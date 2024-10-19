@@ -9,8 +9,8 @@
 TODO:
 ---
 
-- []  add setup guide for mac indexing shortcuts and automator scripts
-- []  build native macos application one instead of this circus, although this is more universal, its slower.
+- [ ]  add setup guide for mac indexing shortcuts and automator scripts
+- [ ]  build native macos application one instead of this circus, although this is more universal, its slower.
 
 
 ---
