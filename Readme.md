@@ -16,8 +16,8 @@ TODO:
 
 Miscellaneous
 --
+https://github.com/user-attachments/assets/905103a5-e0f0-4f15-876b-d33a45988820
 
-bruh
 ---
 Feel free to bash or contribute. :D
 
