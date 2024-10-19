@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+
+env
+
+oldrun.py
+oldmain.py
+run.py
+oldwidget.py
+image_index.py
+
+sad.jpg
+perfect
+
+image_index.bin

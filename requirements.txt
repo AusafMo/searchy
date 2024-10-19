@@ -1,0 +1,9 @@
+kivy
+pillow
+tqdm
+numpy
+scikit-learn
+torch
+transformers
+pynput
+PyQt5
