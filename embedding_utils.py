@@ -1,8 +1,8 @@
 import pickle
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+import os
 
-# Function to save embeddings with error handling
 def save_embeddings(embeddings, image_paths, filename='image_index.bin'):
     try:
         data = {'embeddings': embeddings, 'image_paths': image_paths}
@@ -10,19 +10,28 @@ def save_embeddings(embeddings, image_paths, filename='image_index.bin'):
             pickle.dump(data, f)
         print(f"Embeddings saved to {filename}")
     except Exception as e:
+        with open('log.txt', 'a') as f:
+            f.write(f"Error saving embeddings: {e}\n")
         print(f"Error saving embeddings: {e}")
 
-# Function to load embeddings with error handling
+
+def create_empty_bin(filename='image_index.bin'):
+    if not os.path.exists(filename):
+        print(f"File '{filename}' not found. Creating a new file...")
+        empty_embeddings = np.empty((0, 512))  
+        empty_image_paths = []
+        save_embeddings(empty_embeddings, empty_image_paths, filename)
+
+
 def load_embeddings(filename='image_index.bin'):
+    create_empty_bin(filename)  
     try:
         with open(filename, 'rb') as f:
             data = pickle.load(f)
 
-        # Print the type and structure of `data` to understand the issue
         print(f"Loaded data type: {type(data)}")
         print(f"Loaded data: {data}")
 
-        # Check if 'embeddings' and 'image_paths' are present in data
         if not isinstance(data, dict):
             raise ValueError("Data is not a dictionary.")
 
@@ -32,7 +41,6 @@ def load_embeddings(filename='image_index.bin'):
         embeddings = np.array(data['embeddings'])
         image_paths = data['image_paths']
 
-        # Check if embeddings are non-empty
         if embeddings.size == 0 or len(image_paths) == 0:
             raise ValueError("No embeddings or image paths found.")
 
@@ -48,7 +56,6 @@ def load_embeddings(filename='image_index.bin'):
         print(f"Error loading embeddings: {e}")
         return None, None
 
-# Perform semantic search with error handling
 def semantic_search(query_embedding, embeddings, image_paths, top_k=5):
     if query_embedding is None or embeddings is None or image_paths is None:
         print("Cannot perform search: missing embeddings or query.")
@@ -58,7 +65,6 @@ def semantic_search(query_embedding, embeddings, image_paths, top_k=5):
         similarities = cosine_similarity([query_embedding], embeddings)[0]
         sorted_indices = np.argsort(similarities)[::-1]
 
-        # Return formatted results for display
         result_text = f"Top {top_k} most similar images:\n"
         result_list = []
         for idx in sorted_indices[:top_k]:

@@ -41,6 +41,8 @@ def index_images_from_folder(folder_path):
                 valid_image_paths.append(img_path)  # Store only valid image paths
 
         except Exception as e:
+            with open('log.txt', 'w') as f:
+                f.write(f"Error processing image {img_path}: {e}\n")
             print(f"Error processing image {img_path}: {e}")
 
     if embeddings:
