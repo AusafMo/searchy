@@ -207,6 +207,7 @@ struct ContentView: View {
         }
     }
     
+    
     private var searchBar: some View {
         HStack {
             
