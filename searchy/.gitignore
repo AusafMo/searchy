@@ -4,4 +4,7 @@
 //
 //  Created by Mohammad Ausaf on 01/12/24.
 //
-testIgnore/
+.venv/
+*.pyc
+__pycache__/
+/Users/ausaf/Desktop/searchy/.venv
