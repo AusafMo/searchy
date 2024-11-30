@@ -1,0 +1,6 @@
+pillow
+tqdm
+numpy
+scikit-learn
+torch
+transformers
