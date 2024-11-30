@@ -1,13 +1,12 @@
 import SwiftUI
 import AppKit
 
-// Image View Component
 struct ImageViewFromFile: NSViewRepresentable {
     var filePath: String
     
     func makeNSView(context: Context) -> NSImageView {
         let imageView = NSImageView()
-        imageView.imageScaling = .scaleProportionallyDown
+        imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.wantsLayer = true
         return imageView
     }
@@ -15,7 +14,8 @@ struct ImageViewFromFile: NSViewRepresentable {
     func updateNSView(_ nsView: NSImageView, context: Context) {
         DispatchQueue.global(qos: .userInitiated).async {
             if let image = NSImage(contentsOfFile: filePath) {
-                let resizedImage = resizeImage(image)
+                let newSize = calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
+                let resizedImage = resizeImage(image, targetSize: newSize)
                 DispatchQueue.main.async {
                     nsView.image = resizedImage
                 }
@@ -23,41 +23,41 @@ struct ImageViewFromFile: NSViewRepresentable {
         }
     }
     
-    private func resizeImage(_ image: NSImage) -> NSImage {
-        let maxDimension: CGFloat = 1200
-        let originalSize = image.size
+    private func calculateAspectRatioSize(for image: NSImage, maxWidth: CGFloat, maxHeight: CGFloat) -> NSSize {
+        let imageWidth = image.size.width
+        let imageHeight = image.size.height
         
-        // Check if resize is needed
-        if originalSize.width <= maxDimension && originalSize.height <= maxDimension {
-            return image
-        }
+        let widthRatio = maxWidth / imageWidth
+        let heightRatio = maxHeight / imageHeight
         
-        // Calculate new size maintaining aspect ratio
-        let widthRatio = maxDimension / originalSize.width
-        let heightRatio = maxDimension / originalSize.height
-        let scale = min(widthRatio, heightRatio)
+        let ratio = min(widthRatio, heightRatio)
         
-        let newSize = NSSize(
-            width: originalSize.width * scale,
-            height: originalSize.height * scale
+        return NSSize(
+            width: imageWidth * ratio,
+            height: imageHeight * ratio
         )
+    }
+    
+    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
+        let newImage = NSImage(size: targetSize)
         
-        // Create resized image
-        let resizedImage = NSImage(size: newSize)
-        resizedImage.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
+        newImage.lockFocus()
+        
+        // Fill background with white
+        NSColor.windowBackgroundColor.setFill()
+        NSRect(origin: .zero, size: targetSize).fill()
+        
         image.draw(
-            in: NSRect(origin: .zero, size: newSize),
-            from: NSRect(origin: .zero, size: originalSize),
+            in: NSRect(origin: .zero, size: targetSize),
+            from: NSRect(origin: .zero, size: image.size),
             operation: .copy,
             fraction: 1.0
         )
-        resizedImage.unlockFocus()
         
-        return resizedImage
+        newImage.unlockFocus()
+        return newImage
     }
 }
-
 // Search Result Model
 struct SearchResult: Codable, Identifiable {
     var id = UUID()
@@ -209,6 +209,11 @@ struct ContentView: View {
     
     private var searchBar: some View {
         HStack {
+            
+            Image("searchBar") // Use your custom menu bar icon name here
+                        .resizable()
+                        .frame(width: 16, height: 16)
+            
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.gray)
             TextField("Search images...", text: $searchText)
@@ -257,7 +262,10 @@ struct ContentView: View {
     
     private var resultsList: some View {
         ScrollView {
-            LazyVStack(spacing: 20) {
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 16),
+                GridItem(.flexible(), spacing: 16)
+            ], spacing: 16) {
                 ForEach(searchManager.results) { result in
                     resultView(for: result)
                 }
@@ -265,30 +273,36 @@ struct ContentView: View {
             .padding()
         }
     }
-    
+
     private func resultView(for result: SearchResult) -> some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
             ImageViewFromFile(filePath: result.path)
+                .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .frame(height: 400)
                 .clipped()
             
-            HStack {
-                Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
+            VStack(alignment: .leading, spacing: 8) {
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .lineLimit(1)
                     .font(.caption)
-                Spacer()
-                Button("Copy") {
-                    copyImage(path: result.path)
+                
+                HStack {
+                    Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
+                        .font(.caption2)
+                    Spacer()
+                    Button("Copy") {
+                        copyImage(path: result.path)
+                    }
+                    .font(.caption2)
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
         .background(Color(.windowBackgroundColor))
         .cornerRadius(8)
-        .shadow(radius: 2)
+        .shadow(radius: 1)
     }
-    
     private func performSearch() {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
         searchManager.search(query: searchText)
@@ -304,5 +318,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: 600, minHeight: 600)
 }
+
