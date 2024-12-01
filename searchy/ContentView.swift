@@ -63,21 +63,119 @@ class AppConfig: ObservableObject {
     }
 }
 
+class SearchPreferences: ObservableObject {
+    static let shared = SearchPreferences()
+    
+    @Published var numberOfResults: Int {
+        didSet { UserDefaults.standard.set(numberOfResults, forKey: "numberOfResults") }
+    }
+    
+    @Published var gridColumns: Int {
+        didSet { UserDefaults.standard.set(gridColumns, forKey: "gridColumns") }
+    }
+    
+    @Published var showStats: Bool {
+        didSet { UserDefaults.standard.set(showStats, forKey: "showStats") }
+    }
+    
+    @Published var imageSize: Float {
+        didSet { UserDefaults.standard.set(imageSize, forKey: "imageSize") }
+    }
+    
+    @Published var similarityThreshold: Float {
+        didSet { UserDefaults.standard.set(similarityThreshold, forKey: "similarityThreshold") }
+    }
+    
+    private init() {
+        self.numberOfResults = UserDefaults.standard.integer(forKey: "numberOfResults") != 0 ?
+            UserDefaults.standard.integer(forKey: "numberOfResults") : 20
+        self.gridColumns = UserDefaults.standard.integer(forKey: "gridColumns") != 0 ?
+            UserDefaults.standard.integer(forKey: "gridColumns") : 4
+        self.showStats = UserDefaults.standard.bool(forKey: "showStats") != false
+        self.imageSize = UserDefaults.standard.float(forKey: "imageSize") != 0 ?
+            UserDefaults.standard.float(forKey: "imageSize") : 250
+        self.similarityThreshold = UserDefaults.standard.float(forKey: "similarityThreshold") != 0 ?
+            UserDefaults.standard.float(forKey: "similarityThreshold") : 0.5
+    }
+}
+
+
+struct SettingsSection<Content: View>: View {
+    let title: String
+    let icon: String
+    let content: () -> Content  // Changed to closure type
+    
+    init(title: String, icon: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundStyle(.blue)
+            content()  // Call the closure
+        }
+    }
+}
+
+struct PathSetting: View {
+    let title: String
+    let icon: String
+    @Binding var path: String
+    @Binding var showPicker: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+            HStack {
+                TextField("Path", text: $path)
+                    .textFieldStyle(.roundedBorder)
+                Button("Browse") {
+                    showPicker = true
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
+struct SettingsGroup<Content: View>: View {
+    let title: String
+    let content: () -> Content  // Changed to closure type
+    
+    init(title: String, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.content = content
+    }
+    
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                content()  // Call the closure
+            }
+            .padding(.vertical, 8)
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var config = AppConfig.shared
+    @ObservedObject private var prefs = SearchPreferences.shared
     @State private var isShowingPythonPicker = false
     @State private var isShowingServerScriptPicker = false
     @State private var isShowingEmbeddingScriptPicker = false
     @State private var isShowingBaseDirectoryPicker = false
     @Environment(\.dismiss) private var dismiss
-
+    
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Enhanced Header
             HStack {
                 Text("Settings")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 24, weight: .bold))
                 Spacer()
                 Button("Done") {
                     dismiss()
@@ -85,83 +183,148 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding()
-            .background(Color(.windowBackgroundColor))
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+            )
             
             ScrollView {
-                VStack(spacing: 20) {
-                    // Server Configuration Group
-                    GroupBox(label: settingsHeader("Server Configuration", icon: "server.rack")) {
-                        VStack(spacing: 12) {
-                            settingsRow("Default Port:", icon: "network") {
+                VStack(spacing: 24) {
+                    // Display Settings Section
+                    SettingsSection(title: "Display", icon: "paintbrush") {
+                        // Grid Layout Settings
+                        SettingsGroup(title: "Grid Layout") {
+                            // Number of columns
+                            HStack {
+                                Label("Columns", systemImage: "square.grid.3x3")
+                                Spacer()
+                                Picker("", selection: $prefs.gridColumns) {
+                                    ForEach(2...6, id: \.self) { num in
+                                        Text("\(num)").tag(num)
+                                    }
+                                }
+                                .frame(width: 100)
+                            }
+                            
+                            // Image size slider
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Image Size", systemImage: "photo.fill")
+                                Slider(value: $prefs.imageSize, in: 100...400, step: 50) {
+                                    Text("Image Size")
+                                } minimumValueLabel: {
+                                    Text("S").font(.caption)
+                                } maximumValueLabel: {
+                                    Text("L").font(.caption)
+                                }
+                            }
+                            
+                            // Stats toggle
+                            Toggle(isOn: $prefs.showStats) {
+                                Label("Show Statistics", systemImage: "chart.bar.fill")
+                            }
+                        }
+                    }
+                    
+                    // Search Settings Section
+                    SettingsSection(title: "Search", icon: "magnifyingglass") {
+                        SettingsGroup(title: "Results") {
+                            // Number of results
+                            HStack {
+                                Label("Max Results", systemImage: "number.circle.fill")
+                                Spacer()
+                                Picker("", selection: $prefs.numberOfResults) {
+                                    ForEach([10, 20, 50, 100], id: \.self) { num in
+                                        Text("\(num)").tag(num)
+                                    }
+                                }
+                                .frame(width: 100)
+                            }
+                            
+                            // Similarity threshold
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Minimum Similarity", systemImage: "slider.horizontal.3")
+                                Slider(value: $prefs.similarityThreshold, in: 0...1, step: 0.05) {
+                                    Text("Similarity")
+                                } minimumValueLabel: {
+                                    Text("0%").font(.caption)
+                                } maximumValueLabel: {
+                                    Text("100%").font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Server Settings Section
+                    SettingsSection(title: "Server", icon: "server.rack") {
+                        SettingsGroup(title: "Configuration") {
+                            // Port setting
+                            HStack {
+                                Label("Port", systemImage: "network")
+                                Spacer()
                                 TextField("Port", value: $config.defaultPort, formatter: NumberFormatter())
                                     .textFieldStyle(.roundedBorder)
                                     .frame(width: 100)
                             }
                             
-                            settingsRow("Base Directory:", icon: "folder") {
-                                TextField("Directory", text: $config.baseDirectory)
-                                    .textFieldStyle(.roundedBorder)
-                                Button("Browse") {
-                                    isShowingBaseDirectoryPicker = true
+                            // Base directory
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Base Directory", systemImage: "folder")
+                                HStack {
+                                    TextField("Directory", text: $config.baseDirectory)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("Browse") {
+                                        isShowingBaseDirectoryPicker = true
+                                    }
+                                    .buttonStyle(.bordered)
                                 }
-                                .buttonStyle(.bordered)
                             }
                         }
-                        .padding(.vertical, 8)
                     }
                     
-                    // Python Configuration Group
-                    GroupBox(label: settingsHeader("Python Configuration", icon: "terminal")) {
-                        VStack(spacing: 12) {
-                            settingsRow("Python Executable:", icon: "chevron.left.forwardslash.chevron.right") {
-                                TextField("Path", text: $config.pythonExecutablePath)
-                                    .textFieldStyle(.roundedBorder)
-                                Button("Browse") {
-                                    isShowingPythonPicker = true
-                                }
-                                .buttonStyle(.bordered)
-                            }
+                    // Python Settings Section
+                    SettingsSection(title: "Python", icon: "terminal") {
+                        SettingsGroup(title: "Paths") {
+                            // Python executable
+                            PathSetting(
+                                title: "Python Executable",
+                                icon: "chevron.left.forwardslash.chevron.right",
+                                path: $config.pythonExecutablePath,
+                                showPicker: $isShowingPythonPicker
+                            )
                             
-                            settingsRow("Server Script:", icon: "doc.text") {
-                                TextField("Path", text: $config.serverScriptPath)
-                                    .textFieldStyle(.roundedBorder)
-                                Button("Browse") {
-                                    isShowingServerScriptPicker = true
-                                }
-                                .buttonStyle(.bordered)
-                            }
+                            // Server script
+                            PathSetting(
+                                title: "Server Script",
+                                icon: "doc.text",
+                                path: $config.serverScriptPath,
+                                showPicker: $isShowingServerScriptPicker
+                            )
                             
-                            settingsRow("Embedding Script:", icon: "doc.text.fill") {
-                                TextField("Path", text: $config.embeddingScriptPath)
-                                    .textFieldStyle(.roundedBorder)
-                                Button("Browse") {
-                                    isShowingEmbeddingScriptPicker = true
-                                }
-                                .buttonStyle(.bordered)
-                            }
+                            // Embedding script
+                            PathSetting(
+                                title: "Embedding Script",
+                                icon: "doc.text.fill",
+                                path: $config.embeddingScriptPath,
+                                showPicker: $isShowingEmbeddingScriptPicker
+                            )
                         }
-                        .padding(.vertical, 8)
                     }
                     
                     // Reset Button
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            config.resetToDefaults()
-                        }) {
-                            HStack {
-                                Image(systemName: "arrow.counterclockwise")
-                                Text("Reset to Defaults")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .foregroundColor(.red)
+                    Button(action: {
+                        config.resetToDefaults()
+                    }) {
+                        Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                            .foregroundColor(.blue)
                     }
+                    .buttonStyle(.bordered)
+                    .padding(.top)
                 }
                 .padding()
             }
         }
-        .frame(width: 600, height: 400)
+        .frame(width: 600, height: 700)
         .background(Color(.windowBackgroundColor))
         .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
@@ -182,30 +345,6 @@ struct SettingsView: View {
             if case .success(let url) = result {
                 config.baseDirectory = url.path
             }
-        }
-    }
-    
-    private func settingsHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundColor(.accentColor)
-            Text(title)
-                .font(.headline)
-        }
-    }
-    
-    private func settingsRow<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 12) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundColor(.gray)
-                    .frame(width: 20)
-                Text(title)
-                    .foregroundColor(.primary)
-            }
-            .frame(width: 150, alignment: .leading)
-            
-            content()
         }
     }
 }
@@ -276,17 +415,19 @@ struct CopyNotification: View {
 struct ResultCardView: View {
     let result: SearchResult
     @State private var showingCopyNotification = false
+    @StateObject private var prefs = SearchPreferences.shared
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 6) { // Changed alignment to center by removing alignment parameter
             ZStack {
                 DoubleClickImageView(filePath: result.path) {
                     copyImage(path: result.path)
                     showCopyNotification()
                 }
                 .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                .frame(width: CGFloat(prefs.imageSize), height: CGFloat(prefs.imageSize))
                 .clipped()
+                .frame(maxWidth: .infinity, alignment: .center) // Added this line to center the image
                 
                 CopyNotification(isShowing: $showingCopyNotification)
             }
@@ -315,6 +456,7 @@ struct ResultCardView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
         }
+        .frame(maxWidth: .infinity) // Added this to ensure the card takes full width
         .background(Color(.windowBackgroundColor))
         .cornerRadius(8)
         .shadow(radius: 1)
@@ -370,11 +512,12 @@ struct DoubleClickImageView: NSViewRepresentable {
     }
     
     private func calculateAspectRatioSize(for image: NSImage, maxWidth: CGFloat, maxHeight: CGFloat) -> NSSize {
+        let maxSize = CGFloat(SearchPreferences.shared.imageSize)
         let imageWidth = image.size.width
         let imageHeight = image.size.height
         
-        let widthRatio = maxWidth / imageWidth
-        let heightRatio = maxHeight / imageHeight
+        let widthRatio = maxSize / imageWidth
+        let heightRatio = maxSize / imageHeight
         
         let ratio = min(widthRatio, heightRatio)
         
@@ -466,7 +609,10 @@ class SearchManager: ObservableObject {
             do {
                 let response = try await self.performSearch(query: query, numberOfResults: numberOfResults)
                 DispatchQueue.main.async {
-                    self.results = response.results
+                    let filteredResults = response.results.filter {
+                        $0.similarity >= SearchPreferences.shared.similarityThreshold
+                    }
+                    self.results = filteredResults
                     self.searchStats = response.stats
                     self.isSearching = false
                 }
@@ -486,7 +632,12 @@ class SearchManager: ObservableObject {
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body: [String: Any] = ["query": query, "top_k": numberOfResults, "data_dir": "/Users/ausaf/Library/Application Support/searchy"]
+        let body: [String: Any] = [
+            "query": query,
+            "top_k": numberOfResults,
+            "data_dir": "/Users/ausaf/Library/Application Support/searchy",
+            "similarity_threshold": SearchPreferences.shared.similarityThreshold
+        ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         
         let (data, _) = try await URLSession.shared.data(for: request)
@@ -509,7 +660,6 @@ class SearchManager: ObservableObject {
             throw NSError(domain: "No response from server", code: 0, userInfo: nil)
         }
     }
-    
     func cancelSearch() {
         DispatchQueue.main.async {
             self.isSearching = false
@@ -539,9 +689,6 @@ struct ContentView: View {
                 .buttonStyle(PlainButtonStyle())
                 .padding(8)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-
-                .clipShape(Circle())
-                
                 Spacer()
                 
                 Button(action: {
@@ -586,7 +733,7 @@ struct ContentView: View {
         .background(Color(.windowBackgroundColor).opacity(0.7))
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
-                .frame(width: 600, height: 400)
+                .frame(width: 600, height: 700)
         }
         .onDisappear {
             searchManager.cancelSearch()
@@ -705,40 +852,38 @@ struct ContentView: View {
     }
     
     private var resultsList: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Info label above the grid
-            HStack(spacing: 4) {
-                Image(systemName: "info.circle.fill")
-                    .foregroundColor(.blue)
-                    .imageScale(.small)
-                Text("Double click to copy image")
-                    .font(.caption)
-                    .foregroundColor(.blue)
-            }
-            .padding(.horizontal)
-            
-            ScrollView {
-                VStack(spacing: 12) {
-                    statsView
-                    
-                    // Results grid
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12)
-                    ], spacing: 12) {
-                        ForEach(searchManager.results) { result in
-                            ResultCardView(result: result)
-                        }
-                    }
-                    .padding()
-                    .foregroundStyle(.gray)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                // Info label
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.blue)
+                        .imageScale(.small)
+                    Text("Double click to copy image")
+                        .font(.caption)
+                        .foregroundColor(.blue)
                 }
+                .padding(.horizontal)
+                
+                if SearchPreferences.shared.showStats {
+                    statsView
+                }
+                
+                let columns = Array(repeating: GridItem(.flexible(), spacing: 12),
+                                  count: SearchPreferences.shared.gridColumns)
+                
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(searchManager.results.filter { result in
+                        result.similarity >= SearchPreferences.shared.similarityThreshold
+                    }) { result in
+                        ResultCardView(result: result)
+                    }
+                }
+                .padding()
             }
         }
     }
-    
+
     private func resultView(for result: SearchResult) -> some View {
         @State var showingCopyNotification = false
         
@@ -778,7 +923,7 @@ struct ContentView: View {
         .cornerRadius(8)
         .shadow(radius: 1)
         
-        // Local function to handle showing/hiding notification
+
         func showCopyNotification() {
             showingCopyNotification = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -789,7 +934,7 @@ struct ContentView: View {
     
     private func performSearch() {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
-        searchManager.search(query: searchText)
+        searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
     }
     
     private func selectAndIndexFolder() {
