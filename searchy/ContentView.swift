@@ -1015,5 +1015,3 @@ struct ContentView: View {
     ContentView()
         .frame(minWidth: 600, minHeight: 600)
 }
-
-
