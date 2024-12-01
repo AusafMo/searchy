@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
+
 struct Constants {
     static let baseDirectory: String = "/Users/ausaf/Library/Application Support/searchy"
     static let defaultPort: Int = 7860
@@ -9,6 +11,218 @@ struct Constants {
     static let embeddingScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
 }
 
+class AppConfig: ObservableObject {
+    static let shared = AppConfig()
+    
+    @Published var baseDirectory: String {
+        didSet {
+            UserDefaults.standard.set(baseDirectory, forKey: "baseDirectory")
+        }
+    }
+    
+    @Published var defaultPort: Int {
+        didSet {
+            UserDefaults.standard.set(defaultPort, forKey: "defaultPort")
+        }
+    }
+    
+    @Published var pythonExecutablePath: String {
+        didSet {
+            UserDefaults.standard.set(pythonExecutablePath, forKey: "pythonExecutablePath")
+        }
+    }
+    
+    @Published var serverScriptPath: String {
+        didSet {
+            UserDefaults.standard.set(serverScriptPath, forKey: "serverScriptPath")
+        }
+    }
+    
+    @Published var embeddingScriptPath: String {
+        didSet {
+            UserDefaults.standard.set(embeddingScriptPath, forKey: "embeddingScriptPath")
+        }
+    }
+    
+    private init() {
+        // Load from UserDefaults with fallbacks to current constants
+        self.baseDirectory = UserDefaults.standard.string(forKey: "baseDirectory") ?? Constants.baseDirectory
+        self.defaultPort = UserDefaults.standard.integer(forKey: "defaultPort") != 0 ?
+            UserDefaults.standard.integer(forKey: "defaultPort") : Constants.defaultPort
+        self.pythonExecutablePath = UserDefaults.standard.string(forKey: "pythonExecutablePath") ?? Constants.pythonExecutablePath
+        self.serverScriptPath = UserDefaults.standard.string(forKey: "serverScriptPath") ?? Constants.serverScriptPath
+        self.embeddingScriptPath = UserDefaults.standard.string(forKey: "embeddingScriptPath") ?? Constants.embeddingScriptPath
+    }
+    
+    func resetToDefaults() {
+        baseDirectory = Constants.baseDirectory
+        defaultPort = Constants.defaultPort
+        pythonExecutablePath = Constants.pythonExecutablePath
+        serverScriptPath = Constants.serverScriptPath
+        embeddingScriptPath = Constants.embeddingScriptPath
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject private var config = AppConfig.shared
+    @State private var isShowingPythonPicker = false
+    @State private var isShowingServerScriptPicker = false
+    @State private var isShowingEmbeddingScriptPicker = false
+    @State private var isShowingBaseDirectoryPicker = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Settings")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+            .background(Color(.windowBackgroundColor))
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Server Configuration Group
+                    GroupBox(label: settingsHeader("Server Configuration", icon: "server.rack")) {
+                        VStack(spacing: 12) {
+                            settingsRow("Default Port:", icon: "network") {
+                                TextField("Port", value: $config.defaultPort, formatter: NumberFormatter())
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 100)
+                            }
+                            
+                            settingsRow("Base Directory:", icon: "folder") {
+                                TextField("Directory", text: $config.baseDirectory)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse") {
+                                    isShowingBaseDirectoryPicker = true
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
+                    // Python Configuration Group
+                    GroupBox(label: settingsHeader("Python Configuration", icon: "terminal")) {
+                        VStack(spacing: 12) {
+                            settingsRow("Python Executable:", icon: "chevron.left.forwardslash.chevron.right") {
+                                TextField("Path", text: $config.pythonExecutablePath)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse") {
+                                    isShowingPythonPicker = true
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            
+                            settingsRow("Server Script:", icon: "doc.text") {
+                                TextField("Path", text: $config.serverScriptPath)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse") {
+                                    isShowingServerScriptPicker = true
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            
+                            settingsRow("Embedding Script:", icon: "doc.text.fill") {
+                                TextField("Path", text: $config.embeddingScriptPath)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse") {
+                                    isShowingEmbeddingScriptPicker = true
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    
+                    // Reset Button
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            config.resetToDefaults()
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("Reset to Defaults")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .foregroundColor(.red)
+                    }
+                }
+                .padding()
+            }
+        }
+        .frame(width: 600, height: 400)
+        .background(Color(.windowBackgroundColor))
+        .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
+            if case .success(let url) = result {
+                config.pythonExecutablePath = url.path
+            }
+        }
+        .fileImporter(isPresented: $isShowingServerScriptPicker, allowedContentTypes: [.directory]) { result in
+            if case .success(let url) = result {
+                config.serverScriptPath = url.path
+            }
+        }
+        .fileImporter(isPresented: $isShowingEmbeddingScriptPicker, allowedContentTypes: [.directory]) { result in
+            if case .success(let url) = result {
+                config.embeddingScriptPath = url.path
+            }
+        }
+        .fileImporter(isPresented: $isShowingBaseDirectoryPicker, allowedContentTypes: [.directory]) { result in
+            if case .success(let url) = result {
+                config.baseDirectory = url.path
+            }
+        }
+    }
+    
+    private func settingsHeader(_ title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(.accentColor)
+            Text(title)
+                .font(.headline)
+        }
+    }
+    
+    private func settingsRow<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 12) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(.gray)
+                    .frame(width: 20)
+                Text(title)
+                    .foregroundColor(.primary)
+            }
+            .frame(width: 150, alignment: .leading)
+            
+            content()
+        }
+    }
+}
+
+#Preview {
+    SettingsView()
+}
+// Extension to support Python file types
+extension UTType {
+    static var pythonScript: UTType {
+        UTType(filenameExtension: "py")!
+    }
+    
+    static var unixExecutable: UTType {
+        UTType(filenameExtension: "")!
+    }
+}
 
 class ImageCache {
     static let shared = ImageCache()
@@ -196,43 +410,85 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
-    
+    @State private var isShowingSettings = false  // Add this
+
     var body: some View {
         VStack(spacing: 0) {
+            // Top toolbar
             HStack {
+                Button(action: {
+                    isShowingSettings = true
+                }) {
+                    Image(systemName: "gear")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+                .clipShape(Circle())
+                
                 Spacer()
-                Button("Index New Folder") {
+                
+                Button(action: {
                     if !isIndexing {
                         selectAndIndexFolder()
                     }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.square")
+                        Text("Index New Folder")
+                    }.fontWeight(Font.Weight.semibold).foregroundStyle(.blue)
                 }
+                .buttonStyle(PlainButtonStyle())
+                .padding(8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .cornerRadius(8)
                 .disabled(isIndexing)
-                .padding(.horizontal)
             }
+            .padding(.horizontal)
             .padding(.vertical, 8)
+            .background(Color(.windowBackgroundColor).opacity(0.8))
             
-            if !indexingProgress.isEmpty {
-                Text(indexingProgress)
-                    .foregroundColor(.gray)
-                    .padding(.vertical, 4)
+            // Main content area
+            VStack {
+                if !indexingProgress.isEmpty {
+                    Text(indexingProgress)
+                        .foregroundColor(.blue).fontWeight(Font.Weight.bold)
+                        .padding(.vertical, 4)
+                }
+                
+                searchBarView
+                errorView
+                statsView
+                
+                ScrollView {
+                    resultsList
+                        .padding()
+                }
+                .background(Color(.separatorColor).opacity(0.1))  // Subtle darker background for results
             }
-            
-            searchBarView
-            errorView
-            statsView
-            resultsList
+            .background(Color(.windowBackgroundColor).opacity(0.9))  // Slightly translucent main background
+        }
+        .background(Color(.windowBackgroundColor).opacity(0.7))  // Overall background
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
+                .frame(width: 600, height: 400)
         }
         .onDisappear {
             searchManager.cancelSearch()
         }
     }
-    
     private var searchBarView: some View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.gray)
+                .font(.system(size: 14))
+            
             TextField("Search images...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
+                .font(.system(size: 14))
                 .onSubmit {
                     if !searchManager.isSearching {
                         performSearch()
@@ -240,23 +496,52 @@ struct ContentView: View {
                 }
                 .disabled(searchManager.isSearching || isIndexing)
             
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            
             if searchManager.isSearching {
                 ProgressView()
                     .scaleEffect(0.8)
                     .padding(.horizontal)
             } else {
-                Button("Search") {
+                Button(action: {
                     if !searchManager.isSearching {
                         performSearch()
                     }
+                }) {
+                    Text("Search")
+                        .fontWeight(.semibold)
                 }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(searchText.isEmpty ? Color.gray.opacity(0.2) : Color.green)
+                .foregroundColor(searchText.isEmpty ? .gray : .white)
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(.primary, lineWidth: 0.5)
+                )
                 .disabled(searchText.isEmpty || isIndexing)
-                .padding(.horizontal)
             }
         }
         .padding(12)
         .background(Color(.textBackgroundColor))
         .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(
+                    LinearGradient(colors: [.blue, .pink], startPoint: .leading, endPoint: .trailing),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
         .padding()
     }
     
@@ -321,6 +606,7 @@ struct ContentView: View {
                 }
             }
             .padding()
+            .foregroundStyle(.gray)
         }
     }
 
@@ -373,41 +659,42 @@ struct ContentView: View {
     }
     
     private func indexFolder(_ url: URL) {
-        print("Starting indexing for url: \(url.path)") // Debug
+        print("Starting indexing for url: \(url.path)")
         isIndexing = true
         indexingProgress = "Starting indexing..."
         
         DispatchQueue.global(qos: .userInitiated).async {
+            let config = AppConfig.shared
             let process = Process()
             let pipe = Pipe()
             
-            process.executableURL = URL(fileURLWithPath: Constants.pythonExecutablePath)
-            process.arguments = [Constants.embeddingScriptPath, url.path]
+            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
+            process.arguments = [config.embeddingScriptPath, url.path]
             
             process.standardOutput = pipe
             process.standardError = pipe
             
             process.environment = [
-                "PYTHONPATH": "\(Constants.baseDirectory):\(Constants.baseDirectory)/.venv/lib/python3.12/site-packages",
-                "PATH": "\(Constants.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
+                "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
                 "PYTHONUNBUFFERED": "1"
             ]
             
             do {
                 try process.run()
                 
-                // Read output in real-time
                 pipe.fileHandleForReading.readabilityHandler = { handle in
                     let data = handle.availableData
                     if !data.isEmpty {
                         if let output = String(data: data, encoding: .utf8) {
-                            print("Received output: \(output)") // Debug
+                            print("Received output: \(output)")
                             DispatchQueue.main.async {
                                 self.indexingProgress = output
                             }
                         }
                     }
                 }
+                
                 process.terminationHandler = { _ in
                     DispatchQueue.main.async {
                         self.isIndexing = false
@@ -436,3 +723,5 @@ struct ContentView: View {
     ContentView()
         .frame(minWidth: 600, minHeight: 600)
 }
+
+
