@@ -10,7 +10,7 @@ import json
 
 def process_images(image_dir, output_dir):
     try:
-        # Load existing embeddings if they exist
+        
         output_file = os.path.join(output_dir, 'image_index.bin')
         existing_embeddings = []
         existing_paths = []
@@ -18,7 +18,7 @@ def process_images(image_dir, output_dir):
             print("Loading existing index...")
             with open(output_file, 'rb') as f:
                 data = pickle.load(f)
-                existing_embeddings = data['embeddings'].tolist()  # Convert to list for appending
+                existing_embeddings = data['embeddings'].tolist()
                 existing_paths = data['image_paths']
                 print(f"Loaded {len(existing_paths)} existing images")
 
@@ -31,7 +31,7 @@ def process_images(image_dir, output_dir):
         for root, dirs, files in os.walk(image_dir):
             for file in files:
                 if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    # Check if image is already indexed
+                    
                     full_path = os.path.join(root, file)
                     if full_path not in existing_paths:
                         image_paths.append(full_path)
@@ -55,11 +55,11 @@ def process_images(image_dir, output_dir):
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
                     
-                # Process image through CLIP
+                
                 inputs = processor(images=image, return_tensors="pt")
                 image_features = model.get_image_features(**inputs)
                 
-                # Convert to numpy and normalize
+                
                 embedding = image_features.detach().numpy()[0]
                 embedding = embedding / np.linalg.norm(embedding)
                 
@@ -75,14 +75,14 @@ def process_images(image_dir, output_dir):
             print("No valid images were processed")
             return
             
-        # Combine existing and new embeddings
+        
         all_embeddings = existing_embeddings + embeddings
         all_paths = existing_paths + valid_paths
         
-        # Convert to numpy array
+        
         all_embeddings = np.array(all_embeddings)
         
-        # Save embeddings and paths
+        
         os.makedirs(output_dir, exist_ok=True)
         
         data = {
