@@ -1,112 +1,98 @@
+import torch
+from PIL import Image
+import os
 import pickle
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-import os
+from transformers import CLIPProcessor, CLIPModel
 import sys
 import json
-from transformers import CLIPProcessor, CLIPModel
+import time
 
-def generate_query_embedding(query_text, model, processor):
-    try:
-        # Process text through CLIP
-        inputs = processor(text=query_text, return_tensors="pt", padding=True)
-        text_features = model.get_text_features(**inputs)
-        
-        # Convert to numpy and normalize
+class CLIPSearcher:
+    def __init__(self):
+        # Use stderr for debug messages
+        print("Loading CLIP model...", file=sys.stderr)
+        start_time = time.time()
+        self.model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        print(f"Model loaded in {time.time() - start_time:.2f} seconds", file=sys.stderr)
+
+    def search(self, query, data_dir, top_k=5):
+        try:
+            # Load embeddings
+            start_time = time.time()
+            filename = os.path.join(data_dir, 'image_index.bin')
+            if not os.path.exists(filename):
+                return print(json.dumps({"error": "No image index found"}))
+
+            load_start = time.time()
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+            print(f"Loaded index in {time.time() - load_start:.2f} seconds", file=sys.stderr)
+                
+            if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
+                return print(json.dumps({"error": "Invalid data format"}))
+                
+            embeddings = data['embeddings']
+            image_paths = data['image_paths']
+            
+            if len(embeddings) == 0:
+                return print(json.dumps({"error": "No images indexed"}))
+                
+            # Generate query embedding
+            embedding_start = time.time()
+            query_embedding = self.generate_text_embedding(query)
+            print(f"Generated query embedding in {time.time() - embedding_start:.2f} seconds", file=sys.stderr)
+            
+            # Calculate similarities
+            similarity_start = time.time()
+            similarities = embeddings @ query_embedding
+            sorted_indices = np.argsort(similarities)[::-1]
+            print(f"Calculated similarities for {len(embeddings)} images in {time.time() - similarity_start:.2f} seconds", file=sys.stderr)
+            
+            results = []
+            for idx in sorted_indices[:top_k]:
+                results.append({
+                    "path": image_paths[idx],
+                    "similarity": float(similarities[idx])
+                })
+            
+            total_time = time.time() - start_time
+            final_output = {
+                "results": results,
+                "stats": {
+                    "total_time": f"{total_time:.2f}s",
+                    "images_searched": len(embeddings),
+                    "images_per_second": f"{len(embeddings)/total_time:.2f}"
+                }
+            }
+            
+            # Only print the final JSON to stdout
+            print(json.dumps(final_output))
+            return results
+                
+        except Exception as e:
+            return print(json.dumps({"error": str(e)}))
+
+    def generate_text_embedding(self, text):  # Add this method
+        inputs = self.processor(text=text, return_tensors="pt", padding=True)
+        text_features = self.model.get_text_features(**inputs)
         embedding = text_features.detach().numpy()[0]
-        embedding = embedding / np.linalg.norm(embedding)
-        
-        return embedding
-    except Exception as e:
-        print(json.dumps({"error": f"Failed to generate query embedding: {str(e)}"}))
-        return None
+        return embedding / np.linalg.norm(embedding)
 
-def save_embeddings(embeddings, image_paths, data_dir):
-    try:
-        filename = os.path.join(data_dir, 'image_index.bin')
-        data = {'embeddings': embeddings, 'image_paths': image_paths}
-        with open(filename, 'wb') as f:
-            pickle.dump(data, f)
-        return True
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
-        return False
-
-def load_embeddings(data_dir):
-    try:
-        index_path = os.path.join(data_dir, 'image_index.bin')
-        
-        if not os.path.exists(index_path):
-            print(json.dumps({"error": f"No image index found at {index_path}"}))
-            return None, None
-            
-        with open(index_path, 'rb') as f:
-            data = pickle.load(f)
-            
-        if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
-            print(json.dumps({"error": "Invalid data format in embeddings file"}))
-            return None, None
-            
-        embeddings = np.array(data['embeddings'])
-        image_paths = data['image_paths']
-        
-        if embeddings.size == 0 or len(image_paths) == 0:
-            print(json.dumps({"error": "No embeddings or image paths found"}))
-            return None, None
-            
-        return embeddings, image_paths
-        
-    except Exception as e:
-        print(json.dumps({"error": f"Failed to load embeddings: {str(e)}"}))
-        return None, None
-
-def semantic_search(query_embedding, embeddings, image_paths, top_k=5):
-    try:
-        similarities = cosine_similarity([query_embedding], embeddings)[0]
-        sorted_indices = np.argsort(similarities)[::-1]
-
-        results = []
-        for idx in sorted_indices[:top_k]:
-            results.append({
-                "path": image_paths[idx],
-                "similarity": float(similarities[idx])
-            })
-        
-        print(json.dumps(results))
-        return results
-    except Exception as e:
-        print(json.dumps({"error": f"Search failed: {str(e)}"}))
-        return None
+# Global instance
+searcher = CLIPSearcher()
 
 def main():
     if len(sys.argv) < 4:
-        print(json.dumps({"error": "Missing required arguments"}))
+        print(json.dumps({"error": "Missing arguments"}))
         return
-
+        
     query = sys.argv[1]
     top_k = int(sys.argv[2])
     data_dir = sys.argv[3]
-
-    try:
-        # Initialize CLIP
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        
-        # Generate query embedding
-        query_embedding = generate_query_embedding(query, model, processor)
-        if query_embedding is None:
-            return
-            
-        # Load image embeddings
-        embeddings, image_paths = load_embeddings(data_dir)
-        if embeddings is None or image_paths is None:
-            return
-            
-        # Perform search
-        semantic_search(query_embedding, embeddings, image_paths, top_k)
-        
-    except Exception as e:
-        print(json.dumps({"error": f"Search process failed: {str(e)}"}))
+    
+    searcher.search(query, data_dir, top_k)
 
 if __name__ == "__main__":
     main()

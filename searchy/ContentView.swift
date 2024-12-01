@@ -1,6 +1,20 @@
 import SwiftUI
 import AppKit
 
+
+class ImageCache {
+    static let shared = ImageCache()
+    private var cache = NSCache<NSString, NSImage>()
+    
+    func image(for path: String) -> NSImage? {
+        return cache.object(forKey: path as NSString)
+    }
+    
+    func setImage(_ image: NSImage, for path: String) {
+        cache.setObject(image, forKey: path as NSString)
+    }
+}
+
 struct ImageViewFromFile: NSViewRepresentable {
     var filePath: String
     
@@ -12,10 +26,16 @@ struct ImageViewFromFile: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: NSImageView, context: Context) {
+        if let cachedImage = ImageCache.shared.image(for: filePath) {
+            nsView.image = cachedImage
+            return
+        }
+        
         DispatchQueue.global(qos: .userInitiated).async {
             if let image = NSImage(contentsOfFile: filePath) {
                 let newSize = calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
                 let resizedImage = resizeImage(image, targetSize: newSize)
+                ImageCache.shared.setImage(resizedImage, for: filePath)
                 DispatchQueue.main.async {
                     nsView.image = resizedImage
                 }
@@ -43,7 +63,6 @@ struct ImageViewFromFile: NSViewRepresentable {
         
         newImage.lockFocus()
         
-        // Fill background with white
         NSColor.windowBackgroundColor.setFill()
         NSRect(origin: .zero, size: targetSize).fill()
         
@@ -58,6 +77,8 @@ struct ImageViewFromFile: NSViewRepresentable {
         return newImage
     }
 }
+
+
 // Search Result Model
 struct SearchResult: Codable, Identifiable {
     var id = UUID()
@@ -69,11 +90,24 @@ struct SearchResult: Codable, Identifiable {
         case similarity
     }
 }
+
+struct SearchResponse: Codable {
+    let results: [SearchResult]
+    let stats: SearchStats
+}
+
+struct SearchStats: Codable {
+    let total_time: String
+    let images_searched: Int
+    let images_per_second: String
+}
+
 class SearchManager: ObservableObject {
     @Published private(set) var results: [SearchResult] = []
     @Published private(set) var isSearching = false
     @Published private(set) var errorMessage: String? = nil
-    
+    @Published private(set) var searchStats: SearchStats? = nil
+
     private var currentTask: Process?
     private var workItem: DispatchWorkItem?
     
@@ -99,6 +133,7 @@ class SearchManager: ObservableObject {
             self.isSearching = true
             self.errorMessage = nil
             self.results = []
+            self.searchStats = nil
         }
         
         DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
@@ -136,55 +171,56 @@ class SearchManager: ObservableObject {
             print("Script path:", scriptPath)
             print("Arguments:", process.arguments ?? [])
             print("Environment:", process.environment ?? [:])
-
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             
+            do {
+                try process.run()
+            } catch {
+                print("Failed to run process:", error)
+                updateState(error: "Failed to run search process: \(error.localizedDescription)")
+                return
+            }
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let rawOutput = String(data: data, encoding: .utf8) {
                 print("Raw Python output:", rawOutput)
                 
-                // Split output by lines and take the last non-empty line as our JSON
+                // Get the last line that contains valid JSON
                 let lines = rawOutput.components(separatedBy: .newlines)
-                if let lastLine = lines.last(where: { !$0.isEmpty }) {
-                    if let jsonData = lastLine.data(using: .utf8) {
+                if let jsonLine = lines.last(where: { line in
+                    guard !line.isEmpty else { return false }
+                    return line.starts(with: "{") && line.hasSuffix("}")
+                }) {
+                    if let jsonData = jsonLine.data(using: .utf8) {
                         do {
-                            if let results = try? JSONDecoder().decode([SearchResult].self, from: jsonData) {
-                                print("Successfully decoded \(results.count) results")
-                                updateState(results: results)
-                            } else if let error = try? JSONDecoder().decode([String: String].self, from: jsonData),
-                                      let errorMessage = error["error"] {
-                                print("Error from Python:", errorMessage)
-                                updateState(error: errorMessage)
-                            } else {
-                                print("Failed to decode JSON:", lastLine)
-                                updateState(error: "Failed to decode response")
+                            let response = try JSONDecoder().decode(SearchResponse.self, from: jsonData)
+                            print("Successfully decoded \(response.results.count) results")
+                            DispatchQueue.main.async {
+                                self.results = response.results
+                                self.searchStats = response.stats
+                                self.isSearching = false
+                                self.currentTask = nil
                             }
                         } catch {
                             print("JSON decode error:", error)
                             updateState(error: error.localizedDescription)
                         }
                     } else {
-                        print("Failed to convert last line to data:", lastLine)
                         updateState(error: "Invalid JSON format")
                     }
                 } else {
-                    print("No valid output lines found")
-                    updateState(error: "No valid response from search")
+                    updateState(error: "No valid JSON response found")
                 }
             } else {
-                print("Failed to decode Python output")
                 updateState(error: "No response from search")
             }
-        } catch {
-            print("Process error:", error)
-            updateState(error: error.localizedDescription)
+        }
+        catch {
+            print("Someshit Happened Man!")
+            return
         }
     }
-    private func updateState(results: [SearchResult]? = nil, error: String? = nil) {
+    private func updateState(error: String? = nil) {
         DispatchQueue.main.async {
-            if let results = results {
-                self.results = results
-            }
             self.errorMessage = error
             self.isSearching = false
             self.currentTask = nil
@@ -195,46 +231,183 @@ class SearchManager: ObservableObject {
 struct ContentView: View {
     @StateObject private var searchManager = SearchManager()
     @State private var searchText = ""
+    @State private var isIndexing = false
+    @State private var indexingProgress = ""
     
     var body: some View {
-        VStack(spacing: 0) {
-            searchBar
+        print("ContentView body being rendered") //
+        return VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button("Index New Folder") {
+                    if !isIndexing {
+                        selectAndIndexFolder()
+                    }
+                }
+                .disabled(isIndexing)
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 8)
+            
+            if !indexingProgress.isEmpty {
+                Text(indexingProgress)
+                    .foregroundColor(.gray)
+                    .padding(.vertical, 4)
+            }
+            
+            searchBarView
             errorView
+            statsView  //
             resultsList
         }
         .onDisappear {
             searchManager.cancelSearch()
         }
     }
-    
-    
-    private var searchBar: some View {
-        HStack {
-            
-            Image("searchBar") // Use your custom menu bar icon name here
-                        .resizable()
-                        .frame(width: 16, height: 16)
-            
+    private var statsView: some View {
+        Group {
+            if let stats = searchManager.searchStats {
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading) {
+                        Text("Search Time")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        Text(stats.total_time)
+                            .font(.caption)
+                            .bold()
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("Images Searched")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        Text("\(stats.images_searched)")
+                            .font(.caption)
+                            .bold()
+                    }
+                    
+                    VStack(alignment: .leading) {
+                        Text("Images/Second")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                        Text(stats.images_per_second)
+                            .font(.caption)
+                            .bold()
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            } else {
+                Color.clear
+                    .frame(height: 0)
+            }
+        }
+    }
+    private var searchBarView: some View {
+        print("Rendering searchBarView, isIndexing: \(isIndexing)") // Debug
+        return  HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.gray)
             TextField("Search images...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
-                .onSubmit(performSearch)
-                .disabled(searchManager.isSearching)
+                .onSubmit {
+                    if !searchManager.isSearching {
+                        performSearch()
+                    }
+                }
+                .disabled(searchManager.isSearching || isIndexing)
             
             if searchManager.isSearching {
-                cancelButton
+                Button(action: { searchManager.cancelSearch() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
                 ProgressView()
                     .scaleEffect(0.8)
                     .padding(.horizontal)
             } else {
-                searchButton
+                Button("Search") {
+                    if !searchManager.isSearching {
+                        performSearch()
+                    }
+                }
+                .disabled(searchText.isEmpty || isIndexing)
+                .padding(.horizontal)
             }
         }
         .padding(12)
         .background(Color(.textBackgroundColor))
         .cornerRadius(8)
         .padding()
+    }
+    
+    // Add these new functions
+    private func selectAndIndexFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                indexFolder(url)
+            }
+        }
+    }
+    
+    private func indexFolder(_ url: URL) {
+        print("Starting indexing for url: \(url.path)") // Debug
+        isIndexing = true
+        indexingProgress = "Starting indexing..."
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            let pipe = Pipe()
+            
+            process.executableURL = URL(fileURLWithPath: "/Users/ausaf/Desktop/searchy/.venv/bin/python3")
+            let scriptPath = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
+            process.arguments = [scriptPath, url.path]
+            
+            process.standardOutput = pipe
+            process.standardError = pipe
+            
+            process.environment = [
+                "PYTHONPATH": "/Users/ausaf/Desktop/searchy/searchy:/Users/ausaf/Desktop/searchy/.venv/lib/python3.12/site-packages",
+                "PATH": "/Users/ausaf/Desktop/searchy/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONUNBUFFERED": "1"
+            ]
+            
+            do {
+                try process.run()
+                
+                // Read output in real-time
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if !data.isEmpty {
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("Received output: \(output)") // Debug
+                            DispatchQueue.main.async {
+                                print("Updating progress: \(output)") // Debug
+                                indexingProgress = output
+                            }
+                        }
+                    }
+                }
+                process.terminationHandler = { process in
+                    DispatchQueue.main.async {
+                        isIndexing = false
+                        indexingProgress = ""
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isIndexing = false
+                    indexingProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
     }
     
     private var cancelButton: some View {
@@ -262,7 +435,8 @@ struct ContentView: View {
     }
     
     private var resultsList: some View {
-        ScrollView {
+        print("Rendering resultsList, results count: \(searchManager.results.count)") // Debug
+        return  ScrollView {
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 16),
                 GridItem(.flexible(), spacing: 16)
