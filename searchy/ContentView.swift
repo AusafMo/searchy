@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-
+import Foundation
 
 class ImageCache {
     static let shared = ImageCache()
@@ -33,8 +33,8 @@ struct ImageViewFromFile: NSViewRepresentable {
         
         DispatchQueue.global(qos: .userInitiated).async {
             if let image = NSImage(contentsOfFile: filePath) {
-                let newSize = calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
-                let resizedImage = resizeImage(image, targetSize: newSize)
+                let newSize = self.calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
+                let resizedImage = self.resizeImage(image, targetSize: newSize)
                 ImageCache.shared.setImage(resizedImage, for: filePath)
                 DispatchQueue.main.async {
                     nsView.image = resizedImage
@@ -90,12 +90,10 @@ struct SearchResult: Codable, Identifiable {
         case similarity
     }
 }
-
 struct SearchResponse: Codable {
     let results: [SearchResult]
     let stats: SearchStats
 }
-
 struct SearchStats: Codable {
     let total_time: String
     let images_searched: Int
@@ -107,27 +105,9 @@ class SearchManager: ObservableObject {
     @Published private(set) var isSearching = false
     @Published private(set) var errorMessage: String? = nil
     @Published private(set) var searchStats: SearchStats? = nil
-
-    private var currentTask: Process?
-    private var workItem: DispatchWorkItem?
-    
-    func cancelSearch() {
-        workItem?.cancel()
-        currentTask?.terminate()
-        currentTask = nil
-        DispatchQueue.main.async {
-            self.isSearching = false
-            self.errorMessage = nil
-        }
-    }
     
     func search(query: String, numberOfResults: Int = 5) {
-        cancelSearch()
-        
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.performSearch(query: query, numberOfResults: numberOfResults)
-        }
-        self.workItem = workItem
+        guard !isSearching else { return }
         
         DispatchQueue.main.async {
             self.isSearching = true
@@ -136,55 +116,34 @@ class SearchManager: ObservableObject {
             self.searchStats = nil
         }
         
-        DispatchQueue.global(qos: .userInitiated).async(execute: workItem)
+        Task {
+            do {
+                let response = try await self.performSearch(query: query, numberOfResults: numberOfResults)
+                DispatchQueue.main.async {
+                    self.results = response.results
+                    self.searchStats = response.stats
+                    self.isSearching = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = error.localizedDescription
+                    self.isSearching = false
+                }
+            }
+        }
     }
     
-    private func performSearch(query: String, numberOfResults: Int) {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            updateState(error: "Failed to access Application Support directory")
-            return
-        }
+    private func performSearch(query: String, numberOfResults: Int) async throws -> SearchResponse {
+        let url = URL(string: "http://127.0.0.1:7860/search")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let appDir = appSupport.appendingPathComponent("searchy")
+        let body: [String: Any] = ["query": query, "top_k": numberOfResults, "data_dir": "/Users/ausaf/Library/Application Support/searchy"]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         
-        do {
-            try FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true, attributes: nil)
-            
-            let process = Process()
-            let pipe = Pipe()
-            self.currentTask = process
-            
-            process.executableURL = URL(fileURLWithPath: "/Users/ausaf/Desktop/searchy/.venv/bin/python3")
-            let scriptPath = "/Users/ausaf/Desktop/searchy/searchy/similarity_search.py"
-            process.arguments = [scriptPath, query, String(numberOfResults), appDir.path]
-            
-            process.standardOutput = pipe
-            process.standardError = pipe
-            
-            process.environment = [
-                "PYTHONPATH": "/Users/ausaf/Desktop/searchy/searchy:/Users/ausaf/Desktop/searchy/.venv/lib/python3.12/site-packages",
-                "PATH": "/Users/ausaf/Desktop/searchy/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-                "PYTHONUNBUFFERED": "1"
-            ]
-            
-            print("Python command:", process.executableURL?.path ?? "nil")
-            print("Script path:", scriptPath)
-            print("Arguments:", process.arguments ?? [])
-            print("Environment:", process.environment ?? [:])
-            
-            do {
-                try process.run()
-            } catch {
-                print("Failed to run process:", error)
-                updateState(error: "Failed to run search process: \(error.localizedDescription)")
-                return
-            }
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let rawOutput = String(data: data, encoding: .utf8) {
-                print("Raw Python output:", rawOutput)
-                
-                // Get the last line that contains valid JSON
+        let (data, _) = try await URLSession.shared.data(for: request)
+        if let rawOutput = String(data: data, encoding: .utf8) {
                 let lines = rawOutput.components(separatedBy: .newlines)
                 if let jsonLine = lines.last(where: { line in
                     guard !line.isEmpty else { return false }
@@ -193,40 +152,31 @@ class SearchManager: ObservableObject {
                     if let jsonData = jsonLine.data(using: .utf8) {
                         do {
                             let response = try JSONDecoder().decode(SearchResponse.self, from: jsonData)
-                            print("Successfully decoded \(response.results.count) results")
-                            DispatchQueue.main.async {
-                                self.results = response.results
-                                self.searchStats = response.stats
-                                self.isSearching = false
-                                self.currentTask = nil
-                            }
+                            return response
                         } catch {
                             print("JSON decode error:", error)
-                            updateState(error: error.localizedDescription)
+                            throw error
                         }
                     } else {
-                        updateState(error: "Invalid JSON format")
+                        throw NSError(domain: "Invalid JSON format", code: 0, userInfo: nil)
                     }
                 } else {
-                    updateState(error: "No valid JSON response found")
+                    throw NSError(domain: "No valid JSON response found", code: 0, userInfo: nil)
                 }
             } else {
-                updateState(error: "No response from search")
+                throw NSError(domain: "No response from search", code: 0, userInfo: nil)
             }
         }
-        catch {
-            print("Someshit Happened Man!")
-            return
-        }
-    }
-    private func updateState(error: String? = nil) {
+    
+    func cancelSearch() {
+        print("Cancelling search...")  // Debug: Cancel search
         DispatchQueue.main.async {
-            self.errorMessage = error
             self.isSearching = false
-            self.currentTask = nil
+            self.errorMessage = nil
         }
     }
 }
+
 
 struct ContentView: View {
     @StateObject private var searchManager = SearchManager()
@@ -263,7 +213,11 @@ struct ContentView: View {
         .onDisappear {
             searchManager.cancelSearch()
         }
+        .onAppear {
+            // No need to start a server, as we're directly communicating with the FastAPI server
+        }
     }
+    
     private var statsView: some View {
         Group {
             if let stats = searchManager.searchStats {
@@ -303,6 +257,7 @@ struct ContentView: View {
             }
         }
     }
+    
     private var searchBarView: some View {
         print("Rendering searchBarView, isIndexing: \(isIndexing)") // Debug
         return  HStack {
@@ -343,7 +298,6 @@ struct ContentView: View {
         .padding()
     }
     
-    // Add these new functions
     private func selectAndIndexFolder() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -390,38 +344,24 @@ struct ContentView: View {
                             print("Received output: \(output)") // Debug
                             DispatchQueue.main.async {
                                 print("Updating progress: \(output)") // Debug
-                                indexingProgress = output
+                                self.indexingProgress = output
                             }
                         }
                     }
                 }
-                process.terminationHandler = { process in
+                process.terminationHandler = { _ in
                     DispatchQueue.main.async {
-                        isIndexing = false
-                        indexingProgress = ""
+                        self.isIndexing = false
+                        self.indexingProgress = ""
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
-                    isIndexing = false
-                    indexingProgress = "Error: \(error.localizedDescription)"
+                    self.isIndexing = false
+                    self.indexingProgress = "Error: \(error.localizedDescription)"
                 }
             }
         }
-    }
-    
-    private var cancelButton: some View {
-        Button(action: { searchManager.cancelSearch() }) {
-            Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.gray)
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    private var searchButton: some View {
-        Button("Search", action: performSearch)
-            .padding(.horizontal)
-            .disabled(searchText.isEmpty)
     }
     
     private var errorView: some View {
@@ -478,6 +418,7 @@ struct ContentView: View {
         .cornerRadius(8)
         .shadow(radius: 1)
     }
+    
     private func performSearch() {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
         searchManager.search(query: searchText)
@@ -495,4 +436,3 @@ struct ContentView: View {
     ContentView()
         .frame(minWidth: 600, minHeight: 600)
 }
-
