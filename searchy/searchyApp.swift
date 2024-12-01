@@ -63,23 +63,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 fatalError("No available port found.")
             }
         }
+        print(port)
         return port
     }
     
     @MainActor
     private func startFastAPIServer() async {
-        // Kill any existing Python processes
+        
         let killTask = Process()
         killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
         killTask.arguments = ["-f", "server.py"]
         try? killTask.run()
         killTask.waitUntilExit()
         
-        // Wait a moment for ports to clear
+        
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         
-        // Set port first
-        assignedPort = 7860  // Use a fixed port instead of finding available
+        
+        assignedPort = findAvailablePort(startingFrom: 7860)
         serverURL = URL(string: "http://127.0.0.1:\(assignedPort)")
         
         guard let serverURL = self.serverURL else {
@@ -113,7 +114,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
         
-        // Increase initial delay before checking server
+        
         try? await Task.sleep(nanoseconds: 5_000_000_000)  // 5 seconds
         
         do {

@@ -1,21 +1,22 @@
+import os
+import argparse
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from similarity_search import CLIPSearcher
-import os
 import uvicorn
-import logging
 
-# Initialize the logger
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the FastAPI app
+
 app = FastAPI()
 
-# Initialize the searcher globally for reuse
+
 searcher = CLIPSearcher()
 
-# Define the request model
+
 class SearchRequest(BaseModel):
     query: str
     top_k: int
@@ -34,8 +35,19 @@ def search(request: SearchRequest):
         logger.error(f"Error during search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/status")
+def get_status():
+    return {"status": "Server is running"}
+
 if __name__ == "__main__":
-    # Get the port from the environment or default to 7860
-    port = int(os.getenv("PORT", 7860))
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7860, help="Port to run the server on")
+    args = parser.parse_args()
+
+    
+    port = args.port
     logger.info(f"Starting server on port {port}")
+
+    
     uvicorn.run(app, host="0.0.0.0", port=port)

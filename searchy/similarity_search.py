@@ -8,7 +8,7 @@ import sys
 import json
 import time
 
-# Global model and processor instances
+
 _model = None
 _processor = None
 
@@ -24,7 +24,7 @@ def get_model_and_processor():
 
 class CLIPSearcher:
     def __init__(self):
-        self.model, self.processor = get_model_and_processor()  # Initialize model and processor once
+        self.model, self.processor = get_model_and_processor()  
 
 
     def generate_text_embedding(self, text):
@@ -83,7 +83,7 @@ class CLIPSearcher:
             print(json.dumps({"error": str(e)}))
             return None
 
-# Keep a global instance
+
 _searcher = CLIPSearcher()
 
 def main():
