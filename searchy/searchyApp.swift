@@ -1,9 +1,20 @@
 import Foundation
 import AppKit
 import SwiftUI
+import Carbon
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private static var _shared: AppDelegate?
+    private var serverProcess: Process?
+    @MainActor private(set) var serverURL: URL?
+    private var assignedPort: Int = 7860
+    
+    
+    private var eventHotKey: EventHotKey?
+    private struct EventHotKey {
+        var id: UInt32
+        var ref: EventHotKeyRef?
+    }
     
     @MainActor
     static var shared: AppDelegate {
@@ -19,22 +30,60 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         Self._shared = self
     }
     
-    private var serverProcess: Process?
-    @MainActor private(set) var serverURL: URL?
-    private var assignedPort: Int = 7860
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task {
             await startFastAPIServer()
         }
+        registerGlobalHotKey()
     }
     
+
     func applicationWillTerminate(_ notification: Notification) {
         Task {
             await stopFastAPIServer()
         }
+        
+        if let hotKey = eventHotKey?.ref {
+            UnregisterEventHotKey(hotKey)
+        }
     }
     
+    private func registerGlobalHotKey() {
+        var hotKeyID = EventHotKeyID(signature: OSType("SRCH".utf16.reduce(0, { ($0 << 8) + UInt32($1) })), id: 1)
+        
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
+        
+        InstallEventHandler(GetApplicationEventTarget(), { (_, eventRef, _) -> OSStatus in
+            let appDelegate = AppDelegate.shared
+            DispatchQueue.main.async {
+                appDelegate.bringAppToFront()
+            }
+            return noErr
+        }, 1, &eventType, nil, nil)
+        
+        var hotKeyRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(UInt32(kVK_Space),
+                                       UInt32(cmdKey | shiftKey),
+                                       hotKeyID,
+                                       GetApplicationEventTarget(),
+                                       0,
+                                       &hotKeyRef)
+        
+        if status == noErr {
+            eventHotKey = EventHotKey(id: hotKeyID.id, ref: hotKeyRef)
+            print("Hot key registered successfully")
+        } else {
+            print("Failed to register hot key")
+        }
+    }
+    
+    private func bringAppToFront() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        if let window = NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
     private func isPortInUse(port: Int) -> Bool {
         let task = Process()
         let pipe = Pipe()
@@ -173,6 +222,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         
         throw URLError(.cannotConnectToHost)
     }
+    
 }
 
 @main
