@@ -237,13 +237,117 @@ class ImageCache {
     }
 }
 
-struct ImageViewFromFile: NSViewRepresentable {
-    var filePath: String
+
+struct CopyNotification: View {
+    @Binding var isShowing: Bool
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+                .imageScale(.medium)
+            
+            Text("Copied!")
+                .font(.system(size: 13, weight: .bold))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            ZStack {
+                Color.black
+                    .opacity(0.15)
+                    .background(.ultraThinMaterial)
+                
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(.white.opacity(0.3), lineWidth: 0.5)
+            }
+        )
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 2)
+        .offset(y: isShowing ? 0 : 10)
+        .opacity(isShowing ? 1 : 0)
+        .animation(
+            .spring(response: 0.3, dampingFraction: 0.8),
+            value: isShowing
+        )
+    }
+}
+
+struct ResultCardView: View {
+    let result: SearchResult
+    @State private var showingCopyNotification = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                DoubleClickImageView(filePath: result.path) {
+                    copyImage(path: result.path)
+                    showCopyNotification()
+                }
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                
+                CopyNotification(isShowing: $showingCopyNotification)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .lineLimit(1)
+                    .font(.caption2)
+                
+                HStack {
+                    Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
+                        .font(.caption2)
+                    Spacer()
+                    Button(action: {
+                        revealInFinder(path: result.path)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder")
+                                .font(.caption2)
+                            Text("Reveal")
+                                .font(.caption2)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+        }
+        .background(Color(.windowBackgroundColor))
+        .cornerRadius(8)
+        .shadow(radius: 1)
+    }
+    
+    private func showCopyNotification() {
+        showingCopyNotification = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            showingCopyNotification = false
+        }
+    }
+    
+    private func copyImage(path: String) {
+        if let image = NSImage(contentsOfFile: path) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+        }
+    }
+    
+    private func revealInFinder(path: String) {
+        NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+    }
+}
+
+struct DoubleClickImageView: NSViewRepresentable {
+    let filePath: String
+    let onDoubleClick: () -> Void
     
     func makeNSView(context: Context) -> NSImageView {
-        let imageView = NSImageView()
+        let imageView = DoubleClickableImageView()
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.wantsLayer = true
+        imageView.onDoubleClick = onDoubleClick
         return imageView
     }
     
@@ -255,8 +359,8 @@ struct ImageViewFromFile: NSViewRepresentable {
         
         DispatchQueue.global(qos: .userInitiated).async {
             if let image = NSImage(contentsOfFile: filePath) {
-                let newSize = self.calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
-                let resizedImage = self.resizeImage(image, targetSize: newSize)
+                let newSize = calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
+                let resizedImage = resizeImage(image, targetSize: newSize)
                 ImageCache.shared.setImage(resizedImage, for: filePath)
                 DispatchQueue.main.async {
                     nsView.image = resizedImage
@@ -300,6 +404,15 @@ struct ImageViewFromFile: NSViewRepresentable {
     }
 }
 
+class DoubleClickableImageView: NSImageView {
+    var onDoubleClick: (() -> Void)?
+    
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?()
+        }
+    }
+}
 // Search Result Model
 struct SearchResult: Codable, Identifiable {
     var id = UUID()
@@ -461,17 +574,16 @@ struct ContentView: View {
                 
                 searchBarView
                 errorView
-                statsView
                 
                 ScrollView {
                     resultsList
                         .padding()
                 }
-                .background(Color(.separatorColor).opacity(0.1))  // Subtle darker background for results
+                .background(Color(.separatorColor).opacity(0.1))
             }
-            .background(Color(.windowBackgroundColor).opacity(0.9))  // Slightly translucent main background
+            .background(Color(.windowBackgroundColor).opacity(0.9))
         }
-        .background(Color(.windowBackgroundColor).opacity(0.7))  // Overall background
+        .background(Color(.windowBackgroundColor).opacity(0.7))
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
                 .frame(width: 600, height: 400)
@@ -587,40 +699,66 @@ struct ContentView: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 8)
-            } else {
-                Color.clear
-                    .frame(height: 0)
+                .padding(.top, 8)
             }
         }
     }
     
     private var resultsList: some View {
-        ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 16),
-                GridItem(.flexible(), spacing: 16)
-            ], spacing: 16) {
-                ForEach(searchManager.results) { result in
-                    resultView(for: result)
+        VStack(alignment: .leading, spacing: 12) {
+            // Info label above the grid
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundColor(.blue)
+                    .imageScale(.small)
+                Text("Double click to copy image")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+            }
+            .padding(.horizontal)
+            
+            ScrollView {
+                VStack(spacing: 12) {
+                    statsView
+                    
+                    // Results grid
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ], spacing: 12) {
+                        ForEach(searchManager.results) { result in
+                            ResultCardView(result: result)
+                        }
+                    }
+                    .padding()
+                    .foregroundStyle(.gray)
                 }
             }
-            .padding()
-            .foregroundStyle(.gray)
         }
     }
-
+    
     private func resultView(for result: SearchResult) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ImageViewFromFile(filePath: result.path)
+        @State var showingCopyNotification = false
+        
+        return VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                DoubleClickImageView(filePath: result.path) {
+                    copyImage(path: result.path)
+                    showCopyNotification()
+                }
                 .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
+                
+                CopyNotification(isShowing: $showingCopyNotification)
+            }
             
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(URL(fileURLWithPath: result.path).lastPathComponent)
                     .lineLimit(1)
-                    .font(.caption)
+                    .font(.caption2)
                 
                 HStack {
                     Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
@@ -628,16 +766,25 @@ struct ContentView: View {
                     Spacer()
                     Button("Copy") {
                         copyImage(path: result.path)
+                        showCopyNotification()
                     }
                     .font(.caption2)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
         }
         .background(Color(.windowBackgroundColor))
         .cornerRadius(8)
         .shadow(radius: 1)
+        
+        // Local function to handle showing/hiding notification
+        func showCopyNotification() {
+            showingCopyNotification = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                showingCopyNotification = false
+            }
+        }
     }
     
     private func performSearch() {
