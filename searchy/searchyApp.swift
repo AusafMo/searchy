@@ -1,65 +1,47 @@
-import SwiftUI
 import Foundation
+import AppKit
+import SwiftUI
 
-@main
-struct SearchApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
+class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    private static var _shared: AppDelegate?
+    
+    @MainActor
+    static var shared: AppDelegate {
+        if let delegate = _shared {
+            return delegate
         }
+        _shared = NSApp.delegate as? AppDelegate
+        return _shared ?? AppDelegate()
     }
-}
-class AppDelegate: NSObject, NSApplicationDelegate {
+    
+    override init() {
+        super.init()
+        Self._shared = self
+    }
+    
     private var serverProcess: Process?
-
+    @MainActor private(set) var serverURL: URL?
+    private var assignedPort: Int = 7860
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
-        startFastAPIServer()
+        Task {
+            await startFastAPIServer()
+        }
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         Task {
-            await cleanupBeforeExit()
+            await stopFastAPIServer()
         }
     }
-    private func cleanupBeforeExit() async {
-        await stopFastAPIServer()
-    }
-    private func killProcessOnPort(port: Int) {
-        let task = Process()
-        let pipe = Pipe()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-ti:\(port)"]
-        task.standardOutput = pipe
-
-        do {
-            try task.run()
-            task.waitUntilExit()
-
-            let pidOutput = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let pid = pidOutput, !pid.isEmpty {
-                let killTask = Process()
-                killTask.executableURL = URL(fileURLWithPath: "/bin/kill")
-                killTask.arguments = ["-9", pid]
-                try killTask.run()
-                killTask.waitUntilExit()
-                print("Killed process on port \(port).")
-            } else {
-                print("No process found on port \(port).")
-            }
-        } catch {
-            print("Failed to kill process on port \(port): \(error.localizedDescription)")
-        }
-    }
-
+    
     private func isPortInUse(port: Int) -> Bool {
         let task = Process()
         let pipe = Pipe()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         task.arguments = ["-i:\(port)"]
         task.standardOutput = pipe
-
+        
         do {
             try task.run()
             let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
@@ -69,90 +51,136 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
     }
-
-    private func startFastAPIServer() {
-        if isPortInUse(port: 7860) {
-            print("Port 7860 is already in use. Killing process.")
-            killProcessOnPort(port: 7860)
+    
+    private func findAvailablePort(startingFrom basePort: Int, maxRetries: Int = 100) -> Int {
+        var port = basePort
+        var retries = 0
+        
+        while isPortInUse(port: port) {
+            port += 1
+            retries += 1
+            if retries >= maxRetries {
+                fatalError("No available port found.")
+            }
         }
-
-        if isPortInUse(port: 7860) {
-            print("Port 7860 is still in use after attempting to kill the process. Skipping server start.")
+        return port
+    }
+    
+    @MainActor
+    private func startFastAPIServer() async {
+        // Kill any existing Python processes
+        let killTask = Process()
+        killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        killTask.arguments = ["-f", "server.py"]
+        try? killTask.run()
+        killTask.waitUntilExit()
+        
+        // Wait a moment for ports to clear
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        
+        // Set port first
+        assignedPort = 7860  // Use a fixed port instead of finding available
+        serverURL = URL(string: "http://127.0.0.1:\(assignedPort)")
+        
+        guard let serverURL = self.serverURL else {
+            print("Error: Unable to determine server URL.")
             return
         }
-
+        
         let pythonPath = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
         let serverScript = "/Users/ausaf/Desktop/searchy/searchy/server.py"
-
-        serverProcess = Process()
-        serverProcess?.executableURL = URL(fileURLWithPath: pythonPath)
-        serverProcess?.arguments = [serverScript]
-
+        
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [serverScript, "--port", "\(assignedPort)"]
+        
         let pipe = Pipe()
-        serverProcess?.standardOutput = pipe
-        serverProcess?.standardError = pipe
-
-        pipe.fileHandleForReading.readabilityHandler = { fileHandle in
+        process.standardOutput = pipe
+        process.standardError = pipe
+        
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] fileHandle in
             if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
                 print("FastAPI Output: \(output)")
             }
         }
-
+        
         do {
-            try serverProcess?.run()
-            print("FastAPI server started successfully.")
+            try process.run()
+            serverProcess = process
+            print("FastAPI server started successfully on port \(assignedPort).")
         } catch {
             print("Failed to start FastAPI server: \(error.localizedDescription)")
             return
         }
-
-        Task {
-            do {
-                try await waitForServerReady()
-                print("FastAPI server is ready.")
-            } catch {
-                print("Failed to connect to FastAPI server: \(error.localizedDescription)")
-            }
+        
+        // Increase initial delay before checking server
+        try? await Task.sleep(nanoseconds: 5_000_000_000)  // 5 seconds
+        
+        do {
+            try await waitForServerReady()
+            print("FastAPI server is ready at \(serverURL).")
+        } catch {
+            print("Failed to connect to FastAPI server: \(error.localizedDescription)")
         }
     }
-
-    private func stopFastAPIServer() {
+    
+    @MainActor
+    private func stopFastAPIServer() async {
         guard let serverProcess = serverProcess else {
             print("No server process to stop.")
             return
         }
-
+        
         if serverProcess.isRunning {
             print("Terminating FastAPI server process.")
             serverProcess.terminate()
-            serverProcess.waitUntilExit()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         } else {
             print("Server process is not running.")
         }
-
-        serverProcess.terminationHandler = nil // Remove any handlers
+        
+        serverProcess.terminationHandler = nil
         self.serverProcess = nil
         print("FastAPI server stopped.")
     }
-
+    
     private func waitForServerReady() async throws {
-        let maxRetries = 10
-        var delay: UInt64 = 1_000_000_000
-
+        let maxRetries = 15
+        var delay: UInt64 = 3_000_000_000 // 3 seconds
+        
         for attempt in 1...maxRetries {
             do {
-                let url = URL(string: "http://127.0.0.1:7860/status")!
-                let (_, response) = try await URLSession.shared.data(for: URLRequest(url: url))
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    return
+                guard let serverURL = await self.serverURL else {
+                    throw URLError(.badURL)
+                }
+                let url = serverURL.appendingPathComponent("status")
+                let (_, response) = try await URLSession.shared.data(from: url)
+                
+                if let httpResponse = response as? HTTPURLResponse {
+                    if httpResponse.statusCode == 200 {
+                        print("Server is ready")
+                        return
+                    }
                 }
             } catch {
-                print("Retry \(attempt): Server not ready")
+                print("Retry \(attempt): Server not ready. Error: \(error)")
             }
-
+            
             try await Task.sleep(nanoseconds: delay)
-            delay *= 2
+            delay *= 2 // Exponential backoff
         }
+        
         throw URLError(.cannotConnectToHost)
+    }
+}
+
+@main
+struct SearchApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
     }
 }

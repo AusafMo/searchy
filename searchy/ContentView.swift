@@ -1,6 +1,14 @@
 import SwiftUI
 import AppKit
 import Foundation
+struct Constants {
+    static let baseDirectory: String = "/Users/ausaf/Library/Application Support/searchy"
+    static let defaultPort: Int = 7860
+    static let pythonExecutablePath: String = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
+    static let serverScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/server.py"
+    static let embeddingScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
+}
+
 
 class ImageCache {
     static let shared = ImageCache()
@@ -78,7 +86,6 @@ struct ImageViewFromFile: NSViewRepresentable {
     }
 }
 
-
 // Search Result Model
 struct SearchResult: Codable, Identifiable {
     var id = UUID()
@@ -90,10 +97,12 @@ struct SearchResult: Codable, Identifiable {
         case similarity
     }
 }
+
 struct SearchResponse: Codable {
     let results: [SearchResult]
     let stats: SearchStats
 }
+
 struct SearchStats: Codable {
     let total_time: String
     let images_searched: Int
@@ -105,6 +114,16 @@ class SearchManager: ObservableObject {
     @Published private(set) var isSearching = false
     @Published private(set) var errorMessage: String? = nil
     @Published private(set) var searchStats: SearchStats? = nil
+    
+    private var serverURL: URL {
+        get async {
+            let delegate = await AppDelegate.shared
+            guard let url = await delegate.serverURL else {
+                fatalError("Server URL is not initialized")
+            }
+            return url
+        }
+    }
     
     func search(query: String, numberOfResults: Int = 5) {
         guard !isSearching else { return }
@@ -134,7 +153,8 @@ class SearchManager: ObservableObject {
     }
     
     private func performSearch(query: String, numberOfResults: Int) async throws -> SearchResponse {
-        let url = URL(string: "http://127.0.0.1:7860/search")!
+        let serverURL = await self.serverURL
+        let url = serverURL.appendingPathComponent("search")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -144,39 +164,32 @@ class SearchManager: ObservableObject {
         
         let (data, _) = try await URLSession.shared.data(for: request)
         if let rawOutput = String(data: data, encoding: .utf8) {
-                let lines = rawOutput.components(separatedBy: .newlines)
-                if let jsonLine = lines.last(where: { line in
-                    guard !line.isEmpty else { return false }
-                    return line.starts(with: "{") && line.hasSuffix("}")
-                }) {
-                    if let jsonData = jsonLine.data(using: .utf8) {
-                        do {
-                            let response = try JSONDecoder().decode(SearchResponse.self, from: jsonData)
-                            return response
-                        } catch {
-                            print("JSON decode error:", error)
-                            throw error
-                        }
-                    } else {
-                        throw NSError(domain: "Invalid JSON format", code: 0, userInfo: nil)
-                    }
+            let lines = rawOutput.components(separatedBy: .newlines)
+            if let jsonLine = lines.last(where: { line in
+                guard !line.isEmpty else { return false }
+                return line.starts(with: "{") && line.hasSuffix("}")
+            }) {
+                if let jsonData = jsonLine.data(using: .utf8) {
+                    let response = try JSONDecoder().decode(SearchResponse.self, from: jsonData)
+                    return response
                 } else {
-                    throw NSError(domain: "No valid JSON response found", code: 0, userInfo: nil)
+                    throw NSError(domain: "Invalid JSON format", code: 0, userInfo: nil)
                 }
             } else {
-                throw NSError(domain: "No response from search", code: 0, userInfo: nil)
+                throw NSError(domain: "No valid JSON response found", code: 0, userInfo: nil)
             }
+        } else {
+            throw NSError(domain: "No response from server", code: 0, userInfo: nil)
         }
+    }
     
     func cancelSearch() {
-        print("Cancelling search...")  // Debug: Cancel search
         DispatchQueue.main.async {
             self.isSearching = false
             self.errorMessage = nil
         }
     }
 }
-
 
 struct ContentView: View {
     @StateObject private var searchManager = SearchManager()
@@ -185,8 +198,7 @@ struct ContentView: View {
     @State private var indexingProgress = ""
     
     var body: some View {
-        print("ContentView body being rendered") //
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack {
                 Spacer()
                 Button("Index New Folder") {
@@ -207,14 +219,54 @@ struct ContentView: View {
             
             searchBarView
             errorView
-            statsView  //
+            statsView
             resultsList
         }
         .onDisappear {
             searchManager.cancelSearch()
         }
-        .onAppear {
-            // No need to start a server, as we're directly communicating with the FastAPI server
+    }
+    
+    private var searchBarView: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+            TextField("Search images...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .onSubmit {
+                    if !searchManager.isSearching {
+                        performSearch()
+                    }
+                }
+                .disabled(searchManager.isSearching || isIndexing)
+            
+            if searchManager.isSearching {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .padding(.horizontal)
+            } else {
+                Button("Search") {
+                    if !searchManager.isSearching {
+                        performSearch()
+                    }
+                }
+                .disabled(searchText.isEmpty || isIndexing)
+                .padding(.horizontal)
+            }
+        }
+        .padding(12)
+        .background(Color(.textBackgroundColor))
+        .cornerRadius(8)
+        .padding()
+    }
+    
+    private var errorView: some View {
+        Group {
+            if let error = searchManager.errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+                    .padding()
+            }
         }
     }
     
@@ -258,125 +310,8 @@ struct ContentView: View {
         }
     }
     
-    private var searchBarView: some View {
-        print("Rendering searchBarView, isIndexing: \(isIndexing)") // Debug
-        return  HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.gray)
-            TextField("Search images...", text: $searchText)
-                .textFieldStyle(PlainTextFieldStyle())
-                .onSubmit {
-                    if !searchManager.isSearching {
-                        performSearch()
-                    }
-                }
-                .disabled(searchManager.isSearching || isIndexing)
-            
-            if searchManager.isSearching {
-                Button(action: { searchManager.cancelSearch() }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .padding(.horizontal)
-            } else {
-                Button("Search") {
-                    if !searchManager.isSearching {
-                        performSearch()
-                    }
-                }
-                .disabled(searchText.isEmpty || isIndexing)
-                .padding(.horizontal)
-            }
-        }
-        .padding(12)
-        .background(Color(.textBackgroundColor))
-        .cornerRadius(8)
-        .padding()
-    }
-    
-    private func selectAndIndexFolder() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                indexFolder(url)
-            }
-        }
-    }
-    
-    private func indexFolder(_ url: URL) {
-        print("Starting indexing for url: \(url.path)") // Debug
-        isIndexing = true
-        indexingProgress = "Starting indexing..."
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            let pipe = Pipe()
-            
-            process.executableURL = URL(fileURLWithPath: "/Users/ausaf/Desktop/searchy/.venv/bin/python3")
-            let scriptPath = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
-            process.arguments = [scriptPath, url.path]
-            
-            process.standardOutput = pipe
-            process.standardError = pipe
-            
-            process.environment = [
-                "PYTHONPATH": "/Users/ausaf/Desktop/searchy/searchy:/Users/ausaf/Desktop/searchy/.venv/lib/python3.12/site-packages",
-                "PATH": "/Users/ausaf/Desktop/searchy/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-                "PYTHONUNBUFFERED": "1"
-            ]
-            
-            do {
-                try process.run()
-                
-                // Read output in real-time
-                pipe.fileHandleForReading.readabilityHandler = { handle in
-                    let data = handle.availableData
-                    if !data.isEmpty {
-                        if let output = String(data: data, encoding: .utf8) {
-                            print("Received output: \(output)") // Debug
-                            DispatchQueue.main.async {
-                                print("Updating progress: \(output)") // Debug
-                                self.indexingProgress = output
-                            }
-                        }
-                    }
-                }
-                process.terminationHandler = { _ in
-                    DispatchQueue.main.async {
-                        self.isIndexing = false
-                        self.indexingProgress = ""
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isIndexing = false
-                    self.indexingProgress = "Error: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-    
-    private var errorView: some View {
-        Group {
-            if let error = searchManager.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .padding()
-            }
-        }
-    }
-    
     private var resultsList: some View {
-        print("Rendering resultsList, results count: \(searchManager.results.count)") // Debug
-        return  ScrollView {
+        ScrollView {
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 16),
                 GridItem(.flexible(), spacing: 16)
@@ -424,6 +359,71 @@ struct ContentView: View {
         searchManager.search(query: searchText)
     }
     
+    private func selectAndIndexFolder() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                indexFolder(url)
+            }
+        }
+    }
+    
+    private func indexFolder(_ url: URL) {
+        print("Starting indexing for url: \(url.path)") // Debug
+        isIndexing = true
+        indexingProgress = "Starting indexing..."
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            let pipe = Pipe()
+            
+            process.executableURL = URL(fileURLWithPath: Constants.pythonExecutablePath)
+            process.arguments = [Constants.embeddingScriptPath, url.path]
+            
+            process.standardOutput = pipe
+            process.standardError = pipe
+            
+            process.environment = [
+                "PYTHONPATH": "\(Constants.baseDirectory):\(Constants.baseDirectory)/.venv/lib/python3.12/site-packages",
+                "PATH": "\(Constants.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONUNBUFFERED": "1"
+            ]
+            
+            do {
+                try process.run()
+                
+                // Read output in real-time
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if !data.isEmpty {
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("Received output: \(output)") // Debug
+                            DispatchQueue.main.async {
+                                self.indexingProgress = output
+                            }
+                        }
+                    }
+                }
+                process.terminationHandler = { _ in
+                    DispatchQueue.main.async {
+                        self.isIndexing = false
+                        self.indexingProgress = ""
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isIndexing = false
+                    self.indexingProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+
     private func copyImage(path: String) {
         if let image = NSImage(contentsOfFile: path) {
             NSPasteboard.general.clearContents()
