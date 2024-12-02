@@ -3,80 +3,15 @@ import AppKit
 import SwiftUI
 import Carbon
 
-class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
-    private static var _shared: AppDelegate?
-    private var serverProcess: Process?
-    @MainActor private(set) var serverURL: URL?
-    private var assignedPort: Int = 7860
-    private var statusItem: NSStatusItem!
-    private var mainWindow: NSWindow?
+class WindowController: NSObject, NSWindowDelegate {
+    static let shared = WindowController()
+    private var windows: Set<NSWindow> = []
     
-    private var eventHotKey: EventHotKey?
-    private struct EventHotKey {
-        var id: UInt32
-        var ref: EventHotKeyRef?
-    }
-    
-    @MainActor
-    static var shared: AppDelegate {
-        if let delegate = _shared {
-            return delegate
-        }
-        _shared = NSApp.delegate as? AppDelegate
-        return _shared ?? AppDelegate()
-    }
-    
-    override init() {
+    private override init() {
         super.init()
-        Self._shared = self
     }
     
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        
-        // Initialize status bar with custom length and position
-        statusItem = NSStatusBar.system.statusItem(withLength: 24.0) // Set specific width
-        
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "photo.stack",
-                                 accessibilityDescription: "Searchy")?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .regular))
-            
-            // Center the image in the button
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            
-            button.target = self
-            button.action = #selector(toggleMainWindow)
-        }
-        
-        setupMainWindow()
-        
-        Task {
-            await startFastAPIServer()
-        }
-        registerGlobalHotKey()
-    }
-    
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            mainWindow?.makeKeyAndOrderFront(nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        return true
-    }
-    
-    func applicationWillTerminate(_ notification: Notification) {
-        Task {
-            await stopFastAPIServer()
-        }
-        
-        if let hotKey = eventHotKey?.ref {
-            UnregisterEventHotKey(hotKey)
-        }
-    }
-    
-    private func setupMainWindow() {
+    func createNewWindow() -> NSWindow {
         let contentView = ContentView()
         let hostingView = NSHostingView(rootView: contentView)
         
@@ -94,7 +29,88 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         window.isReleasedWhenClosed = false
         window.delegate = self
         
-        self.mainWindow = window
+        windows.insert(window)
+        return window
+    }
+    
+    func removeWindow(_ window: NSWindow) {
+        windows.remove(window)
+    }
+    
+    // NSWindowDelegate methods
+    func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            removeWindow(window)
+        }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    private static var _shared: AppDelegate?
+    private var serverProcess: Process?
+    @MainActor private(set) var serverURL: URL?
+    private var assignedPort: Int = 7860
+    private var statusItem: NSStatusItem!
+    private var mainWindow: NSWindow?
+    private var windowController: WindowController
+    
+    private var eventHotKey: EventHotKey?
+    private struct EventHotKey {
+        var id: UInt32
+        var ref: EventHotKeyRef?
+    }
+    
+    @MainActor
+    static var shared: AppDelegate {
+        if let delegate = _shared {
+            return delegate
+        }
+        _shared = NSApp.delegate as? AppDelegate
+        return _shared ?? AppDelegate()
+    }
+    
+    override init() {
+        self.windowController = WindowController.shared
+        super.init()
+        Self._shared = self
+    }
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        
+        // Create status item
+        statusItem = NSStatusBar.system.statusItem(withLength: 24.0)
+        
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "photo.stack",
+                                 accessibilityDescription: "Searchy")?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .regular))
+            
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            
+            button.target = self
+            button.action = #selector(toggleMainWindow)
+        }
+        
+        // Let SwiftUI handle the first window
+        mainWindow = NSApplication.shared.windows.first
+        mainWindow?.setFrameAutosaveName("Main Window")
+        
+        Task {
+            await startFastAPIServer()
+        }
+        registerGlobalHotKey()
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        Task {
+            await stopFastAPIServer()
+        }
+        
+        if let hotKey = eventHotKey?.ref {
+            UnregisterEventHotKey(hotKey)
+        }
     }
     
     @objc private func toggleMainWindow() {
@@ -108,6 +124,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
     
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            mainWindow?.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+    
     private func bringAppToFront() {
         if let window = mainWindow {
             window.makeKeyAndOrderFront(nil)
@@ -116,33 +140,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     private func registerGlobalHotKey() {
-            let hotKeyID = EventHotKeyID(signature: OSType("SRCH".utf16.reduce(0, { ($0 << 8) + UInt32($1) })), id: 1)
-            
-            var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
-            
-            InstallEventHandler(GetApplicationEventTarget(), { (_, eventRef, _) -> OSStatus in
-                let appDelegate = AppDelegate.shared
-                DispatchQueue.main.async {
-                    appDelegate.bringAppToFront()
-                }
-                return noErr
-            }, 1, &eventType, nil, nil)
-            
-            var hotKeyRef: EventHotKeyRef?
-            let status = RegisterEventHotKey(UInt32(kVK_Space),
-                                           UInt32(cmdKey | shiftKey),
-                                           hotKeyID,
-                                           GetApplicationEventTarget(),
-                                           0,
-                                           &hotKeyRef)
-            
-            if status == noErr {
-                eventHotKey = EventHotKey(id: hotKeyID.id, ref: hotKeyRef)
-                print("Hot key registered successfully")
-            } else {
-                print("Failed to register hot key")
+        let hotKeyID = EventHotKeyID(signature: OSType("SRCH".utf16.reduce(0, { ($0 << 8) + UInt32($1) })), id: 1)
+        
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
+        
+        InstallEventHandler(GetApplicationEventTarget(), { (_, eventRef, _) -> OSStatus in
+            let appDelegate = AppDelegate.shared
+            DispatchQueue.main.async {
+                appDelegate.bringAppToFront()
             }
+            return noErr
+        }, 1, &eventType, nil, nil)
+        
+        var hotKeyRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(UInt32(kVK_Space),
+                                       UInt32(cmdKey | shiftKey),
+                                       hotKeyID,
+                                       GetApplicationEventTarget(),
+                                       0,
+                                       &hotKeyRef)
+        
+        if status == noErr {
+            eventHotKey = EventHotKey(id: hotKeyID.id, ref: hotKeyRef)
+            print("Hot key registered successfully")
+        } else {
+            print("Failed to register hot key")
         }
+    }
     
     private func isPortInUse(port: Int) -> Bool {
         let task = Process()
@@ -172,22 +196,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 fatalError("No available port found.")
             }
         }
-        print(port)
+        print("Using port: \(port)")
         return port
     }
     
     @MainActor
     private func startFastAPIServer() async {
-        
         let killTask = Process()
         killTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
         killTask.arguments = ["-f", "server.py"]
         try? killTask.run()
         killTask.waitUntilExit()
         
-        
         try? await Task.sleep(nanoseconds: 1_000_000_000)
-        
         
         assignedPort = findAvailablePort(startingFrom: 7860)
         serverURL = URL(string: "http://127.0.0.1:\(assignedPort)")
@@ -222,7 +243,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             print("Failed to start FastAPI server: \(error.localizedDescription)")
             return
         }
-        
         
         try? await Task.sleep(nanoseconds: 5_000_000_000)  // 5 seconds
         
@@ -277,18 +297,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             
             try await Task.sleep(nanoseconds: delay)
-            delay *= 2 // Exponential backoff
+            delay *= 2
         }
         
         throw URLError(.cannotConnectToHost)
-    }
-}
-
-extension AppDelegate: NSWindowDelegate {
-    func windowWillClose(_ notification: Notification) {
-        if let window = notification.object as? NSWindow {
-            window.orderOut(nil)
-        }
     }
 }
 
@@ -299,6 +311,16 @@ struct SearchApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+        }
+        .defaultSize(width: 1000, height: 1000)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Window") {
+                    let window = WindowController.shared.createNewWindow()
+                    window.makeKeyAndOrderFront(nil)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
         }
     }
 }
