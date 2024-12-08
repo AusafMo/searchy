@@ -1,9 +1,11 @@
 # Searchy
 >Photo managment on mac sucks, so this is my attempt at making
 <br>
-  A (somewhat) better, lightweight way to browse/search/(potentially manage) images on mac (afaik). A work in progress.
+
+   A (somewhat) better, lightweight way to ***browse*, *search*, and *potentially manage*** images on mac. A work in progress.
 <br>
-  Entirely On-device, except downloading the model. More model and other customizations coming.
+
+  Entirely **on-device**, except model fetching. More models, UI improvements and other customizations in pipe.
 
 ## Demo
 https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
