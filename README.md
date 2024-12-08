@@ -24,6 +24,6 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
 ### Improvements (not in order, I am NOT a swift guy, I can try my best)
   ---
   - [ ] Making UI more clean and less crappy really.
-  - [ ] fixing hotkey issue, currently the hot key to bring the app to attention (is ⌘ + ⇧ + Space), which is buggy.
+  - [ ] fixing hotkey issue, currently the hot key to bring the app to attention `⌘ + ⇧ + Space`, which is buggy.
   - [ ] Figure out how to bundling the app to be distributed, need real help on this one.
   - [ ] Fixing the indexing stats after indexing finishes, it disappears too quickly, make it a pop if possible.
