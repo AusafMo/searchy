@@ -10,7 +10,8 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
 
 ## To-DO
 
-### New Feat (not in order):
+### New Feat (not in order)
+  ---
   - [ ] Duplicate deleter, i.e., more image managing.
   - [ ] Custom Models, right now, using CLIP, potentially using smaller and lighter models or even domain specific tuned models, like fashion, art etc
   - [ ] Custom user scripts for indexing, querying, adhereing to (yet to decide) schema. Essentially making the front end plug and play.
@@ -20,7 +21,8 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
   - [ ] making a spotlight style widget
   - [ ] Crude Tags/Class implementaion based on user provided classes/tags.
 
-### Improvements (not in order, I am NOT a swift guy, I can try my best):
+### Improvements (not in order, I am NOT a swift guy, I can try my best)
+  ---
   - [ ] Making UI more clean and less crappy really.
   - [ ] fixing hotkey issue, currently the hot key to bring the app to attention (is ⌘ + ⇧ + Space), which is buggy.
   - [ ] Figure out how to bundling the app to be distributed, need real help on this one.
