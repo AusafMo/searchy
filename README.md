@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
   - [ ] Duplicate deleter, i.e., more image managing.
   - [ ] Custom Models, right now, using CLIP, potentially using smaller and lighter models or even domain specific tuned models, like fashion, art etc
   - [ ] Custom user scripts for indexing, querying, adhereing to (yet to decide) schema. Essentially making the front end plug and play.
-  - [ ] Offloading model if the user sets a  `time to offload `
+  - [ ] Offloading model if the user sets a  `time to offload`
   - [ ] More filters: time etc
   - [ ] Hybrid search over captions (either user provided via api_keys (replicate/hf etc) for off the shelf models or otherwise manual short captions entered by user)
   - [ ] making a spotlight style widget
