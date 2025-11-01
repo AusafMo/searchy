@@ -3,6 +3,85 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+// MARK: - Design System
+struct DesignSystem {
+    // Colors
+    struct Colors {
+        // Primary palette - Claude-inspired
+        static let primaryBackground = Color(nsColor: NSColor(red: 0.98, green: 0.98, blue: 0.99, alpha: 1.0))
+        static let secondaryBackground = Color.white
+        static let tertiaryBackground = Color(nsColor: NSColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0))
+
+        // Dark mode palette
+        static let darkPrimaryBackground = Color(nsColor: NSColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0))
+        static let darkSecondaryBackground = Color(nsColor: NSColor(red: 0.15, green: 0.15, blue: 0.16, alpha: 1.0))
+        static let darkTertiaryBackground = Color(nsColor: NSColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 1.0))
+
+        // Accent colors
+        static let accent = Color(nsColor: NSColor(red: 0.33, green: 0.44, blue: 1.0, alpha: 1.0))
+        static let accentHover = Color(nsColor: NSColor(red: 0.28, green: 0.39, blue: 0.95, alpha: 1.0))
+
+        // Text colors
+        static let primaryText = Color(nsColor: NSColor.labelColor)
+        static let secondaryText = Color(nsColor: NSColor.secondaryLabelColor)
+        static let tertiaryText = Color(nsColor: NSColor.tertiaryLabelColor)
+
+        // Semantic colors
+        static let success = Color(nsColor: NSColor(red: 0.2, green: 0.78, blue: 0.35, alpha: 1.0))
+        static let error = Color(nsColor: NSColor(red: 0.96, green: 0.26, blue: 0.21, alpha: 1.0))
+        static let warning = Color(nsColor: NSColor(red: 1.0, green: 0.73, blue: 0.0, alpha: 1.0))
+
+        // Borders
+        static let border = Color(nsColor: NSColor.separatorColor).opacity(0.2)
+        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.4)
+    }
+
+    // Typography
+    struct Typography {
+        static let largeTitle = Font.system(size: 28, weight: .bold, design: .rounded)
+        static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
+        static let title2 = Font.system(size: 17, weight: .semibold, design: .rounded)
+        static let headline = Font.system(size: 15, weight: .semibold, design: .default)
+        static let body = Font.system(size: 14, weight: .regular, design: .default)
+        static let callout = Font.system(size: 13, weight: .regular, design: .default)
+        static let caption = Font.system(size: 11, weight: .regular, design: .default)
+        static let caption2 = Font.system(size: 10, weight: .regular, design: .default)
+    }
+
+    // Spacing
+    struct Spacing {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+        static let xxl: CGFloat = 32
+    }
+
+    // Corner Radius
+    struct CornerRadius {
+        static let sm: CGFloat = 6
+        static let md: CGFloat = 10
+        static let lg: CGFloat = 14
+        static let xl: CGFloat = 20
+    }
+
+    // Shadows
+    struct Shadows {
+        static func small(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08)
+        }
+
+        static func medium(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12)
+        }
+
+        static func large(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.15)
+        }
+    }
+}
+
 struct Constants {
     static let baseDirectory: String = "/Users/ausaf/Library/Application Support/searchy"
     static let defaultPort: Int = 7860
@@ -103,20 +182,32 @@ class SearchPreferences: ObservableObject {
 struct SettingsSection<Content: View>: View {
     let title: String
     let icon: String
-    let content: () -> Content  // Changed to closure type
-    
+    let content: () -> Content
+    @Environment(\.colorScheme) var colorScheme
+
     init(title: String, icon: String, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.icon = icon
         self.content = content
     }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label(title, systemImage: icon)
-                .font(.headline)
-                .foregroundStyle(.blue)
-            content()  // Call the closure
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text(title)
+                    .font(DesignSystem.Typography.title2)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+            }
+            content()
         }
     }
 }
@@ -126,17 +217,49 @@ struct PathSetting: View {
     let icon: String
     @Binding var path: String
     @Binding var showPicker: Bool
-    
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon)
-            HStack {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            HStack(spacing: DesignSystem.Spacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text(title)
+                    .font(DesignSystem.Typography.callout.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+            }
+
+            HStack(spacing: DesignSystem.Spacing.sm) {
                 TextField("Path", text: $path)
-                    .textFieldStyle(.roundedBorder)
-                Button("Browse") {
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(DesignSystem.Typography.caption)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .fill(colorScheme == .dark ?
+                                DesignSystem.Colors.darkTertiaryBackground :
+                                DesignSystem.Colors.tertiaryBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                    )
+
+                Button(action: {
                     showPicker = true
+                }) {
+                    Text("Browse")
+                        .font(DesignSystem.Typography.caption.weight(.medium))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, DesignSystem.Spacing.md)
+                        .padding(.vertical, DesignSystem.Spacing.sm)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                        )
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }
@@ -144,20 +267,30 @@ struct PathSetting: View {
 
 struct SettingsGroup<Content: View>: View {
     let title: String
-    let content: () -> Content  // Changed to closure type
-    
+    let content: () -> Content
+    @Environment(\.colorScheme) var colorScheme
+
     init(title: String, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.content = content
     }
-    
+
     var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
-                content()  // Call the closure
-            }
-            .padding(.vertical, 8)
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            content()
         }
+        .padding(DesignSystem.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .fill(colorScheme == .dark ?
+                    DesignSystem.Colors.darkSecondaryBackground :
+                    DesignSystem.Colors.secondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+        )
     }
 }
 
@@ -169,28 +302,70 @@ struct SettingsView: View {
     @State private var isShowingEmbeddingScriptPicker = false
     @State private var isShowingBaseDirectoryPicker = false
     @Environment(\.dismiss) private var dismiss
-    
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Enhanced Header
-            HStack {
-                Text("Settings")
-                    .font(.system(size: 24, weight: .bold))
-                Spacer()
-                Button("Done") {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding()
-            .background(
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+        ZStack {
+            // Background
+            LinearGradient(
+                colors: colorScheme == .dark ?
+                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
+                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-            
-            ScrollView {
-                VStack(spacing: 24) {
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Modern Header
+                HStack(spacing: DesignSystem.Spacing.md) {
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                        Text("Settings")
+                            .font(DesignSystem.Typography.largeTitle)
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                        Text("Customize your search experience")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        HStack(spacing: DesignSystem.Spacing.xs) {
+                            Text("Done")
+                                .font(DesignSystem.Typography.body.weight(.semibold))
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.sm)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(DesignSystem.Spacing.xl)
+                .background(
+                    (colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground)
+                        .opacity(0.8)
+                        .background(.ultraThinMaterial)
+                )
+
+                ScrollView {
+                    VStack(spacing: DesignSystem.Spacing.xl) {
                     // Display Settings Section
                     SettingsSection(title: "Display", icon: "paintbrush") {
                         // Grid Layout Settings
@@ -313,19 +488,36 @@ struct SettingsView: View {
                     
                     // Reset Button
                     Button(action: {
-                        config.resetToDefaults()
+                        withAnimation {
+                            config.resetToDefaults()
+                        }
                     }) {
-                        Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
-                            .foregroundColor(.blue)
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Image(systemName: "arrow.counterclockwise.circle.fill")
+                                .font(.system(size: 14))
+                            Text("Reset to Defaults")
+                                .font(DesignSystem.Typography.callout.weight(.medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.error)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(DesignSystem.Colors.error.opacity(0.1))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .stroke(DesignSystem.Colors.error.opacity(0.3), lineWidth: 1)
+                        )
                     }
-                    .buttonStyle(.bordered)
-                    .padding(.top)
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .padding()
+                .padding(DesignSystem.Spacing.xl)
+            }
             }
         }
-        .frame(width: 600, height: 700)
-        .background(Color(.windowBackgroundColor))
+        .frame(width: 680, height: 760)
         .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.pythonExecutablePath = url.path
@@ -377,36 +569,862 @@ class ImageCache {
 }
 
 
-struct CopyNotification: View {
-    @Binding var isShowing: Bool
-    
+// MARK: - Loading Skeleton Components
+struct SkeletonView: View {
+    @State private var isAnimating = false
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-                .imageScale(.medium)
-            
-            Text("Copied!")
-                .font(.system(size: 13, weight: .bold))
+        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+            .fill(
+                LinearGradient(
+                    colors: colorScheme == .dark ? [
+                        Color.white.opacity(0.05),
+                        Color.white.opacity(0.1),
+                        Color.white.opacity(0.05)
+                    ] : [
+                        Color.gray.opacity(0.2),
+                        Color.gray.opacity(0.3),
+                        Color.gray.opacity(0.2)
+                    ],
+                    startPoint: isAnimating ? .leading : .trailing,
+                    endPoint: isAnimating ? .trailing : .leading
+                )
+            )
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                    isAnimating = true
+                }
+            }
+    }
+}
+
+struct ResultCardSkeleton: View {
+    @StateObject private var prefs = SearchPreferences.shared
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Image skeleton
+            SkeletonView()
+                .frame(width: CGFloat(prefs.imageSize), height: CGFloat(prefs.imageSize))
+
+            // Info skeleton
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                SkeletonView()
+                    .frame(height: 12)
+                    .frame(maxWidth: .infinity)
+
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    SkeletonView()
+                        .frame(width: 60, height: 20)
+                    SkeletonView()
+                        .frame(width: 60, height: 20)
+                }
+            }
+            .padding(DesignSystem.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                colorScheme == .dark ?
+                    DesignSystem.Colors.darkSecondaryBackground :
+                    DesignSystem.Colors.secondaryBackground
+            )
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Stat Item Component
+struct StatItem: View {
+    let icon: String
+    let label: String
+    let value: String
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(DesignSystem.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(DesignSystem.Typography.caption2)
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                Text(value)
+                    .font(DesignSystem.Typography.callout.weight(.semibold))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+            }
+        }
+    }
+}
+
+// MARK: - Example Query Chip
+struct ExampleQueryChip: View {
+    let text: String
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Text(text)
+            .font(DesignSystem.Typography.caption)
+            .foregroundColor(isHovered ? .white : DesignSystem.Colors.accent)
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.vertical, DesignSystem.Spacing.xs)
+            .background(
+                Capsule()
+                    .fill(isHovered ? DesignSystem.Colors.accent : DesignSystem.Colors.accent.opacity(0.1))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+            )
+            .scaleEffect(isHovered ? 1.05 : 1.0)
+            .onHover { hovering in
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                    isHovered = hovering
+                }
+            }
+    }
+}
+
+// MARK: - Action Button Component
+struct ActionButton: View {
+    let icon: String
+    let title: String
+    let color: Color
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: {
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
+                isPressed = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.6)) {
+                    isPressed = false
+                }
+            }
+            action()
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                Text(title)
+                    .font(DesignSystem.Typography.caption2.weight(.medium))
+            }
+            .foregroundColor(isHovered ? color : color.opacity(0.8))
+            .padding(.horizontal, DesignSystem.Spacing.sm)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(color.opacity(isHovered ? 0.15 : 0.1))
+            )
+            .scaleEffect(isPressed ? 0.92 : (isHovered ? 1.05 : 1.0))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Spotlight Search View
+struct SpotlightSearchView: View {
+    @ObservedObject private var searchManager = SearchManager.shared
+    @State private var searchText = ""
+    @State private var selectedIndex: Int = 0
+    @State private var recentImages: [SearchResult] = []
+    @State private var hasPerformedSearch = false
+    @State private var isLoadingRecent = false
+    @State private var searchDebounceTimer: Timer?
+    let previousApp: NSRunningApplication?
+    @Environment(\.colorScheme) var colorScheme
+    @FocusState private var isSearchFocused: Bool
+
+    init(previousApp: NSRunningApplication? = nil) {
+        self.previousApp = previousApp
+    }
+
+    private func closeWindow() {
+        if let window = NSApp.keyWindow {
+            window.orderOut(nil)
+        }
+    }
+
+    private func loadRecentImages(retryCount: Int = 0) {
+        isLoadingRecent = true
+        searchManager.loadRecentImages { images in
+            if images.isEmpty && retryCount < 3 {
+                // Server might not be ready, retry after delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.loadRecentImages(retryCount: retryCount + 1)
+                }
+            } else {
+                self.recentImages = images
+                self.isLoadingRecent = false
+            }
+        }
+    }
+
+    private var displayResults: [SearchResult] {
+        if hasPerformedSearch {
+            return searchManager.results
+        } else {
+            return recentImages
+        }
+    }
+
+    private var searchBarBackground: some View {
+        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+            .fill(.ultraThinMaterial.opacity(0.3))
+            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 10)
+    }
+
+    private var resultsBackground: some View {
+        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+            .fill(.ultraThinMaterial.opacity(0.3))
+            .shadow(color: Color.black.opacity(0.1), radius: 15, x: 0, y: 8)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+                // Compact search bar
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(Color.black.opacity(0.6))
+
+                    TextField("Search images...", text: $searchText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(DesignSystem.Typography.title)
+                        .foregroundColor(.white)
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            if !searchManager.isSearching && !searchText.isEmpty {
+                                // Cancel debounce timer and search immediately
+                                searchDebounceTimer?.invalidate()
+                                performSearch()
+                            }
+                        }
+                        .onChange(of: searchText) { oldValue, newValue in
+                            selectedIndex = 0
+
+                            // Cancel any existing timer
+                            searchDebounceTimer?.invalidate()
+
+                            // If search text is empty, show recent images
+                            if newValue.isEmpty {
+                                hasPerformedSearch = false
+                                return
+                            }
+
+                            // Debounce: wait 400ms after user stops typing before searching
+                            searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                                if !searchManager.isSearching && !newValue.isEmpty {
+                                    performSearch()
+                                }
+                            }
+                        }
+
+                    if searchManager.isSearching {
+                        ProgressView()
+                            .scaleEffect(1.0)
+                            .transition(.scale.combined(with: .opacity))
+                    } else if !searchText.isEmpty {
+                        Button(action: {
+                            withAnimation {
+                                searchText = ""
+                                selectedIndex = 0
+                                hasPerformedSearch = false
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(Color.black.opacity(0.4))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(DesignSystem.Spacing.md)
+                .background(searchBarBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.5
+                        )
+                )
+                .padding(.horizontal, DesignSystem.Spacing.md)
+
+                // Results area
+                if isLoadingRecent && recentImages.isEmpty && !hasPerformedSearch {
+                    // Show loading indicator while waiting for recent images
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading recent images...")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(Color.black.opacity(0.5))
+                    }
+                    .padding(DesignSystem.Spacing.xxl)
+                } else if !displayResults.isEmpty {
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: DesignSystem.Spacing.sm) {
+                                ForEach(Array(displayResults.prefix(8).enumerated()), id: \.element.id) { index, result in
+                                    SpotlightResultRow(
+                                        result: result,
+                                        isSelected: index == selectedIndex,
+                                        onSelect: {
+                                            closeWindow()
+                                        }
+                                    )
+                                    .id(index)
+                                    .onTapGesture {
+                                        selectedIndex = index
+                                    }
+                                }
+                            }
+                            .padding(DesignSystem.Spacing.sm)
+                            .animation(nil, value: selectedIndex)
+                        }
+                        .frame(maxHeight: 350)
+                        .animation(nil, value: selectedIndex)
+                        .background(resultsBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        )
+                        .padding(.horizontal, DesignSystem.Spacing.md)
+                        .padding(.top, DesignSystem.Spacing.sm)
+                        .onChange(of: selectedIndex) { oldValue, newValue in
+                            // Scroll instantly with no animation
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // Keyboard hints
+                HStack(spacing: DesignSystem.Spacing.md) {
+                    KeyboardHint(key: "↑↓", description: "Navigate")
+                    KeyboardHint(key: "⏎", description: "Copy & Paste")
+                    KeyboardHint(key: "⌘⏎", description: "Open")
+                    KeyboardHint(key: "⌃1-9", description: "Copy")
+                    KeyboardHint(key: "⌘1-9", description: "Copy & Paste")
+                    KeyboardHint(key: "ESC", description: "Close")
+                }
+                .padding(DesignSystem.Spacing.sm)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial.opacity(0.2))
+                )
+                .padding(.bottom, DesignSystem.Spacing.sm)
+        }
+        .frame(width: 650)
+        .padding(.vertical, DesignSystem.Spacing.md)
         .background(
-            ZStack {
-                Color.black
-                    .opacity(0.15)
-                    .background(.ultraThinMaterial)
-                
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.white.opacity(0.3), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+                .fill(.ultraThinMaterial.opacity(0.4))
+                .shadow(color: Color.black.opacity(0.2), radius: 30, x: 0, y: 15)
+        )
+        .onAppear {
+            // Load recent images and focus search field
+            loadRecentImages()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFocused = true
+            }
+        }
+        .onKeyPress(.escape) {
+            closeWindow()
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            if !displayResults.isEmpty {
+                selectedIndex = max(0, selectedIndex - 1)
+            }
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            if !displayResults.isEmpty {
+                selectedIndex = min(displayResults.count - 1, selectedIndex + 1)
+            }
+            return .handled
+        }
+        .onKeyPress { press in
+            // Check if this is a Return key press
+            guard press.key == .return else { return .ignored }
+
+            // If there are results and we have a valid selection
+            if !displayResults.isEmpty && selectedIndex < displayResults.count {
+                let selectedResult = displayResults[selectedIndex]
+
+                // Cmd+Enter: Open in Finder
+                if press.modifiers.contains(.command) {
+                    NSWorkspace.shared.selectFile(selectedResult.path, inFileViewerRootedAtPath: "")
+                    closeWindow()
+                    return .handled
+                }
+                // Enter alone: Copy and paste
+                else {
+                    copyAndPasteImageAtIndex(selectedIndex)
+                    return .handled
+                }
+            }
+            // No results selected, perform search if we have text
+            else if !searchText.isEmpty && !searchManager.isSearching {
+                // Cancel debounce and search immediately
+                searchDebounceTimer?.invalidate()
+                performSearch()
+                return .handled
+            }
+            return .ignored
+        }
+        // Ctrl+1 through Ctrl+9 shortcuts to copy images
+        .onKeyPress { press in
+            // Check if Control key is pressed (but not Command)
+            guard press.modifiers.contains(.control) && !press.modifiers.contains(.command) else { return .ignored }
+
+            // Check for number keys 1-9
+            if let char = press.characters.first, char.isNumber, let digit = char.wholeNumberValue, digit >= 1, digit <= 9 {
+                let index = digit - 1
+                if index < displayResults.count {
+                    copyImageAtIndex(index)
+                    closeWindow()
+                    return .handled
+                }
+            }
+            return .ignored
+        }
+        // Cmd+1 through Cmd+9 shortcuts to copy and paste images
+        .onKeyPress { press in
+            // Check if Command key is pressed
+            guard press.modifiers.contains(.command) else { return .ignored }
+
+            // Check for number keys 1-9
+            if let char = press.characters.first, char.isNumber, let digit = char.wholeNumberValue, digit >= 1, digit <= 9 {
+                let index = digit - 1
+                if index < displayResults.count {
+                    copyAndPasteImageAtIndex(index)
+                    return .handled
+                }
+            }
+            return .ignored
+        }
+    }
+
+    private func performSearch() {
+        guard !searchText.isEmpty, !searchManager.isSearching else { return }
+        selectedIndex = 0
+        hasPerformedSearch = true
+        searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
+    }
+
+    private func copyImageAtIndex(_ index: Int) {
+        guard index < displayResults.count else { return }
+        let result = displayResults[index]
+        if let image = NSImage(contentsOfFile: result.path) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+        }
+    }
+
+    private func copyAndPasteImageAtIndex(_ index: Int) {
+        guard index < displayResults.count else { return }
+        let result = displayResults[index]
+
+        // Check if we have accessibility permissions
+        let checkOptPrompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        let options = [checkOptPrompt: true] as CFDictionary
+        let accessEnabled = AXIsProcessTrustedWithOptions(options)
+
+        if !accessEnabled {
+            print("⚠️ Accessibility permission not granted. Please enable in System Settings > Privacy & Security > Accessibility")
+        }
+
+        // First copy the image to clipboard
+        if let image = NSImage(contentsOfFile: result.path) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+
+            print("✅ Image copied to clipboard")
+
+            // Use the stored previous app
+            let targetApp = previousApp
+
+            // Close the window immediately
+            closeWindow()
+
+            // Wait for window to close, then activate target app and paste
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                // Make sure the previous app is activated
+                if let app = targetApp {
+                    app.activate(options: [.activateIgnoringOtherApps])
+                    print("🎯 Activating app: \(app.localizedName ?? "Unknown")")
+                } else {
+                    print("⚠️ No previous app stored!")
+                }
+
+                // Wait for app to be fully active
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    print("📋 Attempting to paste...")
+
+                    // Simulate Cmd+V paste using CGEvent
+                    let source = CGEventSource(stateID: .combinedSessionState)
+
+                    // Create key down event for 'v' (virtual key 0x09)
+                    if let keyDownEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) {
+                        keyDownEvent.flags = .maskCommand
+                        keyDownEvent.post(tap: .cghidEventTap)
+                        print("⬇️ Posted key down event")
+                    }
+
+                    // Small delay between key down and key up
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        // Create key up event for 'v'
+                        if let keyUpEvent = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) {
+                            keyUpEvent.flags = .maskCommand
+                            keyUpEvent.post(tap: .cghidEventTap)
+                            print("⬆️ Posted key up event")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SpotlightResultRow: View {
+    let result: SearchResult
+    let isSelected: Bool
+    let onSelect: () -> Void
+    @State private var isHovered = false
+    @State private var showingCopyNotification = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            // Thumbnail
+            if let image = NSImage(contentsOfFile: result.path) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .stroke(isSelected ?
+                                DesignSystem.Colors.accent.opacity(0.5) :
+                                DesignSystem.Colors.border.opacity(0.3),
+                                lineWidth: isSelected ? 1.5 : 1)
+                    )
+                    .shadow(color: isSelected ? DesignSystem.Colors.accent.opacity(0.2) : .clear,
+                           radius: 4, x: 0, y: 2)
+            }
+
+            // Info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .font(DesignSystem.Typography.caption.weight(.semibold))
+                    .foregroundColor(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
+                    .lineLimit(1)
+
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8))
+                    Text("\(Int(result.similarity * 100))%")
+                        .font(DesignSystem.Typography.caption2)
+                }
+                .foregroundColor(similarityColor)
+            }
+
+            Spacer()
+
+            // Action buttons
+            HStack(spacing: DesignSystem.Spacing.xs) {
+                Button(action: {
+                    copyImage(path: result.path)
+                    showCopyNotification()
+                }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+                    onSelect()
+                }) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .opacity((isHovered || isSelected) ? 1 : 0.3)
+        }
+        .padding(DesignSystem.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .fill(
+                    isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.1) :
+                        (isHovered ? DesignSystem.Colors.accent.opacity(0.05) : Color.clear)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .stroke(
+                    isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.3) :
+                        Color.clear,
+                    lineWidth: isSelected ? 1 : 0
+                )
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .onTapGesture(count: 2) {
+            copyImage(path: result.path)
+            showCopyNotification()
+        }
+        .overlay(
+            Group {
+                if showingCopyNotification {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DesignSystem.Colors.success)
+                        Text("Copied!")
+                            .font(DesignSystem.Typography.callout.weight(.semibold))
+                    }
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
+                    .padding(.vertical, DesignSystem.Spacing.md)
+                    .background(
+                        Capsule()
+                            .fill(colorScheme == .dark ?
+                                DesignSystem.Colors.darkSecondaryBackground :
+                                DesignSystem.Colors.secondaryBackground)
+                            .shadow(color: DesignSystem.Shadows.medium(colorScheme), radius: 12, x: 0, y: 6)
+                    )
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
         )
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 2)
-        .offset(y: isShowing ? 0 : 10)
+    }
+
+    private var similarityColor: Color {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return DesignSystem.Colors.success
+        } else if percentage >= 60 {
+            return DesignSystem.Colors.accent
+        } else {
+            return DesignSystem.Colors.warning
+        }
+    }
+
+    private func showCopyNotification() {
+        showingCopyNotification = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showingCopyNotification = false
+        }
+    }
+
+    private func copyImage(path: String) {
+        if let image = NSImage(contentsOfFile: path) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+        }
+    }
+}
+
+struct KeyboardHint: View {
+    let key: String
+    let description: String
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.xs) {
+            Text(key)
+                .font(DesignSystem.Typography.caption2.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(colorScheme == .dark ?
+                            DesignSystem.Colors.darkTertiaryBackground :
+                            DesignSystem.Colors.tertiaryBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                )
+
+            Text(description)
+                .font(DesignSystem.Typography.caption2)
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
+        }
+    }
+}
+
+struct VisualEffectBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
+        visualEffectView.state = .active
+        return visualEffectView
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Modern Button Component
+struct ModernButton: View {
+    enum ButtonStyle {
+        case primary, secondary, tertiary
+    }
+
+    let icon: String
+    let title: String?
+    let style: ButtonStyle
+    let isDisabled: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DesignSystem.Spacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: title == nil ? 16 : 14, weight: .medium))
+
+                if let title = title {
+                    Text(title)
+                        .font(DesignSystem.Typography.callout.weight(.medium))
+                }
+            }
+            .foregroundColor(foregroundColor)
+            .padding(.horizontal, title == nil ? DesignSystem.Spacing.sm : DesignSystem.Spacing.md)
+            .padding(.vertical, DesignSystem.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+            .scaleEffect(isHovered && !isDisabled ? 1.02 : 1.0)
+            .shadow(color: isHovered && !isDisabled ? DesignSystem.Shadows.small(colorScheme) : .clear,
+                   radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isDisabled)
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isHovered = hovering
+            }
+        }
+        .opacity(isDisabled ? 0.5 : 1.0)
+    }
+
+    private var backgroundColor: Color {
+        switch style {
+        case .primary:
+            return DesignSystem.Colors.accent
+        case .secondary:
+            return colorScheme == .dark ?
+                DesignSystem.Colors.darkTertiaryBackground :
+                DesignSystem.Colors.tertiaryBackground
+        case .tertiary:
+            return (colorScheme == .dark ?
+                DesignSystem.Colors.darkSecondaryBackground :
+                DesignSystem.Colors.secondaryBackground).opacity(isHovered ? 1.0 : 0.5)
+        }
+    }
+
+    private var foregroundColor: Color {
+        switch style {
+        case .primary:
+            return .white
+        case .secondary, .tertiary:
+            return DesignSystem.Colors.primaryText
+        }
+    }
+
+    private var borderColor: Color {
+        if isHovered {
+            return DesignSystem.Colors.borderHover
+        }
+        return style == .tertiary ? DesignSystem.Colors.border : .clear
+    }
+}
+
+struct CopyNotification: View {
+    @Binding var isShowing: Bool
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(DesignSystem.Colors.success)
+                .font(.system(size: 14, weight: .semibold))
+
+            Text("Copied!")
+                .font(DesignSystem.Typography.callout.weight(.semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+        }
+        .padding(.horizontal, DesignSystem.Spacing.lg)
+        .padding(.vertical, DesignSystem.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .fill(colorScheme == .dark ?
+                    DesignSystem.Colors.darkSecondaryBackground :
+                    DesignSystem.Colors.secondaryBackground)
+                .shadow(color: DesignSystem.Shadows.medium(colorScheme), radius: 12, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(DesignSystem.Colors.success.opacity(0.3), lineWidth: 1.5)
+        )
+        .offset(y: isShowing ? 0 : 20)
         .opacity(isShowing ? 1 : 0)
+        .scaleEffect(isShowing ? 1 : 0.9)
         .animation(
-            .spring(response: 0.3, dampingFraction: 0.8),
+            .spring(response: 0.35, dampingFraction: 0.75),
             value: isShowing
         )
     }
@@ -415,145 +1433,265 @@ struct CopyNotification: View {
 struct ResultCardView: View {
     let result: SearchResult
     @State private var showingCopyNotification = false
+    @State private var isHovered = false
+    @State private var isPressed = false
     @StateObject private var prefs = SearchPreferences.shared
-    
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        VStack(spacing: 6) { // Changed alignment to center by removing alignment parameter
-            ZStack {
+        VStack(spacing: 0) {
+            // Image container with overlay effects
+            ZStack(alignment: .topTrailing) {
                 DoubleClickImageView(filePath: result.path) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        isPressed = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            isPressed = false
+                        }
+                    }
                     copyImage(path: result.path)
                     showCopyNotification()
                 }
-                .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fill)
                 .frame(width: CGFloat(prefs.imageSize), height: CGFloat(prefs.imageSize))
                 .clipped()
-                .frame(maxWidth: .infinity, alignment: .center) // Added this line to center the image
-                
-                CopyNotification(isShowing: $showingCopyNotification)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                    .lineLimit(1)
-                    .font(.caption2)
-                
-                HStack {
-                    Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
-                        .font(.caption2)
-                    Spacer()
-                    Button(action: {
-                        revealInFinder(path: result.path)
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder")
-                                .font(.caption2)
-                            Text("Reveal")
-                                .font(.caption2)
-                        }
+                .background(
+                    colorScheme == .dark ?
+                        DesignSystem.Colors.darkTertiaryBackground :
+                        DesignSystem.Colors.tertiaryBackground
+                )
+                .scaleEffect(isPressed ? 0.95 : 1.0)
+
+                // Hover overlay with gradient
+                if isHovered {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.black.opacity(0), Color.black.opacity(0.3)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+
+                // Similarity badge with glass effect
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8))
+                    Text("\(Int(result.similarity * 100))%")
+                        .font(DesignSystem.Typography.caption2.weight(.semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.xs)
+                .background(
+                    ZStack {
+                        Capsule()
+                            .fill(similarityColor.opacity(0.9))
+                        Capsule()
+                            .fill(.ultraThinMaterial)
+                            .blendMode(.overlay)
                     }
+                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                )
+                .padding(DesignSystem.Spacing.sm)
+                .scaleEffect(isHovered ? 1.05 : 1.0)
+                .allowsHitTesting(false)
+
+                // Copy notification overlay
+                if showingCopyNotification {
+                    CopyNotification(isShowing: $showingCopyNotification)
+                        .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+
+            // Info section with enhanced buttons
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .lineLimit(1)
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                // Action buttons with hover states
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    ActionButton(
+                        icon: "doc.on.doc.fill",
+                        title: "Copy",
+                        color: DesignSystem.Colors.accent
+                    ) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            copyImage(path: result.path)
+                            showCopyNotification()
+                        }
+                    }
+
+                    ActionButton(
+                        icon: "folder.fill",
+                        title: "Reveal",
+                        color: DesignSystem.Colors.secondaryText
+                    ) {
+                        revealInFinder(path: result.path)
+                    }
+
+                    Spacer()
+                }
+            }
+            .padding(DesignSystem.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                colorScheme == .dark ?
+                    DesignSystem.Colors.darkSecondaryBackground :
+                    DesignSystem.Colors.secondaryBackground
+            )
         }
-        .frame(maxWidth: .infinity) // Added this to ensure the card takes full width
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(8)
-        .shadow(radius: 1)
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(
+                    isHovered ?
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ) :
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                    lineWidth: isHovered ? 1.5 : 1
+                )
+        )
+        .shadow(
+            color: isHovered ? DesignSystem.Shadows.large(colorScheme) : DesignSystem.Shadows.small(colorScheme),
+            radius: isHovered ? 16 : 6,
+            x: 0,
+            y: isHovered ? 8 : 3
+        )
+        .scaleEffect(isHovered ? 1.03 : 1.0)
+        .rotation3DEffect(
+            .degrees(isHovered ? 2 : 0),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 1.0
+        )
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                isHovered = hovering
+            }
+        }
     }
-    
+
+    private var similarityColor: Color {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return DesignSystem.Colors.success
+        } else if percentage >= 60 {
+            return DesignSystem.Colors.accent
+        } else {
+            return DesignSystem.Colors.warning
+        }
+    }
+
     private func showCopyNotification() {
         showingCopyNotification = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             showingCopyNotification = false
         }
     }
-    
+
     private func copyImage(path: String) {
         if let image = NSImage(contentsOfFile: path) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([image])
         }
     }
-    
+
     private func revealInFinder(path: String) {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
     }
 }
 
-struct DoubleClickImageView: NSViewRepresentable {
+struct DoubleClickImageView: View {
     let filePath: String
     let onDoubleClick: () -> Void
-    
-    func makeNSView(context: Context) -> NSImageView {
-        let imageView = DoubleClickableImageView()
-        imageView.imageScaling = .scaleProportionallyUpOrDown
-        imageView.wantsLayer = true
-        imageView.onDoubleClick = onDoubleClick
-        return imageView
+    @State private var image: NSImage?
+    @StateObject private var prefs = SearchPreferences.shared
+
+    var body: some View {
+        Group {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+            }
+        }
+        .onTapGesture(count: 2) {
+            onDoubleClick()
+        }
+        .onAppear {
+            loadImage()
+        }
     }
-    
-    func updateNSView(_ nsView: NSImageView, context: Context) {
+
+    private func loadImage() {
         if let cachedImage = ImageCache.shared.image(for: filePath) {
-            nsView.image = cachedImage
+            self.image = cachedImage
             return
         }
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
-            if let image = NSImage(contentsOfFile: filePath) {
-                let newSize = calculateAspectRatioSize(for: image, maxWidth: 250, maxHeight: 250)
-                let resizedImage = resizeImage(image, targetSize: newSize)
+            if let loadedImage = NSImage(contentsOfFile: filePath) {
+                let maxSize = CGFloat(SearchPreferences.shared.imageSize)
+                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
+                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
                 ImageCache.shared.setImage(resizedImage, for: filePath)
                 DispatchQueue.main.async {
-                    nsView.image = resizedImage
+                    self.image = resizedImage
                 }
             }
         }
     }
-    
-    private func calculateAspectRatioSize(for image: NSImage, maxWidth: CGFloat, maxHeight: CGFloat) -> NSSize {
-        let maxSize = CGFloat(SearchPreferences.shared.imageSize)
+
+    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
         let imageWidth = image.size.width
         let imageHeight = image.size.height
-        
+
         let widthRatio = maxSize / imageWidth
         let heightRatio = maxSize / imageHeight
-        
+
         let ratio = min(widthRatio, heightRatio)
-        
+
         return NSSize(
             width: imageWidth * ratio,
             height: imageHeight * ratio
         )
     }
-    
+
     private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
         let newImage = NSImage(size: targetSize)
-        
+
         newImage.lockFocus()
-        
+
         NSColor.windowBackgroundColor.setFill()
         NSRect(origin: .zero, size: targetSize).fill()
-        
+
         image.draw(
             in: NSRect(origin: .zero, size: targetSize),
             from: NSRect(origin: .zero, size: image.size),
             operation: .copy,
             fraction: 1.0
         )
-        
+
         newImage.unlockFocus()
         return newImage
-    }
-}
-
-class DoubleClickableImageView: NSImageView {
-    var onDoubleClick: (() -> Void)?
-    
-    override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 {
-            onDoubleClick?()
-        }
     }
 }
 // Search Result Model
@@ -580,11 +1718,15 @@ struct SearchStats: Codable {
 }
 
 class SearchManager: ObservableObject {
+    static let shared = SearchManager()
+
     @Published private(set) var results: [SearchResult] = []
     @Published private(set) var isSearching = false
     @Published private(set) var errorMessage: String? = nil
     @Published private(set) var searchStats: SearchStats? = nil
-    
+
+    private init() {}
+
     private var serverURL: URL {
         get async {
             let delegate = await AppDelegate.shared
@@ -654,7 +1796,7 @@ class SearchManager: ObservableObject {
                     throw NSError(domain: "Invalid JSON format", code: 0, userInfo: nil)
                 }
             } else {
-                throw NSError(domain: "No valid JSON response found", code: 0, userInfo: nil)
+                throw NSError(domain: "No valid JSON response found, Are You sure the folders are indexed ?", code: 0, userInfo: nil)
             }
         } else {
             throw NSError(domain: "No response from server", code: 0, userInfo: nil)
@@ -666,269 +1808,582 @@ class SearchManager: ObservableObject {
             self.errorMessage = nil
         }
     }
+
+    func loadRecentImages(completion: @escaping ([SearchResult]) -> Void) {
+        Task {
+            do {
+                let serverURL = await self.serverURL
+                let url = serverURL.appendingPathComponent("recent")
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+                components.queryItems = [
+                    URLQueryItem(name: "top_k", value: "8"),
+                    URLQueryItem(name: "data_dir", value: "/Users/ausaf/Library/Application Support/searchy")
+                ]
+
+                guard let finalURL = components.url else {
+                    DispatchQueue.main.async {
+                        completion([])
+                    }
+                    return
+                }
+
+                let (data, _) = try await URLSession.shared.data(from: finalURL)
+                let decoder = JSONDecoder()
+                let response = try decoder.decode(SearchResponse.self, from: data)
+
+                DispatchQueue.main.async {
+                    completion(response.results)
+                }
+            } catch {
+                print("Error loading recent images: \(error)")
+                DispatchQueue.main.async {
+                    completion([])
+                }
+            }
+        }
+    }
 }
 
 struct ContentView: View {
-    @StateObject private var searchManager = SearchManager()
+    @ObservedObject private var searchManager = SearchManager.shared
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
-    @State private var isShowingSettings = false  // Add this
+    @State private var isShowingSettings = false
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Top toolbar
-            HStack {
-                Button(action: {
-                    isShowingSettings = true
-                }) {
-                    Image(systemName: "gear")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(8)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                Spacer()
-                
-                Button(action: {
-                    if !isIndexing {
-                        selectAndIndexFolder()
+        ZStack {
+            // Background gradient
+            LinearGradient(
+                colors: colorScheme == .dark ?
+                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
+                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Modern header
+                modernHeader
+
+                // Main content area
+                VStack(spacing: DesignSystem.Spacing.xl) {
+                    if !indexingProgress.isEmpty {
+                        indexingProgressView
                     }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.square")
-                        Text("Index New Folder")
-                    }.fontWeight(Font.Weight.semibold).foregroundStyle(.blue)
+
+                    modernSearchBar
+                    errorView
+
+                    // Results area
+                    if searchManager.results.isEmpty && searchText.isEmpty && !searchManager.isSearching {
+                        emptyStateView
+                    } else {
+                        ScrollView {
+                            resultsList
+                                .padding(DesignSystem.Spacing.xl)
+                        }
+                    }
                 }
-                .buttonStyle(PlainButtonStyle())
-                .padding(8)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .cornerRadius(8)
-                .disabled(isIndexing)
+                .padding(.horizontal, DesignSystem.Spacing.xl)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(.windowBackgroundColor).opacity(0.8))
-            
-            // Main content area
-            VStack {
-                if !indexingProgress.isEmpty {
-                    Text(indexingProgress)
-                        .foregroundColor(.blue).fontWeight(Font.Weight.bold)
-                        .padding(.vertical, 4)
-                }
-                
-                searchBarView
-                errorView
-                
-                ScrollView {
-                    resultsList
-                        .padding()
-                }
-                .background(Color(.separatorColor).opacity(0.1))
-            }
-            .background(Color(.windowBackgroundColor).opacity(0.9))
         }
-        .background(Color(.windowBackgroundColor).opacity(0.7))
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
-                .frame(width: 600, height: 700)
+                .frame(width: 680, height: 760)
         }
         .onDisappear {
             searchManager.cancelSearch()
         }
     }
-    private var searchBarView: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.gray)
-                .font(.system(size: 14))
-            
-            TextField("Search images...", text: $searchText)
+
+    // MARK: - Modern Header
+    private var modernHeader: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            // App title with animated icon
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    DesignSystem.Colors.accent.opacity(0.15),
+                                    DesignSystem.Colors.accent.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+
+                    Image(systemName: "photo.stack.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Searchy")
+                        .font(DesignSystem.Typography.title2)
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    if searchManager.isSearching {
+                        Text("Searching...")
+                            .font(DesignSystem.Typography.caption2)
+                            .foregroundColor(DesignSystem.Colors.accent)
+                            .transition(.opacity)
+                    } else if !searchManager.results.isEmpty {
+                        Text("\(searchManager.results.count) results")
+                            .font(DesignSystem.Typography.caption2)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: searchManager.isSearching)
+                .animation(.easeInOut(duration: 0.2), value: searchManager.results.count)
+            }
+
+            Spacer()
+
+            // Action buttons with status indicator
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                if isIndexing {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text("Indexing...")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accent.opacity(0.1))
+                    )
+                    .transition(.scale.combined(with: .opacity))
+                }
+
+                ModernButton(
+                    icon: "plus.square.fill",
+                    title: "Index Folder",
+                    style: .secondary,
+                    isDisabled: isIndexing
+                ) {
+                    if !isIndexing {
+                        selectAndIndexFolder()
+                    }
+                }
+
+                ModernButton(
+                    icon: "gearshape.fill",
+                    title: nil,
+                    style: .tertiary,
+                    isDisabled: false
+                ) {
+                    isShowingSettings = true
+                }
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(.vertical, DesignSystem.Spacing.lg)
+        .background(
+            (colorScheme == .dark ?
+                DesignSystem.Colors.darkSecondaryBackground :
+                DesignSystem.Colors.secondaryBackground)
+                .opacity(0.7)
+                .background(.ultraThinMaterial)
+        )
+        .overlay(
+            Rectangle()
+                .frame(height: 1)
+                .foregroundColor(DesignSystem.Colors.border.opacity(0.5))
+                .frame(maxHeight: .infinity, alignment: .bottom)
+        )
+    }
+
+    // MARK: - Modern Search Bar
+    @FocusState private var isSearchFocused: Bool
+
+    private var modernSearchBar: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(DesignSystem.Colors.accent.opacity(isSearchFocused ? 0.15 : 0.1))
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(isSearchFocused ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
+
+            TextField("Search your images with natural language...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
-                .font(.system(size: 14))
+                .font(DesignSystem.Typography.body)
+                .focused($isSearchFocused)
                 .onSubmit {
-                    if !searchManager.isSearching {
+                    if !searchManager.isSearching && !searchText.isEmpty {
                         performSearch()
                     }
                 }
                 .disabled(searchManager.isSearching || isIndexing)
-            
+
             if !searchText.isEmpty {
-                Button(action: { searchText = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.system(size: 12))
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            
-            if searchManager.isSearching {
-                ProgressView()
-                    .scaleEffect(0.8)
-                    .padding(.horizontal)
-            } else {
                 Button(action: {
-                    if !searchManager.isSearching {
-                        performSearch()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        searchText = ""
                     }
                 }) {
-                    Text("Search")
-                        .fontWeight(.semibold)
+                    ZStack {
+                        Circle()
+                            .fill(DesignSystem.Colors.tertiaryText.opacity(0.1))
+                            .frame(width: 20, height: 20)
+
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(searchText.isEmpty ? Color.gray.opacity(0.2) : Color.green)
-                .foregroundColor(searchText.isEmpty ? .gray : .white)
-                .cornerRadius(6)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(.primary, lineWidth: 0.5)
-                )
-                .disabled(searchText.isEmpty || isIndexing)
+                .transition(.scale.combined(with: .opacity))
+            }
+
+            if searchManager.isSearching {
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Searching")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .transition(.scale.combined(with: .opacity))
+            } else if !searchText.isEmpty {
+                Button(action: { performSearch() }) {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
+                        Text("Search")
+                            .font(DesignSystem.Typography.callout.weight(.semibold))
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 14))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, x: 0, y: 4)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.8).combined(with: .opacity),
+                    removal: .scale(scale: 0.9).combined(with: .opacity)
+                ))
             }
         }
-        .padding(12)
-        .background(Color(.textBackgroundColor))
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(
-                    LinearGradient(colors: [.blue, .pink], startPoint: .leading, endPoint: .trailing),
-                    lineWidth: 1
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .fill(colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground)
+                .shadow(
+                    color: isSearchFocused ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
+                    radius: isSearchFocused ? 12 : 8,
+                    x: 0,
+                    y: isSearchFocused ? 4 : 2
                 )
         )
-        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-        .padding()
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(
+                    isSearchFocused ?
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ) :
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                    lineWidth: isSearchFocused ? 1.5 : 1
+                )
+        )
+        .scaleEffect(isSearchFocused ? 1.01 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
+        .padding(.top, DesignSystem.Spacing.xl)
     }
-    
+
+    // MARK: - Indexing Progress View
+    private var indexingProgressView: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text(indexingProgress)
+                .font(DesignSystem.Typography.callout)
+                .foregroundColor(DesignSystem.Colors.accent)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .fill(DesignSystem.Colors.accent.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Empty State
+    @State private var emptyStateIconRotation: Double = 0
+
+    private var emptyStateView: some View {
+        VStack(spacing: DesignSystem.Spacing.xl) {
+            Spacer()
+
+            VStack(spacing: DesignSystem.Spacing.xl) {
+                // Animated icon
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    DesignSystem.Colors.accent.opacity(0.1),
+                                    DesignSystem.Colors.accent.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 120, height: 120)
+                        .blur(radius: 20)
+
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    DesignSystem.Colors.accent.opacity(0.3),
+                                    DesignSystem.Colors.accent.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2
+                        )
+                        .frame(width: 100, height: 100)
+                        .rotationEffect(.degrees(emptyStateIconRotation))
+
+                    Image(systemName: "photo.stack")
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.6)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .onAppear {
+                    withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
+                        emptyStateIconRotation = 360
+                    }
+                }
+
+                VStack(spacing: DesignSystem.Spacing.md) {
+                    Text("Search Your Images")
+                        .font(DesignSystem.Typography.title)
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("Use natural language to find images in your indexed folders")
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 400)
+
+                    // Example queries
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Text("Try searching for:")
+                            .font(DesignSystem.Typography.caption.weight(.medium))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .padding(.top, DesignSystem.Spacing.md)
+
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            ExampleQueryChip(text: "sunset over mountains")
+                            ExampleQueryChip(text: "cat sleeping")
+                            ExampleQueryChip(text: "coffee cup")
+                        }
+                    }
+                }
+            }
+            .padding(DesignSystem.Spacing.xxl)
+
+            Spacer()
+        }
+    }
+    // MARK: - Error View
     private var errorView: some View {
         Group {
             if let error = searchManager.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .padding()
+                HStack(spacing: DesignSystem.Spacing.md) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.error)
+
+                    Text(error)
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Spacer()
+
+                    Button(action: {
+                        searchManager.cancelSearch()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(DesignSystem.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                        .fill(DesignSystem.Colors.error.opacity(0.1))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                        .stroke(DesignSystem.Colors.error.opacity(0.3), lineWidth: 1)
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
-    
+
+    // MARK: - Stats View
     private var statsView: some View {
         Group {
             if let stats = searchManager.searchStats {
-                HStack(spacing: 20) {
-                    VStack(alignment: .leading) {
-                        Text("Search Time")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text(stats.total_time)
-                            .font(.caption)
-                            .bold()
-                    }
-                    
-                    VStack(alignment: .leading) {
-                        Text("Images Searched")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text("\(stats.images_searched)")
-                            .font(.caption)
-                            .bold()
-                    }
-                    
-                    VStack(alignment: .leading) {
-                        Text("Images/Second")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text(stats.images_per_second)
-                            .font(.caption)
-                            .bold()
-                    }
+                HStack(spacing: DesignSystem.Spacing.xl) {
+                    StatItem(
+                        icon: "clock.fill",
+                        label: "Search Time",
+                        value: stats.total_time
+                    )
+
+                    Divider()
+                        .frame(height: 30)
+
+                    StatItem(
+                        icon: "photo.stack.fill",
+                        label: "Images Searched",
+                        value: "\(stats.images_searched)"
+                    )
+
+                    Divider()
+                        .frame(height: 30)
+
+                    StatItem(
+                        icon: "speedometer",
+                        label: "Images/Second",
+                        value: stats.images_per_second
+                    )
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(DesignSystem.Spacing.lg)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                        .fill(colorScheme == .dark ?
+                            DesignSystem.Colors.darkSecondaryBackground :
+                            DesignSystem.Colors.secondaryBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                        .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                )
             }
         }
     }
-    
+
+    // MARK: - Results List
     private var resultsList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Info label
-                HStack(spacing: 4) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundColor(.blue)
-                        .imageScale(.small)
-                    Text("Double click to copy image")
-                        .font(.caption)
-                        .foregroundColor(.blue)
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+            // Header with info and stats
+            if !searchManager.isSearching || !searchManager.results.isEmpty {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                    HStack {
+                        HStack(spacing: DesignSystem.Spacing.xs) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(DesignSystem.Colors.accent)
+                            Text("Double-click any image to copy")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+
+                        Spacer()
+
+                        if !searchManager.results.isEmpty {
+                            HStack(spacing: DesignSystem.Spacing.xs) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+                                Text("\(searchManager.results.count) results")
+                                    .font(DesignSystem.Typography.caption.weight(.medium))
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                            .transition(.opacity)
+                        }
+                    }
+
+                    if SearchPreferences.shared.showStats {
+                        statsView
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-                .padding(.horizontal)
-                
-                if SearchPreferences.shared.showStats {
-                    statsView
-                }
-                
-                let columns = Array(repeating: GridItem(.flexible(), spacing: 12),
-                                  count: SearchPreferences.shared.gridColumns)
-                
-                LazyVGrid(columns: columns, spacing: 12) {
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Grid of results or skeletons
+            let columns = Array(
+                repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
+                count: SearchPreferences.shared.gridColumns
+            )
+
+            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
+                if searchManager.isSearching && searchManager.results.isEmpty {
+                    // Show skeleton loaders while searching
+                    ForEach(0..<12, id: \.self) { _ in
+                        ResultCardSkeleton()
+                    }
+                } else {
+                    // Show actual results
                     ForEach(searchManager.results.filter { result in
                         result.similarity >= SearchPreferences.shared.similarityThreshold
                     }) { result in
                         ResultCardView(result: result)
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.8).combined(with: .opacity),
+                                removal: .scale(scale: 0.9).combined(with: .opacity)
+                            ))
                     }
                 }
-                .padding()
             }
-        }
-    }
-
-    private func resultView(for result: SearchResult) -> some View {
-        @State var showingCopyNotification = false
-        
-        return VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                DoubleClickImageView(filePath: result.path) {
-                    copyImage(path: result.path)
-                    showCopyNotification()
-                }
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipped()
-                
-                CopyNotification(isShowing: $showingCopyNotification)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                    .lineLimit(1)
-                    .font(.caption2)
-                
-                HStack {
-                    Text("Similarity: \(String(format: "%.1f%%", result.similarity * 100))")
-                        .font(.caption2)
-                    Spacer()
-                    Button("Copy") {
-                        copyImage(path: result.path)
-                        showCopyNotification()
-                    }
-                    .font(.caption2)
-                }
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-        }
-        .background(Color(.windowBackgroundColor))
-        .cornerRadius(8)
-        .shadow(radius: 1)
-        
-
-        func showCopyNotification() {
-            showingCopyNotification = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                showingCopyNotification = false
-            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: searchManager.results.count)
+            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: searchManager.isSearching)
         }
     }
     
