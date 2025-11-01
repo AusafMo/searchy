@@ -3,44 +3,80 @@ import AppKit
 import SwiftUI
 import Carbon
 
+// Custom panel that accepts keyboard input
+class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool {
+        return true
+    }
+
+    override var canBecomeMain: Bool {
+        return true
+    }
+
+    override var acceptsFirstResponder: Bool {
+        return true
+    }
+}
+
 class WindowController: NSObject, NSWindowDelegate {
     static let shared = WindowController()
     private var windows: Set<NSWindow> = []
-    
+    weak var appDelegate: AppDelegate?
+
     private override init() {
         super.init()
     }
-    
+
     func createNewWindow() -> NSWindow {
         let contentView = ContentView()
         let hostingView = NSHostingView(rootView: contentView)
-        
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        
+
         window.title = "Searchy"
         window.contentView = hostingView
         window.center()
-        window.setFrameAutosaveName("Main Window")
         window.isReleasedWhenClosed = false
         window.delegate = self
-        
+
         windows.insert(window)
         return window
     }
-    
+
     func removeWindow(_ window: NSWindow) {
         windows.remove(window)
     }
-    
+
     // NSWindowDelegate methods
     func windowWillClose(_ notification: Notification) {
         if let window = notification.object as? NSWindow {
-            removeWindow(window)
+            if window is KeyablePanel {
+                // This is the spotlight window
+                Task { @MainActor in
+                    appDelegate?.clearSpotlightWindow()
+                }
+            } else {
+                // This is a regular window (main or additional)
+                print("🚪 Regular window closing")
+                removeWindow(window)
+            }
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            if window is KeyablePanel {
+                // Spotlight window lost focus, close it
+                window.orderOut(nil)
+                Task { @MainActor in
+                    appDelegate?.clearSpotlightWindow()
+                }
+            }
         }
     }
 }
@@ -51,9 +87,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @MainActor private(set) var serverURL: URL?
     private var assignedPort: Int = 7860
     private var statusItem: NSStatusItem!
-    private var mainWindow: NSWindow?
+    var mainWindow: NSWindow?  // Changed from private to internal so WindowController can access
+    private var spotlightWindow: NSPanel?
+    private var spotlightHostingView: NSHostingView<SpotlightSearchView>?
     private var windowController: WindowController
-    
+
     private var eventHotKey: EventHotKey?
     private struct EventHotKey {
         var id: UInt32
@@ -73,34 +111,72 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         self.windowController = WindowController.shared
         super.init()
         Self._shared = self
+        self.windowController.appDelegate = self
+    }
+
+    @MainActor
+    func clearSpotlightWindow() {
+        spotlightWindow = nil
+        // Keep spotlightHostingView alive for reuse
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        
+        NSApp.setActivationPolicy(.accessory)  // Hide from Dock, no main window by default
+
         // Create status item
-        statusItem = NSStatusBar.system.statusItem(withLength: 24.0)
-        
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "photo.stack",
-                                 accessibilityDescription: "Searchy")?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .regular))
-            
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            
+            // Use a unique icon - tilted photo/image icon
+            if let image = NSImage(systemSymbolName: "photo.on.rectangle.angled",
+                                   accessibilityDescription: "Searchy") {
+                image.isTemplate = true  // Makes it adapt to light/dark mode
+                button.image = image
+                print("✅ Menu bar icon created successfully with 'photo.on.rectangle.angled'")
+            } else {
+                print("❌ Failed to create menu bar icon")
+            }
+
             button.target = self
             button.action = #selector(toggleMainWindow)
+            button.sendAction(on: [.leftMouseUp])  // Ensure click is registered
+            print("✅ Menu bar button action set to toggleMainWindow")
+        } else {
+            print("❌ Failed to create status item button")
         }
-        
-        // Let SwiftUI handle the first window
-        mainWindow = NSApplication.shared.windows.first
-        mainWindow?.setFrameAutosaveName("Main Window")
-        
+
+        print("📍 Status item created: \(statusItem != nil ? "YES" : "NO")")
+
+        // Create main window programmatically - don't rely on SwiftUI WindowGroup
+        createMainWindow()
+
+        print("✅ Main window configured")
+
         Task {
             await startFastAPIServer()
         }
         registerGlobalHotKey()
+    }
+
+    private func createMainWindow() {
+        let contentView = ContentView()
+        let hostingView = NSHostingView(rootView: contentView)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+
+        window.title = "Searchy"
+        window.contentView = hostingView
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.delegate = windowController
+
+        mainWindow = window
+        print("✅ Created main window programmatically")
     }
     
     func applicationWillTerminate(_ notification: Notification) {
@@ -114,13 +190,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     @objc private func toggleMainWindow() {
+        print("🖱️ Menu bar icon clicked - toggleMainWindow called")
+
         if let window = mainWindow {
+            print("📝 Main window exists, isVisible: \(window.isVisible)")
             if window.isVisible {
+                print("🙈 Hiding main window")
                 window.orderOut(nil)
             } else {
+                print("👁️ Showing main window")
+
+                // Set proper window size before showing
+                let frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+                window.setFrame(frame, display: false)
+                window.center()
+
                 window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
+
+                print("✅ Window shown, total windows: \(NSApplication.shared.windows.count)")
             }
+        } else {
+            print("⚠️ Main window is nil!")
         }
     }
     
@@ -133,9 +224,75 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     private func bringAppToFront() {
-        if let window = mainWindow {
-            window.makeKeyAndOrderFront(nil)
+        Task { @MainActor in
+            showSpotlightWindow()
+        }
+    }
+
+    @MainActor
+    private func showSpotlightWindow() {
+        // Capture the currently active app BEFORE we show our window
+        let previousApp = NSWorkspace.shared.runningApplications
+            .first(where: { $0.isActive && $0.bundleIdentifier != Bundle.main.bundleIdentifier })
+
+        if let app = previousApp {
+            print("💾 Captured previous app: \(app.localizedName ?? "Unknown")")
+        } else {
+            print("⚠️ Could not capture previous app")
+        }
+
+        // If window already exists, update it and show it
+        if let existingWindow = spotlightWindow {
+            // Update the view with the new previous app
+            let contentView = SpotlightSearchView(previousApp: previousApp)
+            spotlightHostingView = NSHostingView(rootView: contentView)
+            existingWindow.contentView = spotlightHostingView
+
+            // Reset window size
+            existingWindow.setFrame(NSRect(x: 0, y: 0, width: 650, height: 500), display: false)
+            existingWindow.center()
+            existingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // Create hosting view with the previous app
+        let contentView = SpotlightSearchView(previousApp: previousApp)
+        spotlightHostingView = NSHostingView(rootView: contentView)
+
+        guard let hostingView = spotlightHostingView else { return }
+
+        // Create custom keyable window
+        let window = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 650, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        window.isMovableByWindowBackground = true
+        window.contentView = hostingView
+        window.center()
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.animationBehavior = .alertPanel
+        window.acceptsMouseMovedEvents = true
+        window.hidesOnDeactivate = false
+
+        // Handle window closing
+        window.delegate = windowController
+
+        spotlightWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Force focus with a delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            window.makeKey()
         }
     }
     
@@ -307,20 +464,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 @main
 struct SearchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
+    init() {
+        // Prevent automatic window restoration
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+    }
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-        .defaultSize(width: 1000, height: 1000)
-        .commands {
-            CommandGroup(after: .newItem) {
-                Button("New Window") {
-                    let window = WindowController.shared.createNewWindow()
-                    window.makeKeyAndOrderFront(nil)
-                }
-                .keyboardShortcut("n", modifiers: .command)
-            }
+        // Use Settings instead of WindowGroup to prevent auto-window creation
+        Settings {
+            EmptyView()
         }
     }
 }
