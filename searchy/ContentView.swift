@@ -1809,6 +1809,14 @@ class SearchManager: ObservableObject {
         }
     }
 
+    func clearResults() {
+        DispatchQueue.main.async {
+            self.results = []
+            self.searchStats = nil
+            self.errorMessage = nil
+        }
+    }
+
     func loadRecentImages(completion: @escaping ([SearchResult]) -> Void) {
         Task {
             do {
@@ -1850,6 +1858,7 @@ struct ContentView: View {
     @State private var isIndexing = false
     @State private var indexingProgress = ""
     @State private var isShowingSettings = false
+    @State private var searchDebounceTimer: Timer?
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -1893,6 +1902,14 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
                 .frame(width: 680, height: 760)
+        }
+        .onChange(of: searchManager.results.count) { oldValue, newValue in
+            // Restore focus after results arrive
+            if newValue > 0 && !searchText.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isSearchFocused = true
+                }
+            }
         }
         .onDisappear {
             searchManager.cancelSearch()
@@ -2033,6 +2050,27 @@ struct ContentView: View {
                     if !searchManager.isSearching && !searchText.isEmpty {
                         performSearch()
                     }
+                    // Keep focus after searching
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        isSearchFocused = true
+                    }
+                }
+                .onChange(of: searchText) { oldValue, newValue in
+                    // Cancel previous timer
+                    searchDebounceTimer?.invalidate()
+
+                    // Clear results if search is empty
+                    if newValue.isEmpty {
+                        searchManager.clearResults()
+                        return
+                    }
+
+                    // Debounce: wait 400ms before searching
+                    searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                        if !searchManager.isSearching && !newValue.isEmpty {
+                            performSearch()
+                        }
+                    }
                 }
                 .disabled(searchManager.isSearching || isIndexing)
 
@@ -2125,6 +2163,10 @@ struct ContentView: View {
         )
         .scaleEffect(isSearchFocused ? 1.01 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isSearchFocused = true
+        }
         .padding(.top, DesignSystem.Spacing.xl)
     }
 
