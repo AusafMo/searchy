@@ -84,6 +84,7 @@ class WindowController: NSObject, NSWindowDelegate {
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private static var _shared: AppDelegate?
     private var serverProcess: Process?
+    private var watcherProcess: Process?
     @MainActor private(set) var serverURL: URL?
     private var assignedPort: Int = 7860
     private var statusItem: NSStatusItem!
@@ -139,11 +140,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
             button.target = self
             button.action = #selector(toggleMainWindow)
-            button.sendAction(on: [.leftMouseUp])  // Ensure click is registered
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])  // Handle both left and right clicks
             print("✅ Menu bar button action set to toggleMainWindow")
         } else {
             print("❌ Failed to create status item button")
         }
+
+        // Create menu for right-click
+        createStatusItemMenu()
 
         print("📍 Status item created: \(statusItem != nil ? "YES" : "NO")")
 
@@ -154,8 +158,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         Task {
             await startFastAPIServer()
+            await startImageWatcher()
         }
         registerGlobalHotKey()
+    }
+
+    private func createStatusItemMenu() {
+        let menu = NSMenu()
+
+        menu.addItem(NSMenuItem(title: "Open Searchy", action: #selector(toggleMainWindow), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "About Searchy", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Quit Searchy", action: #selector(quitApp), keyEquivalent: "q"))
+
+        // Store menu but don't set it yet - we'll show it on right-click
+        statusItem.menu = menu
+    }
+
+    @objc private func showAbout() {
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
+            NSApplication.AboutPanelOptionKey.applicationVersion: "3.0",
+            NSApplication.AboutPanelOptionKey.version: "3.0"
+        ])
+    }
+
+    @objc private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func createMainWindow() {
@@ -182,8 +212,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationWillTerminate(_ notification: Notification) {
         Task {
             await stopFastAPIServer()
+            await stopImageWatcher()
         }
-        
+
         if let hotKey = eventHotKey?.ref {
             UnregisterEventHotKey(hotKey)
         }
@@ -434,7 +465,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func waitForServerReady() async throws {
         let maxRetries = 15
         var delay: UInt64 = 3_000_000_000 // 3 seconds
-        
+
         for attempt in 1...maxRetries {
             do {
                 guard let serverURL = await self.serverURL else {
@@ -442,7 +473,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 }
                 let url = serverURL.appendingPathComponent("status")
                 let (_, response) = try await URLSession.shared.data(from: url)
-                
+
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
                         print("Server is ready")
@@ -452,12 +483,60 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             } catch {
                 print("Retry \(attempt): Server not ready. Error: \(error)")
             }
-            
+
             try await Task.sleep(nanoseconds: delay)
             delay *= 2
         }
-        
+
         throw URLError(.cannotConnectToHost)
+    }
+
+    @MainActor
+    private func startImageWatcher() async {
+        let watchDir = NSString(string: "~/Downloads").expandingTildeInPath
+        let dataDir = NSString(string: "~/Library/Application Support/searchy").expandingTildeInPath
+
+        let pythonPath = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
+        let watcherScript = "/Users/ausaf/Desktop/searchy/searchy/image_watcher.py"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [watcherScript, watchDir, dataDir]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        pipe.fileHandleForReading.readabilityHandler = { fileHandle in
+            if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
+                print("Image Watcher: \(output)")
+            }
+        }
+
+        do {
+            try process.run()
+            watcherProcess = process
+            print("✅ Image watcher started - monitoring ~/Downloads for new images")
+        } catch {
+            print("❌ Failed to start image watcher: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func stopImageWatcher() async {
+        guard let watcherProcess = watcherProcess else {
+            return
+        }
+
+        if watcherProcess.isRunning {
+            print("⏹️  Stopping image watcher...")
+            watcherProcess.terminate()
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+
+        watcherProcess.terminationHandler = nil
+        self.watcherProcess = nil
+        print("✅ Image watcher stopped")
     }
 }
 
@@ -474,6 +553,25 @@ struct SearchApp: App {
         // Use Settings instead of WindowGroup to prevent auto-window creation
         Settings {
             EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Searchy") {
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                        NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
+                        NSApplication.AboutPanelOptionKey.applicationVersion: "3.0",
+                        NSApplication.AboutPanelOptionKey.version: "3.0"
+                    ])
+                }
+            }
+
+            CommandGroup(after: .appInfo) {
+                Divider()
+                Button("Quit Searchy") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
         }
     }
 }
