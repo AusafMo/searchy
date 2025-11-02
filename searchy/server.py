@@ -70,12 +70,10 @@ def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application
         if len(image_paths) == 0:
             return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0, "images_per_second": "0"}}
 
-        # Get creation/added times for images directly in Downloads folder only (no subdirectories)
-        downloads_path = os.path.expanduser("~/Downloads")
+        # Get creation/added times for all indexed images
         images_with_time = []
         for path in image_paths:
-            # Only include images directly in Downloads (not in subdirectories)
-            if os.path.exists(path) and os.path.dirname(path) == downloads_path:
+            if os.path.exists(path):
                 try:
                     # Use birthtime (actual creation time on macOS) or fallback to ctime
                     stat_info = os.stat(path)
@@ -90,6 +88,15 @@ def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application
 
         # Take top_k newest
         recent_images = images_with_time[:top_k]
+
+        # Debug: Log directories of recent images
+        import sys
+        from collections import Counter
+        dirs = [os.path.dirname(path) for path, _ in recent_images]
+        dir_counts = Counter(dirs)
+        print(f"📊 Recent images by directory:", file=sys.stderr)
+        for dir_path, count in dir_counts.most_common():
+            print(f"  {dir_path}: {count} images", file=sys.stderr)
 
         # Create results with dummy similarity scores
         results = [{"path": path, "similarity": 1.0} for path, _ in recent_images]

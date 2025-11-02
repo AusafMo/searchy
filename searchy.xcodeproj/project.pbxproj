@@ -28,28 +28,16 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		9A9B37E32EB697CB00E315C7 /* searchy.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = searchy.xcodeproj; sourceTree = "<group>"; };
 		9AF0D5E12CFB9A060018FB8A /* searchy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = searchy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5F22CFB9A070018FB8A /* searchyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5FC2CFB9A070018FB8A /* searchyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D6202CFBA5350018FB8A /* run_search.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = run_search.sh; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		9AF0D6C82CFCE1290018FB8A /* Exceptions for "searchy" folder in "searchy" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 9AF0D5E02CFB9A060018FB8A /* searchy */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9AF0D5E32CFB9A060018FB8A /* searchy */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				9AF0D6C82CFCE1290018FB8A /* Exceptions for "searchy" folder in "searchy" target */,
-			);
 			path = searchy;
 			sourceTree = "<group>";
 		};
@@ -90,6 +78,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		9A9B37E42EB697CB00E315C7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		9AF0D5D82CFB9A060018FB8A = {
 			isa = PBXGroup;
 			children = (
@@ -217,6 +212,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9AF0D5E22CFB9A060018FB8A /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 9A9B37E42EB697CB00E315C7 /* Products */;
+					ProjectRef = 9A9B37E32EB697CB00E315C7 /* searchy.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				9AF0D5E02CFB9A060018FB8A /* searchy */,
