@@ -8,6 +8,101 @@ from transformers import CLIPProcessor, CLIPModel
 import sys
 import json
 
+# Global model cache to avoid reloading
+_model = None
+_processor = None
+
+def get_model_and_processor():
+    """Get or load CLIP model (singleton pattern)"""
+    global _model, _processor
+    if _model is None or _processor is None:
+        model_name = "openai/clip-vit-base-patch32"
+        print(f"Loading {model_name}...", file=sys.stderr)
+        _model = CLIPModel.from_pretrained(model_name, token=False)
+        _processor = CLIPProcessor.from_pretrained(model_name, token=False)
+        print(f"Successfully loaded {model_name}", file=sys.stderr)
+    return _model, _processor
+
+def index_images_with_clip(output_dir, incremental=False, new_files=None):
+    """
+    Index images with CLIP embeddings
+
+    Args:
+        output_dir: Directory to save the index
+        incremental: If True, only index new_files (for auto-indexing)
+        new_files: List of specific files to index (for incremental indexing)
+    """
+    output_file = os.path.join(output_dir, 'image_index.bin')
+
+    # Load existing index
+    existing_embeddings = []
+    existing_paths = []
+    if os.path.exists(output_file):
+        print("Loading existing index...", file=sys.stderr)
+        with open(output_file, 'rb') as f:
+            data = pickle.load(f)
+            existing_embeddings = data['embeddings'].tolist()
+            existing_paths = data['image_paths']
+            print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
+
+    # Get CLIP model
+    model, processor = get_model_and_processor()
+
+    # Process new files
+    embeddings = []
+    valid_paths = []
+
+    for img_path in new_files:
+        if not os.path.exists(img_path):
+            print(f"Skipping non-existent file: {img_path}", file=sys.stderr)
+            continue
+
+        # Skip if already indexed
+        if img_path in existing_paths:
+            print(f"Skipping already indexed: {os.path.basename(img_path)}", file=sys.stderr)
+            continue
+
+        try:
+            print(f"Processing: {os.path.basename(img_path)}", file=sys.stderr)
+            image = Image.open(img_path)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            inputs = processor(images=image, return_tensors="pt")
+            image_features = model.get_image_features(**inputs)
+
+            embedding = image_features.detach().numpy()[0]
+            embedding = embedding / np.linalg.norm(embedding)
+
+            embeddings.append(embedding)
+            valid_paths.append(img_path)
+            print(f"✅ Indexed: {os.path.basename(img_path)}", file=sys.stderr)
+
+        except Exception as e:
+            print(f"❌ Error processing {img_path}: {e}", file=sys.stderr)
+            continue
+
+    if not embeddings:
+        print("No new images to index", file=sys.stderr)
+        return
+
+    # Merge with existing
+    all_embeddings = existing_embeddings + embeddings
+    all_paths = existing_paths + valid_paths
+    all_embeddings = np.array(all_embeddings)
+
+    # Save updated index
+    os.makedirs(output_dir, exist_ok=True)
+    data = {
+        'embeddings': all_embeddings,
+        'image_paths': all_paths
+    }
+
+    with open(output_file, 'wb') as f:
+        pickle.dump(data, f)
+
+    print(f"✅ Index updated: {len(all_paths)} total images (+{len(valid_paths)} new)", file=sys.stderr)
+
 def process_images(image_dir, output_dir):
     try:
         
@@ -23,8 +118,18 @@ def process_images(image_dir, output_dir):
                 print(f"Loaded {len(existing_paths)} existing images")
 
         print("Loading CLIP model...")
-        model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        # Use OpenAI's CLIP model - explicitly disable token auth to avoid credential issues
+        model_name = "openai/clip-vit-base-patch32"
+
+        try:
+            print(f"Loading {model_name}...")
+            # Explicitly set token=False to prevent invalid credential errors
+            model = CLIPModel.from_pretrained(model_name, token=False)
+            processor = CLIPProcessor.from_pretrained(model_name, token=False)
+            print(f"Successfully loaded {model_name}")
+        except Exception as e:
+            print(f"Error loading CLIP model: {e}")
+            raise Exception(f"Could not load CLIP model: {e}")
         
         print("Scanning for images...")
         image_paths = []

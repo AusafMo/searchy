@@ -4,3 +4,6 @@ numpy
 scikit-learn
 torch
 transformers
+watchdog
+fastapi
+uvicorn
