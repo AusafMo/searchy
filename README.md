@@ -76,7 +76,7 @@ Esc          Close
 - Add custom directories with prefix, suffix, or regex filters
 - Incremental updates — only new files get processed
 
-**Beautiful UI**
+**UI**
 - Theme toggle (System/Light/Dark)
 - Glass-morphism design with hover effects
 - Responsive grid with 2-6 columns and adjustable image sizes
