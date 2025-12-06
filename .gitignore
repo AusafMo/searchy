@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+Resources/python_env/
+
+# macOS
+.DS_Store
+*.swp
+
+# Xcode
+build/
+*.xcuserstate
+xcuserdata/
+
+# Project specific
+*.bin
