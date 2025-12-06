@@ -1,163 +1,139 @@
-# Searchy
+<h1 align="center">Searchy</h1>
 
-> Photo management on macOS sucks, so this is my attempt at making it better.
+<p align="center">A semantic image search tool for macOS that uses CLIP to find images through natural language queries.</p>
 
-A lightweight, **Spotlight-style** semantic image search app for macOS. Search your images using natural language powered by CLIP AI.
+<p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b></p>
 
-**Entirely on-device** (except initial model download). Fast, private, and always accessible from your menu bar.
-
-## Demo
 https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
 
-## Features
+---
 
-### Semantic Search
-- **Natural Language Queries** - Search with phrases like "sunset over mountains", "person wearing red", "cat on couch"
-- **Real-time Results** - Results update as you type with 400ms debounce
-- **Similarity Scoring** - Color-coded match percentages (green 80%+, blue 60-80%, yellow <60%)
-- **Configurable Threshold** - Filter results by minimum similarity
+<p align="center">Photo management on macOS sucks. Searchy indexes your images locally and lets you search them using descriptive phrases like <i>"sunset over mountains"</i>, <i>"person wearing red"</i>, or <i>"cat sleeping on couch"</i>. Access it instantly from the menu bar with a global hotkey.</p>
 
-### Spotlight-Style Interface
-- **Global Hotkey** - `⌘ + ⇧ + Space` opens Searchy from anywhere
-- **Floating Window** - Borderless, glass-effect overlay
-- **Instant Actions** - Copy, paste, or reveal images with keyboard shortcuts
-- **Recent Images** - Shows your 8 most recent images on startup
-
-### Auto-Indexing
-- **Watches Directories** - Automatically indexes new images in watched folders
-- **Default Watchers** - ~/Downloads (all images) and ~/Desktop (screenshots only)
-- **Incremental Updates** - Only processes new files, preserves existing index
-- **Configurable Filters** - Filter by prefix, suffix, or custom regex
-
-### Beautiful UI
-- **Theme Toggle** - Switch between System, Light, and Dark themes
-- **Glass-Morphism Design** - Modern transparent materials and gradients
-- **Hover Effects** - 3D rotation and glow effects on image cards
-- **Responsive Grid** - 2-6 columns with adjustable image sizes
-
-### 100% Private
-- **On-Device Processing** - All AI runs locally on your Mac
-- **No Cloud Required** - Works offline after initial model download
-- **GPU Accelerated** - Uses Metal (Apple Silicon) or CUDA when available
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `⌘ + ⇧ + Space` | Open Searchy from anywhere |
-| `⌘ + 1-9` | Copy image and paste instantly |
-| `Ctrl + 1-9` | Copy image to clipboard |
-| `Enter` | Copy and paste selected image |
-| `⌘ + Enter` | Reveal in Finder |
-| `↑ ↓` | Navigate results |
-| `Esc` | Close window |
+---
 
 ## Installation
 
-1. Clone the repository
-   ```bash
-   git clone https://github.com/yourusername/searchy.git
-   cd searchy
-   ```
+```bash
+git clone https://github.com/AusafMo/searchy.git
+cd searchy
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r searchy/requirements.txt
+```
 
-2. Create a Python virtual environment and install dependencies
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r searchy/requirements.txt
-   ```
-
-3. Open `searchy.xcodeproj` in Xcode
-
-4. Build and run (`⌘ + R`)
+Open `searchy.xcodeproj` in Xcode and build (`⌘R`).
 
 On first launch, Searchy will:
-- Download the CLIP model (~350MB one-time download)
+- Download the CLIP model (~1GB, one-time)
 - Start the FastAPI backend server
-- Begin watching ~/Downloads and ~/Desktop for new images
+- Begin monitoring default directories for new images
+
+---
+
+## Keyboard Shortcuts
+
+```
+⌘⇧Space      Open Searchy
+↑ ↓          Navigate results
+Enter        Copy and paste selected image
+⌘Enter       Reveal in Finder
+⌘1-9         Copy and paste by position
+Ctrl+1-9     Copy to clipboard only
+Esc          Close window
+```
+
+---
 
 ## Settings
 
-Access settings via the gear icon in the header:
+Access via the gear icon in the header.
 
-### Display
-- **Grid Columns** - 2 to 6 columns
-- **Image Size** - 100px to 400px thumbnails
-- **Show Statistics** - Display search performance stats
+**Display** — Grid columns (2-6), thumbnail size (100-400px), performance statistics toggle
 
-### Search
-- **Max Results** - 10, 20, 50, or 100 results
-- **Similarity Threshold** - Minimum match percentage (0-100%)
+**Search** — Maximum results (10/20/50/100), minimum similarity threshold (0-100%)
 
-### Indexing
-- **Fast Indexing** - Resize images before processing (recommended)
-- **Max Dimension** - 256, 384, 512, or 768px
-- **Batch Size** - 32, 64, 128, or 256 images per batch
+**Indexing** — Fast indexing mode, maximum image dimension (256-768px), batch size (32-256)
 
-### Watched Directories
-- Add folders to automatically index new images
-- Set filters: All Files, Starts With, Ends With, or Custom Regex
-- Re-index all watched directories with one click
+**Watched Directories** — Configure folders for automatic indexing with optional filename filters
 
-### Paths
-- Configure Python executable, server script, and data directory paths
+**Paths** — Python executable, server script, and data directory locations
+
+---
+
+<h2 align="center">Features</h2>
+
+**Semantic Search**
+- Query images using natural language descriptions
+- Real-time results with 400ms debounce
+- Similarity scores displayed as color-coded percentages
+- Adjustable threshold to filter weak matches
+
+**Spotlight-Style Interface**
+- Global hotkey `⌘⇧Space` summons a floating search window
+- Displays 8 most recently indexed images on launch
+- Fully keyboard-navigable
+
+**Auto-Indexing**
+- Monitors ~/Downloads and ~/Desktop by default
+- Supports custom directories with prefix, suffix, or regex filters
+- Incremental indexing — only processes new files
+
+**Customization**
+- Theme options: System, Light, Dark
+- Adjustable grid layout and thumbnail sizes
+- Hover effects and visual feedback
+
+**Privacy**
+- All processing runs locally on your machine
+- No network requests after initial model download
+- GPU acceleration via Metal (Apple Silicon) or CUDA (NVIDIA)
+
+---
 
 ## Architecture
 
 ```
 searchy/
-├── searchy.xcodeproj     # Xcode project
-├── searchy/
-│   ├── ContentView.swift # Main UI (SwiftUI)
-│   ├── searchyApp.swift  # App lifecycle, server management
-│   ├── server.py         # FastAPI backend
-│   ├── generate_embeddings.py  # CLIP indexing
-│   ├── image_watcher.py  # Auto-indexing daemon
-│   └── requirements.txt  # Python dependencies
-└── README.md
+├── ContentView.swift       # SwiftUI interface
+├── searchyApp.swift        # App lifecycle and server management
+├── server.py               # FastAPI backend
+├── generate_embeddings.py  # CLIP model and embedding generation
+├── image_watcher.py        # File system monitor for auto-indexing
+└── requirements.txt
 ```
 
-**Tech Stack:**
-- **Frontend:** SwiftUI, AppKit
-- **Backend:** FastAPI, Uvicorn
-- **AI Model:** OpenAI CLIP (ViT-B/32)
-- **Storage:** Pickle binary index with numpy embeddings
+**Stack:** SwiftUI + AppKit → FastAPI + Uvicorn → CLIP ViT-B/32 → NumPy embeddings (pickle)
 
-## To-Do
+---
 
-### Planned Features
-- [ ] Duplicate image detection and cleanup
-- [ ] Custom/smaller models (domain-specific for fashion, art, etc.)
-- [ ] Date, size, and file type filters
-- [ ] Hybrid search with image captions
-- [ ] User-defined tags and categories
-- [ ] Model offloading after idle timeout
-- [ ] Bundled app for easy distribution
+## Roadmap
 
-### Completed
 - [x] Spotlight-style floating widget
-- [x] Global hotkey (`⌘ + ⇧ + Space`)
-- [x] Transparent glass UI with theme toggle
+- [x] Global hotkey (`⌘⇧Space`)
+- [x] Theme toggle (System/Light/Dark)
 - [x] Real-time search with debouncing
 - [x] Auto-indexing with file watchers
 - [x] Watched directories with filters
 - [x] Configurable settings panel
-- [x] Menu bar-only app (no Dock icon)
+- [x] Menu bar app (no Dock icon)
 - [x] GPU acceleration (Metal/CUDA)
 - [x] Recent images display
 - [x] Fast indexing with image resizing
+- [ ] Duplicate image detection
+- [ ] Alternative/smaller models
+- [ ] Date, size, and file type filters
+- [ ] Hybrid search with image captions
+- [ ] Bundled .app distribution
 
-## Supported Formats
-
-`.jpg` `.jpeg` `.png` `.gif` `.bmp` `.tiff` `.webp` `.heic`
+---
 
 ## Requirements
 
-- macOS 13.0+
-- Python 3.9+
-- ~1.1GB RAM (when model is loaded)
-- Disk space for index (varies by library size)
+macOS 13+ · Python 3.9+ · ~1.1GB RAM (when model is loaded)
 
-## License
+**Supported formats:** jpg, jpeg, png, gif, bmp, tiff, webp, heic
 
-MIT
+---
+
+MIT License
