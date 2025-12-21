@@ -84,7 +84,7 @@ class WindowController: NSObject, NSWindowDelegate {
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private static var _shared: AppDelegate?
     private var serverProcess: Process?
-    private var watcherProcess: Process?
+    private var watcherProcesses: [Process] = []
     @MainActor private(set) var serverURL: URL?
     private var assignedPort: Int = 7860
     private var statusItem: NSStatusItem!
@@ -493,50 +493,89 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @MainActor
     private func startImageWatcher() async {
-        let watchDir = NSString(string: "~/Downloads").expandingTildeInPath
-        let dataDir = NSString(string: "~/Library/Application Support/searchy").expandingTildeInPath
+        let config = AppConfig.shared
+        let indexingSettings = IndexingSettings.shared
+        let dirManager = DirectoryManager.shared
+        let dataDir = config.baseDirectory
 
-        let pythonPath = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
+        let pythonPath = config.pythonExecutablePath
         let watcherScript = "/Users/ausaf/Desktop/searchy/searchy/image_watcher.py"
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = [watcherScript, watchDir, dataDir]
+        // Start a watcher for each watched directory
+        for directory in dirManager.watchedDirectories {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: pythonPath)
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+            // Build arguments with all settings
+            var arguments = [
+                watcherScript,
+                directory.path,
+                dataDir,
+                "--max-dimension", String(indexingSettings.maxDimension),
+                "--batch-size", String(indexingSettings.batchSize)
+            ]
 
-        pipe.fileHandleForReading.readabilityHandler = { fileHandle in
-            if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
-                print("Image Watcher: \(output)")
+            // Add fast indexing flag
+            if indexingSettings.enableFastIndexing {
+                arguments.append("--fast")
+            } else {
+                arguments.append("--no-fast")
+            }
+
+            // Add filter if set
+            if !directory.filter.isEmpty && directory.filterType != .all {
+                let filterTypeArg = directory.filterType.rawValue.lowercased().replacingOccurrences(of: " ", with: "-")
+                arguments.append(contentsOf: ["--filter-type", filterTypeArg, "--filter", directory.filter])
+            }
+
+            process.arguments = arguments
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            let dirName = directory.path.components(separatedBy: "/").last ?? directory.path
+            pipe.fileHandleForReading.readabilityHandler = { fileHandle in
+                if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
+                    print("[\(dirName)] \(output)")
+                }
+            }
+
+            do {
+                try process.run()
+                watcherProcesses.append(process)
+                let filterInfo = directory.filterDescription ?? "all files"
+                print("✅ Image watcher started for \(dirName) (\(filterInfo))")
+            } catch {
+                print("❌ Failed to start watcher for \(dirName): \(error.localizedDescription)")
             }
         }
 
-        do {
-            try process.run()
-            watcherProcess = process
-            print("✅ Image watcher started - monitoring ~/Downloads for new images")
-        } catch {
-            print("❌ Failed to start image watcher: \(error.localizedDescription)")
+        if watcherProcesses.isEmpty {
+            print("⚠️ No image watchers started - check watched directories in Settings")
+        } else {
+            print("✅ Started \(watcherProcesses.count) image watcher(s)")
         }
     }
 
     @MainActor
     private func stopImageWatcher() async {
-        guard let watcherProcess = watcherProcess else {
+        guard !watcherProcesses.isEmpty else {
             return
         }
 
-        if watcherProcess.isRunning {
-            print("⏹️  Stopping image watcher...")
-            watcherProcess.terminate()
-            try? await Task.sleep(nanoseconds: 500_000_000)
+        print("⏹️  Stopping \(watcherProcesses.count) image watcher(s)...")
+
+        for process in watcherProcesses {
+            if process.isRunning {
+                process.terminate()
+            }
+            process.terminationHandler = nil
         }
 
-        watcherProcess.terminationHandler = nil
-        self.watcherProcess = nil
-        print("✅ Image watcher stopped")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        watcherProcesses.removeAll()
+        print("✅ All image watchers stopped")
     }
 }
 
