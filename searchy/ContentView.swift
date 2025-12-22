@@ -83,11 +83,19 @@ struct DesignSystem {
 }
 
 struct Constants {
-    static let baseDirectory: String = "/Users/ausaf/Library/Application Support/searchy"
+    static var baseDirectory: String {
+        SetupManager.shared.appSupportPath
+    }
     static let defaultPort: Int = 7860
-    static let pythonExecutablePath: String = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
-    static let serverScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/server.py"
-    static let embeddingScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
+    static var pythonExecutablePath: String {
+        SetupManager.shared.venvPythonPath
+    }
+    static var serverScriptPath: String {
+        Bundle.main.path(forResource: "server", ofType: "py") ?? ""
+    }
+    static var embeddingScriptPath: String {
+        Bundle.main.path(forResource: "generate_embeddings", ofType: "py") ?? ""
+    }
 }
 
 class AppConfig: ObservableObject {
@@ -144,27 +152,27 @@ class AppConfig: ObservableObject {
 
 class SearchPreferences: ObservableObject {
     static let shared = SearchPreferences()
-    
+
     @Published var numberOfResults: Int {
         didSet { UserDefaults.standard.set(numberOfResults, forKey: "numberOfResults") }
     }
-    
+
     @Published var gridColumns: Int {
         didSet { UserDefaults.standard.set(gridColumns, forKey: "gridColumns") }
     }
-    
+
     @Published var showStats: Bool {
         didSet { UserDefaults.standard.set(showStats, forKey: "showStats") }
     }
-    
+
     @Published var imageSize: Float {
         didSet { UserDefaults.standard.set(imageSize, forKey: "imageSize") }
     }
-    
+
     @Published var similarityThreshold: Float {
         didSet { UserDefaults.standard.set(similarityThreshold, forKey: "similarityThreshold") }
     }
-    
+
     private init() {
         self.numberOfResults = UserDefaults.standard.integer(forKey: "numberOfResults") != 0 ?
             UserDefaults.standard.integer(forKey: "numberOfResults") : 20
@@ -175,6 +183,107 @@ class SearchPreferences: ObservableObject {
             UserDefaults.standard.float(forKey: "imageSize") : 250
         self.similarityThreshold = UserDefaults.standard.float(forKey: "similarityThreshold") != 0 ?
             UserDefaults.standard.float(forKey: "similarityThreshold") : 0.5
+    }
+}
+
+// MARK: - Indexing Settings
+class IndexingSettings: ObservableObject {
+    static let shared = IndexingSettings()
+
+    @Published var enableFastIndexing: Bool {
+        didSet { UserDefaults.standard.set(enableFastIndexing, forKey: "enableFastIndexing") }
+    }
+
+    @Published var maxDimension: Int {
+        didSet { UserDefaults.standard.set(maxDimension, forKey: "maxDimension") }
+    }
+
+    @Published var batchSize: Int {
+        didSet { UserDefaults.standard.set(batchSize, forKey: "batchSize") }
+    }
+
+    private init() {
+        self.enableFastIndexing = UserDefaults.standard.object(forKey: "enableFastIndexing") as? Bool ?? true
+        self.maxDimension = UserDefaults.standard.integer(forKey: "maxDimension") != 0 ?
+            UserDefaults.standard.integer(forKey: "maxDimension") : 384
+        self.batchSize = UserDefaults.standard.integer(forKey: "batchSize") != 0 ?
+            UserDefaults.standard.integer(forKey: "batchSize") : 64
+    }
+}
+
+// MARK: - Watched Directory Model
+struct WatchedDirectory: Identifiable, Codable, Equatable {
+    var id: UUID
+    var path: String
+    var filter: String
+    var filterType: FilterType
+
+    enum FilterType: String, Codable, CaseIterable {
+        case all = "All Files"
+        case startsWith = "Starts With"
+        case endsWith = "Ends With"
+        case contains = "Contains"
+        case regex = "Regex"
+    }
+
+    init(id: UUID = UUID(), path: String, filter: String = "", filterType: FilterType = .all) {
+        self.id = id
+        self.path = path
+        self.filter = filter
+        self.filterType = filterType
+    }
+
+    var displayPath: String {
+        (path as NSString).abbreviatingWithTildeInPath
+    }
+
+    var filterDescription: String? {
+        guard !filter.isEmpty && filterType != .all else { return nil }
+        return "\(filterType.rawValue): \(filter)"
+    }
+}
+
+// MARK: - Directory Manager
+class DirectoryManager: ObservableObject {
+    static let shared = DirectoryManager()
+
+    @Published var watchedDirectories: [WatchedDirectory] {
+        didSet { saveDirectories() }
+    }
+
+    private let userDefaultsKey = "watchedDirectories"
+
+    private init() {
+        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+           let directories = try? JSONDecoder().decode([WatchedDirectory].self, from: data) {
+            self.watchedDirectories = directories
+        } else {
+            // Default directories
+            self.watchedDirectories = [
+                WatchedDirectory(path: NSString(string: "~/Downloads").expandingTildeInPath),
+                WatchedDirectory(path: NSString(string: "~/Desktop").expandingTildeInPath, filter: "Screenshot", filterType: .startsWith)
+            ]
+        }
+    }
+
+    private func saveDirectories() {
+        if let data = try? JSONEncoder().encode(watchedDirectories) {
+            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        }
+    }
+
+    func addDirectory(_ directory: WatchedDirectory) {
+        watchedDirectories.append(directory)
+    }
+
+    func removeDirectory(_ directory: WatchedDirectory) {
+        watchedDirectories.removeAll { $0.id == directory.id }
+    }
+
+    func updateDirectory(_ directory: WatchedDirectory) {
+        if let index = watchedDirectories.firstIndex(where: { $0.id == directory.id }) {
+            watchedDirectories[index] = directory
+        }
     }
 }
 
@@ -294,13 +403,206 @@ struct SettingsGroup<Content: View>: View {
     }
 }
 
+// MARK: - Watched Directory Row
+struct WatchedDirectoryRow: View {
+    let directory: WatchedDirectory
+    let onDelete: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            Image(systemName: "folder.fill")
+                .foregroundColor(DesignSystem.Colors.accent)
+                .font(.system(size: 16))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(directory.path.components(separatedBy: "/").last ?? directory.path)
+                    .font(DesignSystem.Typography.body.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                Text(directory.displayPath)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                if let filterDesc = directory.filterDescription {
+                    Text(filterDesc)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.success)
+                }
+            }
+
+            Spacer()
+
+            Button(action: onDelete) {
+                Image(systemName: "trash.fill")
+                    .foregroundColor(DesignSystem.Colors.error)
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .fill(colorScheme == .dark ?
+                    DesignSystem.Colors.darkTertiaryBackground :
+                    DesignSystem.Colors.tertiaryBackground)
+        )
+    }
+}
+
+// MARK: - Add Directory Sheet
+struct AddDirectorySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) var colorScheme
+    @ObservedObject var dirManager = DirectoryManager.shared
+
+    @State private var selectedPath: String = ""
+    @State private var filter: String = ""
+    @State private var filterType: WatchedDirectory.FilterType = .all
+    @State private var isShowingFolderPicker = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Add Directory")
+                    .font(DesignSystem.Typography.title)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            .padding(DesignSystem.Spacing.xl)
+            .background(colorScheme == .dark ?
+                DesignSystem.Colors.darkSecondaryBackground :
+                DesignSystem.Colors.secondaryBackground)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
+                    // Directory Selection
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Label("Directory", systemImage: "folder")
+                            .font(DesignSystem.Typography.callout.weight(.medium))
+
+                        HStack {
+                            Text(selectedPath.isEmpty ? "Select a directory..." : selectedPath)
+                                .font(DesignSystem.Typography.body)
+                                .foregroundColor(selectedPath.isEmpty ?
+                                    DesignSystem.Colors.secondaryText :
+                                    DesignSystem.Colors.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(DesignSystem.Spacing.md)
+                                .background(
+                                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                        .fill(colorScheme == .dark ?
+                                            DesignSystem.Colors.darkTertiaryBackground :
+                                            DesignSystem.Colors.tertiaryBackground)
+                                )
+
+                            Button("Browse") {
+                                isShowingFolderPicker = true
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+
+                    // Filter Type
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                        Label("Filter Type", systemImage: "line.3.horizontal.decrease.circle")
+                            .font(DesignSystem.Typography.callout.weight(.medium))
+
+                        Picker("", selection: $filterType) {
+                            ForEach(WatchedDirectory.FilterType.allCases, id: \.self) { type in
+                                Text(type.rawValue).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    // Filter Value (if not "All Files")
+                    if filterType != .all {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                            Label("Filter Value", systemImage: "text.magnifyingglass")
+                                .font(DesignSystem.Typography.callout.weight(.medium))
+
+                            TextField("e.g., Screenshot", text: $filter)
+                                .textFieldStyle(.roundedBorder)
+
+                            Text(filterHelpText)
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                    }
+
+                    // Add Button
+                    Button(action: addDirectory) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Directory")
+                        }
+                        .font(DesignSystem.Typography.body.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(selectedPath.isEmpty ?
+                                    DesignSystem.Colors.accent.opacity(0.5) :
+                                    DesignSystem.Colors.accent)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(selectedPath.isEmpty)
+                }
+                .padding(DesignSystem.Spacing.xl)
+            }
+        }
+        .frame(width: 450, height: 400)
+        .background(colorScheme == .dark ?
+            DesignSystem.Colors.darkPrimaryBackground :
+            DesignSystem.Colors.primaryBackground)
+        .fileImporter(isPresented: $isShowingFolderPicker, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result {
+                selectedPath = url.path
+            }
+        }
+    }
+
+    private var filterHelpText: String {
+        switch filterType {
+        case .all: return ""
+        case .startsWith: return "Only index files whose names start with this text"
+        case .endsWith: return "Only index files whose names end with this text"
+        case .contains: return "Only index files whose names contain this text"
+        case .regex: return "Only index files matching this regular expression"
+        }
+    }
+
+    private func addDirectory() {
+        guard !selectedPath.isEmpty else { return }
+        let newDir = WatchedDirectory(
+            path: selectedPath,
+            filter: filterType == .all ? "" : filter,
+            filterType: filterType
+        )
+        dirManager.addDirectory(newDir)
+        dismiss()
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject private var config = AppConfig.shared
     @ObservedObject private var prefs = SearchPreferences.shared
+    @ObservedObject private var indexingSettings = IndexingSettings.shared
+    @ObservedObject private var dirManager = DirectoryManager.shared
     @State private var isShowingPythonPicker = false
     @State private var isShowingServerScriptPicker = false
     @State private var isShowingEmbeddingScriptPicker = false
     @State private var isShowingBaseDirectoryPicker = false
+    @State private var isShowingAddDirectorySheet = false
+    @State private var isReindexing = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
 
@@ -415,7 +717,7 @@ struct SettingsView: View {
                                 }
                                 .frame(width: 100)
                             }
-                            
+
                             // Similarity threshold
                             VStack(alignment: .leading, spacing: 6) {
                                 Label("Minimum Similarity", systemImage: "slider.horizontal.3")
@@ -429,7 +731,181 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    
+
+                    // Indexing Settings Section
+                    SettingsSection(title: "Indexing", icon: "square.stack.3d.up") {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+                            // Fast Indexing toggle
+                            VStack(alignment: .leading, spacing: 4) {
+                                Toggle(isOn: $indexingSettings.enableFastIndexing) {
+                                    HStack(spacing: DesignSystem.Spacing.sm) {
+                                        Image(systemName: "bolt.fill")
+                                            .foregroundColor(.yellow)
+                                        Text("Fast Indexing")
+                                            .font(DesignSystem.Typography.body)
+                                    }
+                                }
+                                .toggleStyle(.checkbox)
+                                Text("Resize large images before processing (recommended)")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .padding(.leading, 24)
+                            }
+
+                            Divider()
+
+                            // Max Dimension
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    HStack(spacing: DesignSystem.Spacing.sm) {
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                            .foregroundColor(DesignSystem.Colors.accent)
+                                        Text("Max Dimension")
+                                    }
+                                    Spacer()
+                                    HStack(spacing: 4) {
+                                        TextField("", value: $indexingSettings.maxDimension, formatter: NumberFormatter())
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 60)
+                                            .multilineTextAlignment(.center)
+                                        Text("px")
+                                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                                        Stepper("", value: $indexingSettings.maxDimension, in: 256...768, step: 128)
+                                            .labelsHidden()
+                                    }
+                                }
+                                Text("Larger values = slower indexing, potentially better accuracy")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+
+                            Divider()
+
+                            // Batch Size
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    HStack(spacing: DesignSystem.Spacing.sm) {
+                                        Image(systemName: "square.stack.3d.up.fill")
+                                            .foregroundColor(DesignSystem.Colors.accent)
+                                        Text("Batch Size")
+                                    }
+                                    Spacer()
+                                    HStack(spacing: 4) {
+                                        TextField("", value: $indexingSettings.batchSize, formatter: NumberFormatter())
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 60)
+                                            .multilineTextAlignment(.center)
+                                        Stepper("", value: $indexingSettings.batchSize, in: 32...256, step: 32)
+                                            .labelsHidden()
+                                    }
+                                }
+                                Text("Images processed at once. Higher = faster but more memory")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                        }
+                        .padding(DesignSystem.Spacing.lg)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                                .fill(colorScheme == .dark ?
+                                    DesignSystem.Colors.darkSecondaryBackground :
+                                    DesignSystem.Colors.secondaryBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                        )
+                    }
+
+                    // Watched Directories Section
+                    SettingsSection(title: "Watched Directories", icon: "eye") {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                            Text("Manage directories that are automatically monitored for new images")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                            // Directory List
+                            VStack(spacing: DesignSystem.Spacing.sm) {
+                                ForEach(dirManager.watchedDirectories) { directory in
+                                    WatchedDirectoryRow(directory: directory, onDelete: {
+                                        dirManager.removeDirectory(directory)
+                                    })
+                                }
+                            }
+
+                            // Action Buttons
+                            HStack(spacing: DesignSystem.Spacing.md) {
+                                // Re-index All Button
+                                Button(action: {
+                                    performReindex()
+                                }) {
+                                    HStack(spacing: DesignSystem.Spacing.sm) {
+                                        if isReindexing {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                                .tint(.white)
+                                        } else {
+                                            Image(systemName: "arrow.clockwise")
+                                        }
+                                        Text("Re-index All")
+                                    }
+                                    .font(DesignSystem.Typography.callout.weight(.medium))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, DesignSystem.Spacing.md)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(isReindexing)
+
+                                // Add Directory Button
+                                Button(action: {
+                                    isShowingAddDirectorySheet = true
+                                }) {
+                                    HStack(spacing: DesignSystem.Spacing.sm) {
+                                        Image(systemName: "plus.circle.fill")
+                                        Text("Add Directory")
+                                    }
+                                    .font(DesignSystem.Typography.callout.weight(.medium))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, DesignSystem.Spacing.md)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(DesignSystem.Spacing.lg)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                                .fill(colorScheme == .dark ?
+                                    DesignSystem.Colors.darkSecondaryBackground :
+                                    DesignSystem.Colors.secondaryBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                        )
+                    }
+
                     // Server Settings Section
                     SettingsSection(title: "Server", icon: "server.rack") {
                         SettingsGroup(title: "Configuration") {
@@ -517,7 +993,7 @@ struct SettingsView: View {
             }
             }
         }
-        .frame(width: 680, height: 760)
+        .frame(width: 680, height: 860)
         .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.pythonExecutablePath = url.path
@@ -536,6 +1012,63 @@ struct SettingsView: View {
         .fileImporter(isPresented: $isShowingBaseDirectoryPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.baseDirectory = url.path
+            }
+        }
+        .sheet(isPresented: $isShowingAddDirectorySheet) {
+            AddDirectorySheet()
+        }
+    }
+
+    // MARK: - Re-index Function
+    private func performReindex() {
+        isReindexing = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let config = AppConfig.shared
+            let indexingSettings = IndexingSettings.shared
+
+            // Delete existing index
+            let indexPath = "\(config.baseDirectory)/image_index.pkl"
+            try? FileManager.default.removeItem(atPath: indexPath)
+
+            // Re-index all watched directories
+            for directory in dirManager.watchedDirectories {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
+                process.arguments = [
+                    config.embeddingScriptPath,
+                    directory.path,
+                    "--max-dimension", String(indexingSettings.maxDimension),
+                    "--batch-size", String(indexingSettings.batchSize)
+                ]
+
+                if indexingSettings.enableFastIndexing {
+                    process.arguments?.append("--fast")
+                }
+
+                // Add filter arguments if applicable
+                if !directory.filter.isEmpty && directory.filterType != .all {
+                    process.arguments?.append("--filter-type")
+                    process.arguments?.append(directory.filterType.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))
+                    process.arguments?.append("--filter")
+                    process.arguments?.append(directory.filter)
+                }
+
+                process.environment = [
+                    "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
+                    "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+                ]
+
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                } catch {
+                    print("Error re-indexing \(directory.path): \(error)")
+                }
+            }
+
+            DispatchQueue.main.async {
+                isReindexing = false
             }
         }
     }
@@ -956,6 +1489,26 @@ struct SpotlightSearchView: View {
             loadRecentImages()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
+            }
+        }
+        .onChange(of: searchManager.isSearching) { _, _ in
+            // Always restore focus on any search state change
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isSearchFocused = true
+            }
+        }
+        .onChange(of: searchManager.results.count) { _, _ in
+            // Restore focus after results change
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isSearchFocused = true
+            }
+        }
+        .onChange(of: isSearchFocused) { _, newValue in
+            // If focus is lost, restore it
+            if !newValue {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    isSearchFocused = true
+                }
             }
         }
         .onKeyPress(.escape) {
@@ -1616,6 +2169,152 @@ struct ResultCardView: View {
     }
 }
 
+// MARK: - Recent Image Card
+struct RecentImageCard: View {
+    let result: SearchResult
+    @State private var showingCopyNotification = false
+    @State private var isHovered = false
+    @State private var isPressed = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Image container
+            ZStack(alignment: .center) {
+                if let image = NSImage(contentsOfFile: result.path) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 150, height: 150)
+                        .clipped()
+                } else {
+                    Rectangle()
+                        .fill(colorScheme == .dark ?
+                            DesignSystem.Colors.darkTertiaryBackground :
+                            DesignSystem.Colors.tertiaryBackground)
+                        .frame(width: 150, height: 150)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 32))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        )
+                }
+
+                // Hover overlay
+                if isHovered {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.3))
+                        .overlay(
+                            VStack(spacing: DesignSystem.Spacing.sm) {
+                                Button(action: {
+                                    copyImage(path: result.path)
+                                    showCopyNotification()
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "doc.on.doc.fill")
+                                        Text("Copy")
+                                    }
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(DesignSystem.Colors.accent))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
+                                Button(action: {
+                                    NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+                                }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "folder.fill")
+                                        Text("Reveal")
+                                    }
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.white.opacity(0.3)))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        )
+                        .transition(.opacity)
+                }
+
+                // Copy notification
+                if showingCopyNotification {
+                    CopyNotification(isShowing: $showingCopyNotification)
+                        .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .scaleEffect(isPressed ? 0.95 : 1.0)
+
+            // Filename
+            Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                .lineLimit(1)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(DesignSystem.Colors.primaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .stroke(
+                    isHovered ?
+                        DesignSystem.Colors.accent.opacity(0.5) :
+                        DesignSystem.Colors.border,
+                    lineWidth: isHovered ? 1.5 : 1
+                )
+        )
+        .shadow(
+            color: isHovered ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
+            radius: isHovered ? 12 : 4,
+            x: 0,
+            y: isHovered ? 6 : 2
+        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                isHovered = hovering
+            }
+        }
+        .onTapGesture(count: 2) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                isPressed = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    isPressed = false
+                }
+            }
+            copyImage(path: result.path)
+            showCopyNotification()
+        }
+    }
+
+    private func showCopyNotification() {
+        showingCopyNotification = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showingCopyNotification = false
+        }
+    }
+
+    private func copyImage(path: String) {
+        if let image = NSImage(contentsOfFile: path) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+        }
+    }
+}
+
 struct DoubleClickImageView: View {
     let filePath: String
     let onDoubleClick: () -> Void
@@ -1727,13 +2426,10 @@ class SearchManager: ObservableObject {
 
     private init() {}
 
-    private var serverURL: URL {
+    private var serverURL: URL? {
         get async {
             let delegate = await AppDelegate.shared
-            guard let url = await delegate.serverURL else {
-                fatalError("Server URL is not initialized")
-            }
-            return url
+            return await delegate.serverURL
         }
     }
     
@@ -1768,7 +2464,9 @@ class SearchManager: ObservableObject {
     }
     
     private func performSearch(query: String, numberOfResults: Int) async throws -> SearchResponse {
-        let serverURL = await self.serverURL
+        guard let serverURL = await self.serverURL else {
+            throw NSError(domain: "Server not ready", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server is still starting up. Please wait a moment."])
+        }
         let url = serverURL.appendingPathComponent("search")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -1820,7 +2518,13 @@ class SearchManager: ObservableObject {
     func loadRecentImages(completion: @escaping ([SearchResult]) -> Void) {
         Task {
             do {
-                let serverURL = await self.serverURL
+                guard let serverURL = await self.serverURL else {
+                    // Server not ready yet, return empty
+                    DispatchQueue.main.async {
+                        completion([])
+                    }
+                    return
+                }
                 let url = serverURL.appendingPathComponent("recent")
                 var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
                 components.queryItems = [
@@ -1859,6 +2563,8 @@ struct ContentView: View {
     @State private var indexingProgress = ""
     @State private var isShowingSettings = false
     @State private var searchDebounceTimer: Timer?
+    @State private var recentImages: [SearchResult] = []
+    @State private var isLoadingRecent = false
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -1886,15 +2592,31 @@ struct ContentView: View {
                     modernSearchBar
                     errorView
 
-                    // Results area
-                    if searchManager.results.isEmpty && searchText.isEmpty && !searchManager.isSearching {
-                        emptyStateView
-                    } else {
-                        ScrollView {
-                            resultsList
-                                .padding(DesignSystem.Spacing.xl)
+                    // Results area - wrapped in Group with consistent frame to prevent layout shifts
+                    Group {
+                        if searchManager.isSearching {
+                            VStack(spacing: DesignSystem.Spacing.md) {
+                                Spacer()
+                                ProgressView()
+                                    .scaleEffect(1.2)
+                                Text("Searching...")
+                                    .font(DesignSystem.Typography.callout)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                Spacer()
+                            }
+                        } else if !searchManager.results.isEmpty {
+                            ScrollView {
+                                resultsList
+                                    .padding(DesignSystem.Spacing.xl)
+                            }
+                        } else if searchText.isEmpty {
+                            // Show recent images section
+                            recentImagesSection
+                        } else {
+                            emptyStateView
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding(.horizontal, DesignSystem.Spacing.xl)
             }
@@ -1903,12 +2625,11 @@ struct ContentView: View {
             SettingsView()
                 .frame(width: 680, height: 760)
         }
-        .onChange(of: searchManager.results.count) { oldValue, newValue in
-            // Restore focus after results arrive
-            if newValue > 0 && !searchText.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isSearchFocused = true
-                }
+        .onAppear {
+            loadRecentImages()
+            // Focus the search field on appear
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isSearchFocused = true
             }
         }
         .onDisappear {
@@ -2000,6 +2721,17 @@ struct ContentView: View {
                 }
 
                 ModernButton(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: "Replace Index",
+                    style: .secondary,
+                    isDisabled: isIndexing
+                ) {
+                    if !isIndexing {
+                        selectAndReplaceIndex()
+                    }
+                }
+
+                ModernButton(
                     icon: "gearshape.fill",
                     title: nil,
                     style: .tertiary,
@@ -2072,7 +2804,6 @@ struct ContentView: View {
                         }
                     }
                 }
-                .disabled(searchManager.isSearching || isIndexing)
 
             if !searchText.isEmpty {
                 Button(action: {
@@ -2277,6 +3008,93 @@ struct ContentView: View {
             Spacer()
         }
     }
+
+    // MARK: - Recent Images Section
+    private var recentImagesSection: some View {
+        VStack(spacing: DesignSystem.Spacing.md) {
+            // Header with title and refresh button
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent Images")
+                        .font(DesignSystem.Typography.title2)
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("8 most recent images from your indexed folders")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                Button(action: {
+                    loadRecentImages()
+                }) {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
+                        if isLoadingRecent {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text("Refresh")
+                    }
+                    .font(DesignSystem.Typography.callout.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                            .fill(DesignSystem.Colors.accent.opacity(0.1))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isLoadingRecent)
+            }
+            .padding(.horizontal, DesignSystem.Spacing.md)
+
+            // Recent images grid - use frame to prevent layout shifts
+            Group {
+                if isLoadingRecent && recentImages.isEmpty {
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        Spacer()
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading recent images...")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Spacer()
+                    }
+                } else if recentImages.isEmpty {
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        Spacer()
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 48, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text("No recent images")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Text("Index a folder to see recent images here")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Spacer()
+                    }
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 150, maximum: 200), spacing: DesignSystem.Spacing.md)
+                        ], spacing: DesignSystem.Spacing.md) {
+                            ForEach(recentImages.prefix(8)) { result in
+                                RecentImageCard(result: result)
+                            }
+                        }
+                        .padding(DesignSystem.Spacing.md)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
     // MARK: - Error View
     private var errorView: some View {
         Group {
@@ -2499,6 +3317,101 @@ struct ContentView: View {
         }
     }
 
+    private func selectAndReplaceIndex() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.message = "Select a folder to replace the current index"
+        panel.prompt = "Replace Index"
+
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                replaceAndIndexFolder(url)
+            }
+        }
+    }
+
+    private func replaceAndIndexFolder(_ url: URL) {
+        print("Replacing index with folder: \(url.path)")
+        isIndexing = true
+        indexingProgress = "Clearing existing index..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let config = AppConfig.shared
+
+            // Delete existing index files
+            let indexPath = "\(config.baseDirectory)/image_index.bin"
+            let indexPklPath = "\(config.baseDirectory)/image_index.pkl"
+            try? FileManager.default.removeItem(atPath: indexPath)
+            try? FileManager.default.removeItem(atPath: indexPklPath)
+
+            DispatchQueue.main.async {
+                self.indexingProgress = "Starting fresh index..."
+            }
+
+            // Now index the new folder
+            let process = Process()
+            let pipe = Pipe()
+
+            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
+            process.arguments = [config.embeddingScriptPath, url.path]
+
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            process.environment = [
+                "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
+                "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONUNBUFFERED": "1"
+            ]
+
+            do {
+                try process.run()
+
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if !data.isEmpty {
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("Received output: \(output)")
+                            DispatchQueue.main.async {
+                                self.indexingProgress = output
+                            }
+                        }
+                    }
+                }
+
+                process.terminationHandler = { _ in
+                    DispatchQueue.main.async {
+                        self.isIndexing = false
+                        self.indexingProgress = ""
+                        // Reload recent images after re-indexing
+                        self.loadRecentImages()
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isIndexing = false
+                    self.indexingProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func loadRecentImages(retryCount: Int = 0) {
+        isLoadingRecent = true
+        searchManager.loadRecentImages { images in
+            if images.isEmpty && retryCount < 3 {
+                // Server might not be ready, retry after delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.loadRecentImages(retryCount: retryCount + 1)
+                }
+            } else {
+                self.recentImages = images
+                self.isLoadingRecent = false
+            }
+        }
+    }
 
     private func copyImage(path: String) {
         if let image = NSImage(contentsOfFile: path) {
