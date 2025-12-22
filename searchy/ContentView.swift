@@ -83,11 +83,19 @@ struct DesignSystem {
 }
 
 struct Constants {
-    static let baseDirectory: String = "/Users/ausaf/Library/Application Support/searchy"
+    static var baseDirectory: String {
+        SetupManager.shared.appSupportPath
+    }
     static let defaultPort: Int = 7860
-    static let pythonExecutablePath: String = "/Users/ausaf/Desktop/searchy/.venv/bin/python3"
-    static let serverScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/server.py"
-    static let embeddingScriptPath: String = "/Users/ausaf/Desktop/searchy/searchy/generate_embeddings.py"
+    static var pythonExecutablePath: String {
+        SetupManager.shared.venvPythonPath
+    }
+    static var serverScriptPath: String {
+        Bundle.main.path(forResource: "server", ofType: "py") ?? ""
+    }
+    static var embeddingScriptPath: String {
+        Bundle.main.path(forResource: "generate_embeddings", ofType: "py") ?? ""
+    }
 }
 
 class AppConfig: ObservableObject {
