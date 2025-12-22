@@ -999,7 +999,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = [serverScript, "--port", "\(assignedPort)"]
-        
+
+        // Set PYTHONPATH to include the Resources directory so imports work
+        let resourcesPath = Bundle.main.resourcePath ?? ""
+        process.environment = [
+            "PYTHONPATH": resourcesPath,
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        ]
+        process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
+
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -1121,6 +1129,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
 
             process.arguments = arguments
+
+            // Set PYTHONPATH to include the Resources directory so imports work
+            let resourcesPath = Bundle.main.resourcePath ?? ""
+            process.environment = [
+                "PYTHONPATH": resourcesPath,
+                "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+            ]
+            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
 
             let pipe = Pipe()
             process.standardOutput = pipe

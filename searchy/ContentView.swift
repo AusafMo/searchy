@@ -1054,10 +1054,12 @@ struct SettingsView: View {
                     process.arguments?.append(directory.filter)
                 }
 
+                let resourcesPath = Bundle.main.resourcePath ?? ""
                 process.environment = [
-                    "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
-                    "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+                    "PYTHONPATH": resourcesPath,
+                    "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
                 ]
+                process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
 
                 do {
                     try process.run()
@@ -3280,16 +3282,18 @@ struct ContentView: View {
             
             process.standardOutput = pipe
             process.standardError = pipe
-            
+
+            let resourcesPath = Bundle.main.resourcePath ?? ""
             process.environment = [
-                "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
-                "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONPATH": resourcesPath,
+                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
                 "PYTHONUNBUFFERED": "1"
             ]
-            
+            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
+
             do {
                 try process.run()
-                
+
                 pipe.fileHandleForReading.readabilityHandler = { handle in
                     let data = handle.availableData
                     if !data.isEmpty {
@@ -3360,11 +3364,13 @@ struct ContentView: View {
             process.standardOutput = pipe
             process.standardError = pipe
 
+            let resourcesPath = Bundle.main.resourcePath ?? ""
             process.environment = [
-                "PYTHONPATH": "\(config.baseDirectory):\(config.baseDirectory)/.venv/lib/python3.12/site-packages",
-                "PATH": "\(config.baseDirectory)/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONPATH": resourcesPath,
+                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
                 "PYTHONUNBUFFERED": "1"
             ]
+            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
 
             do {
                 try process.run()
