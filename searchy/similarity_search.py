@@ -11,20 +11,39 @@ import time
 
 _model = None
 _processor = None
+_device = None
+
+def get_device():
+    """Get the best available device (MPS for Apple Silicon, CUDA, or CPU)"""
+    global _device
+    if _device is None:
+        if torch.backends.mps.is_available():
+            _device = torch.device("mps")
+            print(f"🚀 Using Apple Metal (MPS) acceleration", file=sys.stderr)
+        elif torch.cuda.is_available():
+            _device = torch.device("cuda")
+            print(f"🚀 Using CUDA GPU acceleration", file=sys.stderr)
+        else:
+            _device = torch.device("cpu")
+            print(f"💻 Using CPU", file=sys.stderr)
+    return _device
 
 def get_model_and_processor():
     global _model, _processor
     if _model is None or _processor is None:
         print("Loading CLIP model...", file=sys.stderr)
-        # Use OpenAI's CLIP model - explicitly disable token auth to avoid credential issues
         model_name = "openai/clip-vit-base-patch32"
 
         try:
             print(f"Loading {model_name}...", file=sys.stderr)
-            # Explicitly set token=False to prevent invalid credential errors
             _model = CLIPModel.from_pretrained(model_name, token=False)
             _processor = CLIPProcessor.from_pretrained(model_name, token=False)
-            print(f"Successfully loaded {model_name}", file=sys.stderr)
+
+            # Move model to GPU if available
+            device = get_device()
+            _model = _model.to(device)
+
+            print(f"✅ Successfully loaded {model_name} on {device}", file=sys.stderr)
         except Exception as e:
             print(f"Error loading CLIP model: {e}", file=sys.stderr)
             raise Exception(f"Could not load CLIP model: {e}")
@@ -36,12 +55,14 @@ def get_model_and_processor():
 class CLIPSearcher:
     def __init__(self):
         self.model, self.processor = get_model_and_processor()
-
+        self.device = get_device()
 
     def generate_text_embedding(self, text):
         inputs = self.processor(text=text, return_tensors="pt", padding=True)
-        text_features = self.model.get_text_features(**inputs)
-        embedding = text_features.detach().numpy()[0]
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        with torch.no_grad():
+            text_features = self.model.get_text_features(**inputs)
+        embedding = text_features.cpu().numpy()[0]
         return embedding / np.linalg.norm(embedding)
 
     def search(self, query, data_dir, top_k=5):
