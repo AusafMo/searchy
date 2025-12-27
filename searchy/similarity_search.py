@@ -71,19 +71,25 @@ class CLIPSearcher:
 
             filename = os.path.join(data_dir, 'image_index.bin')
             if not os.path.exists(filename):
-                return print(json.dumps({"error": "No image index found"}))
+                error_response = {"error": "No images indexed yet. Please index a folder first."}
+                print(json.dumps(error_response))
+                return error_response
 
             with open(filename, 'rb') as f:
                 data = pickle.load(f)
 
             if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
-                return print(json.dumps({"error": "Invalid data format"}))
+                error_response = {"error": "Invalid index format. Please re-index."}
+                print(json.dumps(error_response))
+                return error_response
 
             embeddings = data['embeddings']
             image_paths = data['image_paths']
 
             if len(embeddings) == 0:
-                return print(json.dumps({"error": "No images indexed"}))
+                error_response = {"error": "No images indexed yet. Please index a folder first."}
+                print(json.dumps(error_response))
+                return error_response
 
             print(f"Loaded {len(embeddings)} embeddings", file=sys.stderr)
             query_embedding = self.generate_text_embedding(query)
