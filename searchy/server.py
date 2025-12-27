@@ -113,6 +113,29 @@ def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application
         logger.error(f"Error fetching recent images: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/index-count")
+def get_index_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+    """
+    Get total count of indexed images.
+    """
+    try:
+        import pickle
+
+        filename = os.path.join(data_dir, 'image_index.bin')
+        if not os.path.exists(filename):
+            return {"count": 0}
+
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+
+        if not isinstance(data, dict) or 'image_paths' not in data:
+            return {"count": 0}
+
+        return {"count": len(data['image_paths'])}
+    except Exception as e:
+        logger.error(f"Error getting index count: {e}")
+        return {"count": 0}
+
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()

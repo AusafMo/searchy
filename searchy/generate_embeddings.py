@@ -9,6 +9,7 @@ import sys
 import json
 import argparse
 import re
+import time
 
 # Global model cache to avoid reloading
 _model = None
@@ -258,10 +259,15 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
             return
 
         total_images = len(image_paths)
+        total_batches = (total_images + batch_size - 1) // batch_size
         print(f"Found {total_images} new images. Processing with batch_size={batch_size}...", file=sys.stderr)
+
+        # Output initial progress
+        print(json.dumps({"type": "start", "total_images": total_images, "total_batches": total_batches}), flush=True)
 
         embeddings = []
         valid_paths = []
+        start_time = time.time()
 
         # Process in batches
         for i in range(0, total_images, batch_size):
@@ -303,7 +309,19 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                 embeddings.extend(batch_embeddings.tolist())
                 valid_paths.extend(batch_paths)
 
-                print(f"✅ Batch {i//batch_size + 1}/{(total_images + batch_size - 1)//batch_size}: {len(batch_paths)} images", file=sys.stderr)
+                batch_num = i // batch_size + 1
+                elapsed = time.time() - start_time
+                images_per_sec = len(valid_paths) / elapsed if elapsed > 0 else 0
+                print(json.dumps({
+                    "type": "progress",
+                    "batch": batch_num,
+                    "total_batches": total_batches,
+                    "images_processed": len(valid_paths),
+                    "total_images": total_images,
+                    "elapsed": round(elapsed, 2),
+                    "images_per_sec": round(images_per_sec, 1)
+                }), flush=True)
+                print(f"✅ Batch {batch_num}/{total_batches}: {len(batch_paths)} images", file=sys.stderr)
 
             except Exception as e:
                 print(f"❌ Batch error, falling back to single processing: {e}", file=sys.stderr)
@@ -339,6 +357,18 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
         with open(output_file, 'wb') as f:
             pickle.dump(data, f)
+
+        total_time = time.time() - start_time
+        images_per_sec = len(valid_paths) / total_time if total_time > 0 else 0
+
+        # Output completion report as JSON
+        print(json.dumps({
+            "type": "complete",
+            "total_images": len(all_paths),
+            "new_images": len(valid_paths),
+            "total_time": round(total_time, 2),
+            "images_per_sec": round(images_per_sec, 1)
+        }), flush=True)
 
         print(f"✅ Total images in index: {len(all_paths)}", file=sys.stderr)
         print(f"✅ New images added: {len(valid_paths)}", file=sys.stderr)
