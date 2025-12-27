@@ -116,8 +116,26 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     model, processor = get_model_and_processor()
     device = get_device()
 
-    # Filter out macOS metadata files and apply user filters
-    new_files = [f for f in new_files if not os.path.basename(f).startswith('._')]
+    # Directories to skip (system, packages, caches, etc.)
+    skip_dirs = {
+        'site-packages', 'node_modules', 'vendor', '__pycache__',
+        'env', 'venv', '.venv', 'virtualenv',
+        'Library', 'Caches', 'cache', '.cache',
+        'build', 'dist', 'target', '.git', '.svn',
+        'DerivedData', 'xcuserdata', 'Pods',
+        '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
+    }
+
+    def is_user_image(path):
+        if os.path.basename(path).startswith('.'):
+            return False
+        parts = path.split(os.sep)
+        return not any(part in skip_dirs for part in parts)
+
+    # Filter out hidden, system, and package files (handle None)
+    if new_files is None:
+        new_files = []
+    new_files = [f for f in new_files if is_user_image(f)]
 
     if filter_type and filter_value:
         new_files = [f for f in new_files if matches_filter(os.path.basename(f), filter_type, filter_value)]
@@ -236,10 +254,24 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
         print(f"Scanning for images in {image_dir}...", file=sys.stderr)
         image_paths = []
+
+        # Directories to skip (system, packages, caches, etc.)
+        skip_dirs = {
+            'site-packages', 'node_modules', 'vendor', '__pycache__',
+            'env', 'venv', '.venv', 'virtualenv',
+            'Library', 'Caches', 'cache', '.cache',
+            'build', 'dist', 'target', '.git', '.svn',
+            'DerivedData', 'xcuserdata', 'Pods',
+            '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
+        }
+
         for root, dirs, files in os.walk(image_dir):
+            # Skip hidden directories and system directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in skip_dirs]
+
             for file in files:
-                # Skip macOS metadata files (AppleDouble resource forks)
-                if file.startswith('._'):
+                # Skip hidden and macOS metadata files
+                if file.startswith('.'):
                     continue
 
                 if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
@@ -264,6 +296,17 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
         # Output initial progress
         print(json.dumps({"type": "start", "total_images": total_images, "total_batches": total_batches}), flush=True)
+
+        # Create empty index file immediately if none exists (so search works during indexing)
+        if not os.path.exists(output_file):
+            os.makedirs(output_dir, exist_ok=True)
+            empty_data = {
+                'embeddings': np.array([]).reshape(0, 512),  # Empty array with correct shape
+                'image_paths': []
+            }
+            with open(output_file, 'wb') as f:
+                pickle.dump(empty_data, f)
+            print("Created initial empty index file", file=sys.stderr)
 
         embeddings = []
         valid_paths = []
@@ -312,6 +355,20 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                 batch_num = i // batch_size + 1
                 elapsed = time.time() - start_time
                 images_per_sec = len(valid_paths) / elapsed if elapsed > 0 else 0
+
+                # Save incrementally after each batch (allows searching while indexing)
+                current_all_embeddings = existing_embeddings + embeddings
+                current_all_paths = existing_paths + valid_paths
+                current_all_embeddings_np = np.array(current_all_embeddings)
+
+                os.makedirs(output_dir, exist_ok=True)
+                temp_data = {
+                    'embeddings': current_all_embeddings_np,
+                    'image_paths': current_all_paths
+                }
+                with open(output_file, 'wb') as f:
+                    pickle.dump(temp_data, f)
+
                 print(json.dumps({
                     "type": "progress",
                     "batch": batch_num,
@@ -319,9 +376,10 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                     "images_processed": len(valid_paths),
                     "total_images": total_images,
                     "elapsed": round(elapsed, 2),
-                    "images_per_sec": round(images_per_sec, 1)
+                    "images_per_sec": round(images_per_sec, 1),
+                    "indexed_total": len(current_all_paths)
                 }), flush=True)
-                print(f"✅ Batch {batch_num}/{total_batches}: {len(batch_paths)} images", file=sys.stderr)
+                print(f"✅ Batch {batch_num}/{total_batches}: {len(batch_paths)} images (index saved)", file=sys.stderr)
 
             except Exception as e:
                 print(f"❌ Batch error, falling back to single processing: {e}", file=sys.stderr)
