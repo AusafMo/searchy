@@ -668,7 +668,7 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: DesignSystem.Spacing.xl) {
-                    // Display Settings Section
+                        // Display Settings Section
                     SettingsSection(title: "Display", icon: "paintbrush") {
                         // Grid Layout Settings
                         SettingsGroup(title: "Grid Layout") {
@@ -993,7 +993,7 @@ struct SettingsView: View {
             }
             }
         }
-        .frame(width: 680, height: 860)
+        .frame(minWidth: 700, idealWidth: 750, maxWidth: 850, minHeight: 600, idealHeight: 800, maxHeight: .infinity)
         .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.pythonExecutablePath = url.path
@@ -1479,7 +1479,7 @@ struct SpotlightSearchView: View {
                 )
                 .padding(.bottom, DesignSystem.Spacing.sm)
         }
-        .frame(width: 650)
+        .frame(minWidth: 500, maxWidth: .infinity)
         .padding(.vertical, DesignSystem.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
@@ -2558,11 +2558,46 @@ class SearchManager: ObservableObject {
     }
 }
 
+// MARK: - Indexing Progress Models
+struct IndexingProgressData: Codable {
+    let type: String
+    let batch: Int?
+    let total_batches: Int?
+    let images_processed: Int?
+    let total_images: Int?
+    let elapsed: Double?
+    let new_images: Int?
+    let total_time: Double?
+    let images_per_sec: Double?
+}
+
+struct IndexingReport {
+    let totalImages: Int
+    let newImages: Int
+    let totalTime: Double
+    let imagesPerSec: Double
+}
+
+struct IndexStats {
+    let totalImages: Int
+    let fileSize: String
+    let lastModified: Date?
+}
+
 struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
+    @State private var indexingPercent: Double = 0
+    @State private var indexingETA: String = ""
+    @State private var batchTimes: [Double] = []
+    @State private var lastBatchTime: Double = 0
+    @State private var indexingReport: IndexingReport? = nil
+    @State private var indexingSpeed: Double = 0
+    @State private var indexingElapsed: Double = 0
+    @State private var indexingBatchInfo: String = ""
+    @State private var indexStats: IndexStats? = nil
     @State private var isShowingSettings = false
     @State private var searchDebounceTimer: Timer?
     @State private var recentImages: [SearchResult] = []
@@ -2587,8 +2622,13 @@ struct ContentView: View {
 
                 // Main content area
                 VStack(spacing: DesignSystem.Spacing.xl) {
-                    if !indexingProgress.isEmpty {
+                    if isIndexing {
                         indexingProgressView
+                    } else if let report = indexingReport {
+                        indexingReportView(report)
+                    } else if let stats = indexStats {
+                        indexStatsView(stats)
+                            .padding(.top, DesignSystem.Spacing.xxl)
                     }
 
                     modernSearchBar
@@ -2629,6 +2669,7 @@ struct ContentView: View {
         }
         .onAppear {
             loadRecentImages()
+            loadIndexStats()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -2776,12 +2817,13 @@ struct ContentView: View {
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
 
-            TextField("Search your images with natural language...", text: $searchText)
+            TextField(isIndexing ? "Indexing in progress..." : "Search your images with natural language...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(DesignSystem.Typography.body)
                 .focused($isSearchFocused)
+                .disabled(isIndexing)
                 .onSubmit {
-                    if !searchManager.isSearching && !searchText.isEmpty {
+                    if !searchManager.isSearching && !searchText.isEmpty && !isIndexing {
                         performSearch()
                     }
                     // Keep focus after searching
@@ -2793,6 +2835,9 @@ struct ContentView: View {
                     // Cancel previous timer
                     searchDebounceTimer?.invalidate()
 
+                    // Don't search while indexing
+                    if isIndexing { return }
+
                     // Clear results if search is empty
                     if newValue.isEmpty {
                         searchManager.clearResults()
@@ -2801,7 +2846,7 @@ struct ContentView: View {
 
                     // Debounce: wait 400ms before searching
                     searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                        if !searchManager.isSearching && !newValue.isEmpty {
+                        if !searchManager.isSearching && !newValue.isEmpty && !self.isIndexing {
                             performSearch()
                         }
                     }
@@ -2905,12 +2950,55 @@ struct ContentView: View {
 
     // MARK: - Indexing Progress View
     private var indexingProgressView: some View {
-        HStack(spacing: DesignSystem.Spacing.md) {
-            ProgressView()
-                .scaleEffect(0.8)
-            Text(indexingProgress)
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.accent)
+        VStack(spacing: DesignSystem.Spacing.sm) {
+            // Progress bar
+            ProgressView(value: indexingPercent, total: 100)
+                .progressViewStyle(LinearProgressViewStyle(tint: DesignSystem.Colors.accent))
+                .scaleEffect(x: 1, y: 1.5, anchor: .center)
+
+            // Top row: percentage and ETA
+            HStack {
+                Text("\(Int(indexingPercent))%")
+                    .font(DesignSystem.Typography.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .monospacedDigit()
+
+                Spacer()
+
+                if !indexingETA.isEmpty {
+                    Text(indexingETA)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+            }
+
+            // Bottom row: detailed stats
+            HStack(spacing: DesignSystem.Spacing.md) {
+                // Images processed
+                if !indexingProgress.isEmpty {
+                    Label(indexingProgress, systemImage: "photo.stack")
+                }
+
+                // Batch info
+                if !indexingBatchInfo.isEmpty {
+                    Label(indexingBatchInfo, systemImage: "square.stack.3d.up")
+                }
+
+                // Speed
+                if indexingSpeed > 0 {
+                    Label(String(format: "%.1f/s", indexingSpeed), systemImage: "speedometer")
+                }
+
+                // Elapsed time
+                if indexingElapsed > 0 {
+                    Label(formatDuration(indexingElapsed), systemImage: "clock")
+                }
+
+                Spacer()
+            }
+            .font(DesignSystem.Typography.caption)
+            .foregroundColor(DesignSystem.Colors.secondaryText)
         }
         .padding(DesignSystem.Spacing.md)
         .frame(maxWidth: .infinity)
@@ -2922,6 +3010,177 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
                 .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    // MARK: - Indexing Report View
+    private func indexingReportView(_ report: IndexingReport) -> some View {
+        HStack(spacing: DesignSystem.Spacing.lg) {
+            // Success icon
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.green)
+
+            // Stats
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Indexing Complete")
+                    .font(DesignSystem.Typography.callout)
+                    .fontWeight(.medium)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                HStack(spacing: DesignSystem.Spacing.md) {
+                    Label("\(report.newImages) images", systemImage: "photo.stack")
+                    Label(formatDuration(report.totalTime), systemImage: "clock")
+                    Label(String(format: "%.1f/s", report.imagesPerSec), systemImage: "speedometer")
+                }
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+
+            Spacer()
+
+            // Dismiss button
+            Button(action: { indexingReport = nil }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .fill(Color.green.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+        )
+        .onAppear {
+            // Auto-dismiss after 8 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                withAnimation {
+                    indexingReport = nil
+                    loadIndexStats()
+                }
+            }
+        }
+    }
+
+    // MARK: - Index Stats View
+    private func indexStatsView(_ stats: IndexStats) -> some View {
+        HStack(spacing: DesignSystem.Spacing.lg) {
+            // Database icon
+            Image(systemName: "cylinder.split.1x2")
+                .font(.system(size: 20))
+                .foregroundColor(DesignSystem.Colors.accent)
+
+            // Stats
+            HStack(spacing: DesignSystem.Spacing.xl) {
+                Label("\(stats.totalImages) images", systemImage: "photo.stack")
+
+                Label(stats.fileSize, systemImage: "internaldrive")
+
+                if let lastMod = stats.lastModified {
+                    Label(formatRelativeDate(lastMod), systemImage: "clock")
+                }
+            }
+            .font(DesignSystem.Typography.caption)
+            .foregroundColor(DesignSystem.Colors.secondaryText)
+
+            Spacer()
+
+            // Refresh button
+            Button(action: { loadIndexStats() }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .fill(DesignSystem.Colors.accent.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                .stroke(DesignSystem.Colors.accent.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func loadIndexStats() {
+        let config = AppConfig.shared
+        let indexPath = "\(config.baseDirectory)/image_index.bin"
+
+        DispatchQueue.global(qos: .utility).async {
+            let fileManager = FileManager.default
+
+            guard fileManager.fileExists(atPath: indexPath) else {
+                DispatchQueue.main.async {
+                    self.indexStats = nil
+                }
+                return
+            }
+
+            // Get file attributes
+            var fileSize = "Unknown"
+            var lastModified: Date? = nil
+
+            if let attrs = try? fileManager.attributesOfItem(atPath: indexPath) {
+                if let size = attrs[.size] as? Int64 {
+                    fileSize = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+                }
+                lastModified = attrs[.modificationDate] as? Date
+            }
+
+            // Get image count from server
+            let port = config.defaultPort
+            guard let url = URL(string: "http://localhost:\(port)/index-count") else { return }
+
+            var imageCount = 0
+            let semaphore = DispatchSemaphore(value: 0)
+
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let count = json["count"] as? Int {
+                    imageCount = count
+                }
+                semaphore.signal()
+            }.resume()
+
+            semaphore.wait()
+
+            DispatchQueue.main.async {
+                self.indexStats = IndexStats(
+                    totalImages: imageCount,
+                    fileSize: fileSize,
+                    lastModified: lastModified
+                )
+            }
+        }
+    }
+
+    private func formatRelativeDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        if seconds < 60 {
+            return String(format: "%.1fs", seconds)
+        } else if seconds < 3600 {
+            let mins = Int(seconds) / 60
+            let secs = Int(seconds) % 60
+            return "\(mins)m \(secs)s"
+        } else {
+            let hours = Int(seconds) / 3600
+            let mins = (Int(seconds) % 3600) / 60
+            return "\(hours)h \(mins)m"
+        }
     }
 
     // MARK: - Empty State
@@ -3259,27 +3518,139 @@ struct ContentView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        
+
         panel.begin { response in
             if response == .OK, let url = panel.url {
                 indexFolder(url)
             }
         }
     }
-    
+
+    // MARK: - Progress Parsing & ETA Calculation
+    private func parseIndexingOutput(_ output: String) {
+        // Try to parse each line as JSON
+        for line in output.components(separatedBy: "\n") {
+            guard !line.isEmpty else { continue }
+
+            if let data = line.data(using: .utf8),
+               let progress = try? JSONDecoder().decode(IndexingProgressData.self, from: data) {
+
+                DispatchQueue.main.async {
+                    switch progress.type {
+                    case "start":
+                        self.indexingPercent = 0
+                        self.indexingETA = "Calculating..."
+                        self.batchTimes = []
+                        self.lastBatchTime = 0
+                        if let total = progress.total_images {
+                            self.indexingProgress = "Indexing \(total) images..."
+                        }
+
+                    case "progress":
+                        if let batch = progress.batch,
+                           let totalBatches = progress.total_batches,
+                           let elapsed = progress.elapsed {
+                            // Calculate percentage
+                            self.indexingPercent = Double(batch) / Double(totalBatches) * 100
+
+                            // Track elapsed time and speed
+                            self.indexingElapsed = elapsed
+                            if let speed = progress.images_per_sec {
+                                self.indexingSpeed = speed
+                            }
+
+                            // Batch info
+                            self.indexingBatchInfo = "Batch \(batch)/\(totalBatches)"
+
+                            // Track batch time for rolling average
+                            let batchTime = elapsed - self.lastBatchTime
+                            self.lastBatchTime = elapsed
+                            if batch > 1 { // Skip first batch (includes model loading)
+                                self.batchTimes.append(batchTime)
+                                // Keep last 5 batch times for rolling average
+                                if self.batchTimes.count > 5 {
+                                    self.batchTimes.removeFirst()
+                                }
+                            }
+
+                            // Calculate ETA using rolling average
+                            let remainingBatches = totalBatches - batch
+                            if !self.batchTimes.isEmpty && remainingBatches > 0 {
+                                let avgBatchTime = self.batchTimes.reduce(0, +) / Double(self.batchTimes.count)
+                                let etaSeconds = avgBatchTime * Double(remainingBatches)
+                                self.indexingETA = self.formatETA(etaSeconds)
+                            } else if remainingBatches == 0 {
+                                self.indexingETA = "Finishing..."
+                            }
+
+                            if let processed = progress.images_processed, let total = progress.total_images {
+                                self.indexingProgress = "\(processed)/\(total) images"
+                            }
+                        }
+
+                    case "complete":
+                        self.indexingPercent = 100
+                        self.indexingETA = ""
+                        if let totalImages = progress.total_images,
+                           let newImages = progress.new_images,
+                           let totalTime = progress.total_time,
+                           let imagesPerSec = progress.images_per_sec {
+                            self.indexingReport = IndexingReport(
+                                totalImages: totalImages,
+                                newImages: newImages,
+                                totalTime: totalTime,
+                                imagesPerSec: imagesPerSec
+                            )
+                        }
+
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private func formatETA(_ seconds: Double) -> String {
+        if seconds < 60 {
+            return "~\(Int(seconds))s remaining"
+        } else if seconds < 3600 {
+            let mins = Int(seconds) / 60
+            let secs = Int(seconds) % 60
+            return "~\(mins)m \(secs)s remaining"
+        } else {
+            let hours = Int(seconds) / 3600
+            let mins = (Int(seconds) % 3600) / 60
+            return "~\(hours)h \(mins)m remaining"
+        }
+    }
+
+    private func resetIndexingState() {
+        indexingPercent = 0
+        indexingETA = ""
+        indexingProgress = ""
+        batchTimes = []
+        lastBatchTime = 0
+        indexingSpeed = 0
+        indexingElapsed = 0
+        indexingBatchInfo = ""
+    }
+
     private func indexFolder(_ url: URL) {
         print("Starting indexing for url: \(url.path)")
         isIndexing = true
+        indexingReport = nil
+        resetIndexingState()
         indexingProgress = "Starting indexing..."
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             let config = AppConfig.shared
             let process = Process()
             let pipe = Pipe()
-            
+
             process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
             process.arguments = [config.embeddingScriptPath, url.path]
-            
+
             process.standardOutput = pipe
             process.standardError = pipe
 
@@ -3299,17 +3670,16 @@ struct ContentView: View {
                     if !data.isEmpty {
                         if let output = String(data: data, encoding: .utf8) {
                             print("Received output: \(output)")
-                            DispatchQueue.main.async {
-                                self.indexingProgress = output
-                            }
+                            self.parseIndexingOutput(output)
                         }
                     }
                 }
-                
+
                 process.terminationHandler = { _ in
                     DispatchQueue.main.async {
                         self.isIndexing = false
-                        self.indexingProgress = ""
+                        // Reload recent images after indexing
+                        self.loadRecentImages()
                     }
                 }
             } catch {
@@ -3339,6 +3709,8 @@ struct ContentView: View {
     private func replaceAndIndexFolder(_ url: URL) {
         print("Replacing index with folder: \(url.path)")
         isIndexing = true
+        indexingReport = nil
+        resetIndexingState()
         indexingProgress = "Clearing existing index..."
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -3380,9 +3752,7 @@ struct ContentView: View {
                     if !data.isEmpty {
                         if let output = String(data: data, encoding: .utf8) {
                             print("Received output: \(output)")
-                            DispatchQueue.main.async {
-                                self.indexingProgress = output
-                            }
+                            self.parseIndexingOutput(output)
                         }
                     }
                 }
@@ -3390,7 +3760,6 @@ struct ContentView: View {
                 process.terminationHandler = { _ in
                     DispatchQueue.main.async {
                         self.isIndexing = false
-                        self.indexingProgress = ""
                         // Reload recent images after re-indexing
                         self.loadRecentImages()
                     }

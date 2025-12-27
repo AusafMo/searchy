@@ -114,6 +114,190 @@ searchy/
 
 ---
 
+## For Developers
+
+### Data Storage
+
+All data is stored in `~/Library/Application Support/searchy/`:
+
+```
+searchy/
+├── venv/                  # Isolated Python environment
+├── image_index.bin        # Embeddings + paths (pickle)
+├── watched_directories.json
+└── settings files...
+```
+
+### Embedding Format
+
+The index file (`image_index.bin`) is a pickled Python dictionary:
+
+```python
+{
+    'embeddings': np.ndarray,  # Shape: (num_images, 512) - normalized vectors
+    'image_paths': list[str]   # Absolute paths to images
+}
+```
+
+Load it in Python:
+```python
+import pickle
+with open('image_index.bin', 'rb') as f:
+    data = pickle.load(f)
+    embeddings = data['embeddings']  # numpy array
+    paths = data['image_paths']      # list of strings
+```
+
+### API Endpoints
+
+The FastAPI server runs on `localhost:7860` (or next available port).
+
+**Search images:**
+```bash
+curl -X POST http://localhost:7860/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "sunset over mountains", "n_results": 10}'
+```
+
+Response:
+```json
+{
+  "results": [
+    {"path": "/path/to/image.jpg", "similarity": 0.342},
+    ...
+  ]
+}
+```
+
+**Get recent images:**
+```bash
+curl http://localhost:7860/recent?n=20
+```
+
+**Health check:**
+```bash
+curl http://localhost:7860/health
+```
+
+### Swapping CLIP Models
+
+Edit `generate_embeddings.py` line 37:
+
+```python
+# Default: ViT-B/32 (512-dim embeddings, fastest)
+model_name = "openai/clip-vit-base-patch32"
+
+# Alternatives:
+# "openai/clip-vit-base-patch16"   # 512-dim, more accurate
+# "openai/clip-vit-large-patch14"  # 768-dim, most accurate, slower
+```
+
+> **Note:** Changing models requires re-indexing all images. Delete `image_index.bin` before switching.
+
+### Custom Backend Implementation
+
+Want to replace CLIP with your own model or rewrite the backend entirely? Just respect these contracts:
+
+#### 1. Embedding Index File
+
+The Swift app reads `~/Library/Application Support/searchy/image_index.bin`. Your indexer must produce a pickle file with this exact structure:
+
+```python
+import pickle
+import numpy as np
+
+data = {
+    'embeddings': np.ndarray,  # Shape: (N, embedding_dim), float32, L2-normalized
+    'image_paths': list[str]   # Length N, absolute paths
+}
+
+with open('image_index.bin', 'wb') as f:
+    pickle.dump(data, f)
+```
+
+#### 2. Server API Contract
+
+The app expects a FastAPI/HTTP server. Implement these endpoints:
+
+| Endpoint | Method | Request | Response |
+|----------|--------|---------|----------|
+| `/health` | GET | — | `{"status": "ok"}` |
+| `/search` | POST | `{"query": str, "n_results": int, "threshold": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/recent` | GET | `?n=int` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/index-count` | GET | — | `{"count": int}` |
+
+#### 3. Script Interface
+
+The app calls your scripts via `Process()`. Replace these files in the app bundle's Resources:
+
+**`generate_embeddings.py`** — Called for indexing:
+```bash
+python generate_embeddings.py /path/to/folder [options]
+
+# Must accept:
+--fast                    # Optional: fast mode flag
+--max-dimension INT       # Optional: resize dimension
+--batch-size INT          # Optional: batch size
+--filter-type TYPE        # Optional: all|starts-with|ends-with|contains|regex
+--filter VALUE            # Optional: filter value
+
+# Must output to stdout (JSON, one per line):
+{"type": "start", "total_images": N, "total_batches": N}
+{"type": "progress", "batch": N, "total_batches": N, "images_processed": N, "total_images": N, "elapsed": float, "images_per_sec": float}
+{"type": "complete", "total_images": N, "new_images": N, "total_time": float, "images_per_sec": float}
+```
+
+**`server.py`** — Called to start the API server:
+```bash
+python server.py --port PORT
+# Must start HTTP server on given port
+```
+
+**`image_watcher.py`** — Called for auto-indexing:
+```bash
+python image_watcher.py
+# Watches directories, triggers incremental indexing
+```
+
+#### 4. Example: Custom Backend
+
+```python
+# my_custom_indexer.py - Use any model you want
+from sentence_transformers import SentenceTransformer
+import pickle, numpy as np
+
+model = SentenceTransformer('clip-ViT-L-14')  # Or any model
+
+def index_images(paths):
+    embeddings = model.encode([Image.open(p) for p in paths])
+    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+
+    with open('image_index.bin', 'wb') as f:
+        pickle.dump({'embeddings': embeddings, 'image_paths': paths}, f)
+```
+
+As long as you output the right JSON progress messages and maintain the pickle format, the Swift UI will work with any backend.
+
+---
+
+### CLI Usage
+
+Generate embeddings directly:
+```bash
+cd ~/Library/Application\ Support/searchy
+source venv/bin/activate
+python generate_embeddings.py /path/to/images --batch-size 64 --fast
+```
+
+Options:
+- `--fast` / `--no-fast` — Resize images before processing
+- `--max-dimension 384` — Max image size (256, 384, 512, 768)
+- `--batch-size 64` — Images per batch (32, 64, 128, 256)
+- `--filter-type starts-with` — Filter filenames
+- `--filter "IMG_"` — Filter value
+
+---
+
 ## Roadmap
 
 - [x] Spotlight-style floating widget
