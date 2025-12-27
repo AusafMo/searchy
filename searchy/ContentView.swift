@@ -100,53 +100,47 @@ struct Constants {
 
 class AppConfig: ObservableObject {
     static let shared = AppConfig()
-    
+
     @Published var baseDirectory: String {
         didSet {
             UserDefaults.standard.set(baseDirectory, forKey: "baseDirectory")
         }
     }
-    
+
     @Published var defaultPort: Int {
         didSet {
             UserDefaults.standard.set(defaultPort, forKey: "defaultPort")
         }
     }
-    
-    @Published var pythonExecutablePath: String {
-        didSet {
-            UserDefaults.standard.set(pythonExecutablePath, forKey: "pythonExecutablePath")
-        }
+
+    // Script paths should ALWAYS come from Bundle.main, never cached
+    var pythonExecutablePath: String {
+        Constants.pythonExecutablePath
     }
-    
-    @Published var serverScriptPath: String {
-        didSet {
-            UserDefaults.standard.set(serverScriptPath, forKey: "serverScriptPath")
-        }
+
+    var serverScriptPath: String {
+        Constants.serverScriptPath
     }
-    
-    @Published var embeddingScriptPath: String {
-        didSet {
-            UserDefaults.standard.set(embeddingScriptPath, forKey: "embeddingScriptPath")
-        }
+
+    var embeddingScriptPath: String {
+        Constants.embeddingScriptPath
     }
-    
+
     private init() {
         // Load from UserDefaults with fallbacks to current constants
         self.baseDirectory = UserDefaults.standard.string(forKey: "baseDirectory") ?? Constants.baseDirectory
         self.defaultPort = UserDefaults.standard.integer(forKey: "defaultPort") != 0 ?
             UserDefaults.standard.integer(forKey: "defaultPort") : Constants.defaultPort
-        self.pythonExecutablePath = UserDefaults.standard.string(forKey: "pythonExecutablePath") ?? Constants.pythonExecutablePath
-        self.serverScriptPath = UserDefaults.standard.string(forKey: "serverScriptPath") ?? Constants.serverScriptPath
-        self.embeddingScriptPath = UserDefaults.standard.string(forKey: "embeddingScriptPath") ?? Constants.embeddingScriptPath
+
+        // Clear any old cached paths (migration)
+        UserDefaults.standard.removeObject(forKey: "pythonExecutablePath")
+        UserDefaults.standard.removeObject(forKey: "serverScriptPath")
+        UserDefaults.standard.removeObject(forKey: "embeddingScriptPath")
     }
-    
+
     func resetToDefaults() {
         baseDirectory = Constants.baseDirectory
         defaultPort = Constants.defaultPort
-        pythonExecutablePath = Constants.pythonExecutablePath
-        serverScriptPath = Constants.serverScriptPath
-        embeddingScriptPath = Constants.embeddingScriptPath
     }
 }
 
@@ -597,9 +591,6 @@ struct SettingsView: View {
     @ObservedObject private var prefs = SearchPreferences.shared
     @ObservedObject private var indexingSettings = IndexingSettings.shared
     @ObservedObject private var dirManager = DirectoryManager.shared
-    @State private var isShowingPythonPicker = false
-    @State private var isShowingServerScriptPicker = false
-    @State private var isShowingEmbeddingScriptPicker = false
     @State private var isShowingBaseDirectoryPicker = false
     @State private var isShowingAddDirectorySheet = false
     @State private var isReindexing = false
@@ -933,35 +924,6 @@ struct SettingsView: View {
                         }
                     }
                     
-                    // Python Settings Section
-                    SettingsSection(title: "Python", icon: "terminal") {
-                        SettingsGroup(title: "Paths") {
-                            // Python executable
-                            PathSetting(
-                                title: "Python Executable",
-                                icon: "chevron.left.forwardslash.chevron.right",
-                                path: $config.pythonExecutablePath,
-                                showPicker: $isShowingPythonPicker
-                            )
-                            
-                            // Server script
-                            PathSetting(
-                                title: "Server Script",
-                                icon: "doc.text",
-                                path: $config.serverScriptPath,
-                                showPicker: $isShowingServerScriptPicker
-                            )
-                            
-                            // Embedding script
-                            PathSetting(
-                                title: "Embedding Script",
-                                icon: "doc.text.fill",
-                                path: $config.embeddingScriptPath,
-                                showPicker: $isShowingEmbeddingScriptPicker
-                            )
-                        }
-                    }
-                    
                     // Reset Button
                     Button(action: {
                         withAnimation {
@@ -994,21 +956,6 @@ struct SettingsView: View {
             }
         }
         .frame(minWidth: 700, idealWidth: 750, maxWidth: 850, minHeight: 600, idealHeight: 800, maxHeight: .infinity)
-        .fileImporter(isPresented: $isShowingPythonPicker, allowedContentTypes: [.directory]) { result in
-            if case .success(let url) = result {
-                config.pythonExecutablePath = url.path
-            }
-        }
-        .fileImporter(isPresented: $isShowingServerScriptPicker, allowedContentTypes: [.directory]) { result in
-            if case .success(let url) = result {
-                config.serverScriptPath = url.path
-            }
-        }
-        .fileImporter(isPresented: $isShowingEmbeddingScriptPicker, allowedContentTypes: [.directory]) { result in
-            if case .success(let url) = result {
-                config.embeddingScriptPath = url.path
-            }
-        }
         .fileImporter(isPresented: $isShowingBaseDirectoryPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.baseDirectory = url.path
@@ -2395,27 +2342,136 @@ struct DoubleClickImageView: View {
         return newImage
     }
 }
+
+// MARK: - Async Thumbnail View
+struct AsyncThumbnailView: View {
+    let path: String
+    var contentMode: ContentMode = .fill
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    )
+            }
+        }
+        .onAppear {
+            loadImage()
+        }
+    }
+
+    private func loadImage() {
+        if let cachedImage = ImageCache.shared.image(for: path) {
+            self.image = cachedImage
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let loadedImage = NSImage(contentsOfFile: path) {
+                let maxSize: CGFloat = 200
+                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
+                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
+                ImageCache.shared.setImage(resizedImage, for: path)
+                DispatchQueue.main.async {
+                    self.image = resizedImage
+                }
+            }
+        }
+    }
+
+    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
+        let imageWidth = image.size.width
+        let imageHeight = image.size.height
+        let widthRatio = maxSize / imageWidth
+        let heightRatio = maxSize / imageHeight
+        let ratio = min(widthRatio, heightRatio)
+        return NSSize(width: imageWidth * ratio, height: imageHeight * ratio)
+    }
+
+    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
+        let newImage = NSImage(size: targetSize)
+        newImage.lockFocus()
+        NSColor.windowBackgroundColor.setFill()
+        NSRect(origin: .zero, size: targetSize).fill()
+        image.draw(
+            in: NSRect(origin: .zero, size: targetSize),
+            from: NSRect(origin: .zero, size: image.size),
+            operation: .copy,
+            fraction: 1.0
+        )
+        newImage.unlockFocus()
+        return newImage
+    }
+}
+
 // Search Result Model
 struct SearchResult: Codable, Identifiable {
     var id = UUID()
     let path: String
     let similarity: Float
-    
+    let size: Int?
+    let date: String?
+    let type: String?
+
     enum CodingKeys: String, CodingKey {
         case path
         case similarity
+        case size
+        case date
+        case type
+    }
+
+    var formattedSize: String {
+        guard let size = size else { return "Unknown" }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
+    }
+
+    var fileExtension: String {
+        type ?? URL(fileURLWithPath: path).pathExtension.lowercased()
     }
 }
 
 struct SearchResponse: Codable {
     let results: [SearchResult]
     let stats: SearchStats
+    let error: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.error = try container.decodeIfPresent(String.self, forKey: .error)
+        // If there's an error, set empty results and default stats
+        if self.error != nil {
+            self.results = []
+            self.stats = SearchStats(total_time: "0s", images_searched: 0, images_per_second: "0")
+        } else {
+            self.results = try container.decode([SearchResult].self, forKey: .results)
+            self.stats = try container.decode(SearchStats.self, forKey: .stats)
+        }
+    }
 }
 
 struct SearchStats: Codable {
     let total_time: String
     let images_searched: Int
     let images_per_second: String
+
+    init(total_time: String, images_searched: Int, images_per_second: String) {
+        self.total_time = total_time
+        self.images_searched = images_searched
+        self.images_per_second = images_per_second
+    }
 }
 
 class SearchManager: ObservableObject {
@@ -2473,7 +2529,7 @@ class SearchManager: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
         let body: [String: Any] = [
             "query": query,
             "top_k": numberOfResults,
@@ -2481,26 +2537,16 @@ class SearchManager: ObservableObject {
             "similarity_threshold": SearchPreferences.shared.similarityThreshold
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
-        
+
         let (data, _) = try await URLSession.shared.data(for: request)
-        if let rawOutput = String(data: data, encoding: .utf8) {
-            let lines = rawOutput.components(separatedBy: .newlines)
-            if let jsonLine = lines.last(where: { line in
-                guard !line.isEmpty else { return false }
-                return line.starts(with: "{") && line.hasSuffix("}")
-            }) {
-                if let jsonData = jsonLine.data(using: .utf8) {
-                    let response = try JSONDecoder().decode(SearchResponse.self, from: jsonData)
-                    return response
-                } else {
-                    throw NSError(domain: "Invalid JSON format", code: 0, userInfo: nil)
-                }
-            } else {
-                throw NSError(domain: "No valid JSON response found, Are You sure the folders are indexed ?", code: 0, userInfo: nil)
-            }
-        } else {
-            throw NSError(domain: "No response from server", code: 0, userInfo: nil)
+        let response = try JSONDecoder().decode(SearchResponse.self, from: data)
+
+        // Check if server returned an error
+        if let errorMessage = response.error {
+            throw NSError(domain: "SearchError", code: 0, userInfo: [NSLocalizedDescriptionKey: errorMessage])
         }
+
+        return response
     }
     func cancelSearch() {
         DispatchQueue.main.async {
@@ -2584,11 +2630,205 @@ struct IndexStats {
     let lastModified: Date?
 }
 
+// MARK: - App Tabs
+enum AppTab: String, CaseIterable {
+    case search = "Search"
+    case duplicates = "Duplicates"
+}
+
+// MARK: - Duplicates Models
+struct DuplicateImage: Identifiable, Codable {
+    var id: String { path }
+    let path: String
+    let size: Int
+    let date: String?
+    let type: String
+    let similarity: Float
+    var isSelected: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case path, size, date, type, similarity
+    }
+
+    var formattedSize: String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
+    }
+}
+
+struct DuplicateGroup: Identifiable, Codable {
+    let id: Int
+    var images: [DuplicateImage]
+
+    var selectedCount: Int {
+        images.filter { $0.isSelected }.count
+    }
+}
+
+struct DuplicatesResponse: Codable {
+    let groups: [DuplicateGroup]
+    let total_duplicates: Int
+    let total_groups: Int
+}
+
+// MARK: - Duplicates Manager
+class DuplicatesManager: ObservableObject {
+    static let shared = DuplicatesManager()
+
+    @Published var groups: [DuplicateGroup] = []
+    @Published var isScanning = false
+    @Published var errorMessage: String? = nil
+    @Published var threshold: Float = 0.95
+    @Published var totalDuplicates: Int = 0
+
+    private init() {}
+
+    private var serverURL: URL? {
+        get async {
+            let delegate = await AppDelegate.shared
+            return await delegate.serverURL
+        }
+    }
+
+    func scanForDuplicates() {
+        guard !isScanning else { return }
+
+        DispatchQueue.main.async {
+            self.isScanning = true
+            self.errorMessage = nil
+            self.groups = []
+        }
+
+        Task {
+            do {
+                guard let serverURL = await self.serverURL else {
+                    throw NSError(domain: "Server not ready", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server is still starting up."])
+                }
+
+                let url = serverURL.appendingPathComponent("duplicates")
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+                let body: [String: Any] = [
+                    "threshold": self.threshold,
+                    "data_dir": "/Users/ausaf/Library/Application Support/searchy"
+                ]
+                request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+                let (data, _) = try await URLSession.shared.data(for: request)
+                let response = try JSONDecoder().decode(DuplicatesResponse.self, from: data)
+
+                DispatchQueue.main.async {
+                    self.groups = response.groups
+                    self.totalDuplicates = response.total_duplicates
+                    self.isScanning = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = error.localizedDescription
+                    self.isScanning = false
+                }
+            }
+        }
+    }
+
+    func toggleSelection(groupId: Int, imagePath: String) {
+        if let groupIndex = groups.firstIndex(where: { $0.id == groupId }),
+           let imageIndex = groups[groupIndex].images.firstIndex(where: { $0.path == imagePath }) {
+            groups[groupIndex].images[imageIndex].isSelected.toggle()
+        }
+    }
+
+    func autoSelectSmaller(groupId: Int) {
+        if let groupIndex = groups.firstIndex(where: { $0.id == groupId }) {
+            // Keep first (largest), select rest
+            for i in 0..<groups[groupIndex].images.count {
+                groups[groupIndex].images[i].isSelected = i > 0
+            }
+        }
+    }
+
+    func autoSelectAllSmaller() {
+        for groupIndex in 0..<groups.count {
+            for i in 0..<groups[groupIndex].images.count {
+                groups[groupIndex].images[i].isSelected = i > 0
+            }
+        }
+    }
+
+    func deleteSelected(completion: @escaping (Int, Int) -> Void) {
+        var deleted = 0
+        var failed = 0
+
+        for group in groups {
+            for image in group.images where image.isSelected {
+                let url = URL(fileURLWithPath: image.path)
+                do {
+                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                    deleted += 1
+                } catch {
+                    failed += 1
+                }
+            }
+        }
+
+        // Remove deleted images from groups
+        DispatchQueue.main.async {
+            self.groups = self.groups.compactMap { group in
+                var updatedGroup = group
+                updatedGroup.images = group.images.filter { !$0.isSelected }
+                return updatedGroup.images.count > 1 ? updatedGroup : nil
+            }
+            self.totalDuplicates = self.groups.reduce(0) { $0 + $1.images.count - 1 }
+            completion(deleted, failed)
+        }
+    }
+
+    func moveSelected(to destination: URL, completion: @escaping (Int, Int) -> Void) {
+        var moved = 0
+        var failed = 0
+
+        for group in groups {
+            for image in group.images where image.isSelected {
+                let sourceURL = URL(fileURLWithPath: image.path)
+                let destURL = destination.appendingPathComponent(sourceURL.lastPathComponent)
+                do {
+                    try FileManager.default.moveItem(at: sourceURL, to: destURL)
+                    moved += 1
+                } catch {
+                    failed += 1
+                }
+            }
+        }
+
+        // Remove moved images from groups
+        DispatchQueue.main.async {
+            self.groups = self.groups.compactMap { group in
+                var updatedGroup = group
+                updatedGroup.images = group.images.filter { !$0.isSelected }
+                return updatedGroup.images.count > 1 ? updatedGroup : nil
+            }
+            self.totalDuplicates = self.groups.reduce(0) { $0 + $1.images.count - 1 }
+            completion(moved, failed)
+        }
+    }
+
+    var totalSelected: Int {
+        groups.reduce(0) { $0 + $1.selectedCount }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
+    @ObservedObject private var duplicatesManager = DuplicatesManager.shared
+    @State private var activeTab: AppTab = .search
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
+    @State private var indexingProcess: Process? = nil
     @State private var indexingPercent: Double = 0
     @State private var indexingETA: String = ""
     @State private var batchTimes: [Double] = []
@@ -2599,6 +2839,12 @@ struct ContentView: View {
     @State private var indexingBatchInfo: String = ""
     @State private var indexStats: IndexStats? = nil
     @State private var isShowingSettings = false
+    @State private var showFilterSidebar = false
+    @State private var filterTypes: Set<String> = []
+    @State private var filterSizeMin: Int? = nil
+    @State private var filterSizeMax: Int? = nil
+    @State private var filterDateFrom: Date? = nil
+    @State private var filterDateTo: Date? = nil
     @State private var searchDebounceTimer: Timer?
     @State private var recentImages: [SearchResult] = []
     @State private var isLoadingRecent = false
@@ -2620,47 +2866,16 @@ struct ContentView: View {
                 // Modern header
                 modernHeader
 
-                // Main content area
-                VStack(spacing: DesignSystem.Spacing.xl) {
-                    if isIndexing {
-                        indexingProgressView
-                    } else if let report = indexingReport {
-                        indexingReportView(report)
-                    } else if let stats = indexStats {
-                        indexStatsView(stats)
-                            .padding(.top, DesignSystem.Spacing.xxl)
-                    }
+                // Tab Picker
+                tabPicker
+                    .padding(.top, DesignSystem.Spacing.md)
 
-                    modernSearchBar
-                    errorView
-
-                    // Results area - wrapped in Group with consistent frame to prevent layout shifts
-                    Group {
-                        if searchManager.isSearching {
-                            VStack(spacing: DesignSystem.Spacing.md) {
-                                Spacer()
-                                ProgressView()
-                                    .scaleEffect(1.2)
-                                Text("Searching...")
-                                    .font(DesignSystem.Typography.callout)
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                                Spacer()
-                            }
-                        } else if !searchManager.results.isEmpty {
-                            ScrollView {
-                                resultsList
-                                    .padding(DesignSystem.Spacing.xl)
-                            }
-                        } else if searchText.isEmpty {
-                            // Show recent images section
-                            recentImagesSection
-                        } else {
-                            emptyStateView
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Main content area based on active tab
+                if activeTab == .search {
+                    searchTabContent
+                } else {
+                    duplicatesTabContent
                 }
-                .padding(.horizontal, DesignSystem.Spacing.xl)
             }
         }
         .sheet(isPresented: $isShowingSettings) {
@@ -2801,6 +3016,920 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Tab Picker
+    private var tabPicker: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        activeTab = tab
+                    }
+                }) {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
+                        Image(systemName: tab == .search ? "magnifyingglass" : "square.on.square")
+                            .font(.system(size: 12, weight: .medium))
+                        Text(tab.rawValue)
+                            .font(DesignSystem.Typography.callout.weight(.medium))
+                    }
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(activeTab == tab ? DesignSystem.Colors.accent : Color.clear)
+                    )
+                    .foregroundColor(activeTab == tab ? .white : DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.xl)
+    }
+
+    // MARK: - Search Tab Content
+    private var searchTabContent: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: DesignSystem.Spacing.xl) {
+                if isIndexing {
+                    indexingProgressView
+                } else if let report = indexingReport {
+                    indexingReportView(report)
+                } else if let stats = indexStats {
+                    indexStatsView(stats)
+                        .padding(.top, DesignSystem.Spacing.xxl)
+                }
+
+                modernSearchBar
+                errorView
+
+                // Results area
+                Group {
+                    if searchManager.isSearching {
+                        VStack(spacing: DesignSystem.Spacing.md) {
+                            Spacer()
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Searching...")
+                                .font(DesignSystem.Typography.callout)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            Spacer()
+                        }
+                    } else if !searchManager.results.isEmpty {
+                        ScrollView {
+                            filteredResultsList
+                                .padding(DesignSystem.Spacing.xl)
+                        }
+                    } else if searchText.isEmpty {
+                        recentImagesSection
+                    } else {
+                        emptyStateView
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(.horizontal, DesignSystem.Spacing.xl)
+
+            // Filter sidebar
+            if showFilterSidebar {
+                filterSidebar
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+    }
+
+    // MARK: - Filtered Results
+    private var filteredResults: [SearchResult] {
+        searchManager.results.filter { result in
+            // Type filter
+            if !filterTypes.isEmpty {
+                if !filterTypes.contains(result.fileExtension) {
+                    return false
+                }
+            }
+
+            // Size filter
+            if let minSize = filterSizeMin, let resultSize = result.size {
+                if resultSize < minSize { return false }
+            }
+            if let maxSize = filterSizeMax, let resultSize = result.size {
+                if resultSize > maxSize { return false }
+            }
+
+            // Date filter
+            if let dateStr = result.date,
+               let resultDate = ISO8601DateFormatter().date(from: dateStr) {
+                if let fromDate = filterDateFrom, resultDate < fromDate {
+                    return false
+                }
+                if let toDate = filterDateTo, resultDate > toDate {
+                    return false
+                }
+            }
+
+            return true
+        }
+    }
+
+    private var filteredResultsList: some View {
+        let results = filteredResults.filter { result in
+            result.similarity >= SearchPreferences.shared.similarityThreshold
+        }
+
+        let columns = Array(
+            repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
+            count: SearchPreferences.shared.gridColumns
+        )
+
+        return VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+            // Stats header
+            if SearchPreferences.shared.showStats, let stats = searchManager.searchStats {
+                HStack(spacing: DesignSystem.Spacing.lg) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 11))
+                        Text(stats.total_time)
+                            .font(DesignSystem.Typography.caption)
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 11))
+                        Text("\(stats.images_searched)")
+                            .font(DesignSystem.Typography.caption)
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "speedometer")
+                            .font(.system(size: 11))
+                        Text("\(stats.images_per_second) img/s")
+                            .font(DesignSystem.Typography.caption)
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    if filteredResults.count != searchManager.results.count {
+                        HStack(spacing: 4) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.system(size: 11))
+                            Text("\(filteredResults.count)/\(searchManager.results.count)")
+                                .font(DesignSystem.Typography.caption)
+                        }
+                        .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                    Spacer()
+                }
+                .padding(.bottom, DesignSystem.Spacing.sm)
+            }
+
+            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
+                ForEach(results) { result in
+                    ResultCardView(result: result)
+                }
+            }
+        }
+    }
+
+    private var activeFilterCount: Int {
+        var count = 0
+        if !filterTypes.isEmpty { count += 1 }
+        if filterSizeMin != nil || filterSizeMax != nil { count += 1 }
+        if filterDateFrom != nil || filterDateTo != nil { count += 1 }
+        return count
+    }
+
+    // MARK: - Filter Sidebar
+    private var filterSidebar: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+            // Header
+            HStack {
+                Text("Filters")
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                Spacer()
+
+                Button(action: { clearFilters() }) {
+                    Text("Clear")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showFilterSidebar = false
+                    }
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
+                    // File Type Section
+                    filterSection(title: "File Type") {
+                        let types = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff"]
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: DesignSystem.Spacing.sm) {
+                            ForEach(types, id: \.self) { type in
+                                filterChip(type.uppercased(), isSelected: filterTypes.contains(type)) {
+                                    if filterTypes.contains(type) {
+                                        filterTypes.remove(type)
+                                    } else {
+                                        filterTypes.insert(type)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Size Section
+                    filterSection(title: "File Size") {
+                        VStack(spacing: DesignSystem.Spacing.sm) {
+                            HStack {
+                                sizePresetButton("< 1 MB", minSize: nil, maxSize: 1_000_000)
+                                sizePresetButton("1-5 MB", minSize: 1_000_000, maxSize: 5_000_000)
+                                sizePresetButton("> 5 MB", minSize: 5_000_000, maxSize: nil)
+                            }
+                            if filterSizeMin != nil || filterSizeMax != nil {
+                                HStack {
+                                    Text(sizeRangeText)
+                                        .font(DesignSystem.Typography.caption)
+                                        .foregroundColor(DesignSystem.Colors.accent)
+                                    Spacer()
+                                    Button("Clear") {
+                                        filterSizeMin = nil
+                                        filterSizeMax = nil
+                                    }
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+                        }
+                    }
+
+                    // Date Section
+                    filterSection(title: "Date Range") {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                            HStack {
+                                Text("From:")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .frame(width: 40)
+                                DatePicker("", selection: Binding(
+                                    get: { filterDateFrom ?? Date.distantPast },
+                                    set: { filterDateFrom = $0 }
+                                ), displayedComponents: .date)
+                                .datePickerStyle(.compact)
+                                .labelsHidden()
+
+                                if filterDateFrom != nil {
+                                    Button(action: { filterDateFrom = nil }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                            .font(.system(size: 12))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+
+                            HStack {
+                                Text("To:")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .frame(width: 40)
+                                DatePicker("", selection: Binding(
+                                    get: { filterDateTo ?? Date() },
+                                    set: { filterDateTo = $0 }
+                                ), displayedComponents: .date)
+                                .datePickerStyle(.compact)
+                                .labelsHidden()
+
+                                if filterDateTo != nil {
+                                    Button(action: { filterDateTo = nil }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                            .font(.system(size: 12))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .frame(width: 220)
+        .background(
+            colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground
+        )
+        .overlay(
+            Rectangle()
+                .frame(width: 1)
+                .foregroundColor(DesignSystem.Colors.border)
+                .frame(maxHeight: .infinity),
+            alignment: .leading
+        )
+    }
+
+    private func filterSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+            Text(title)
+                .font(DesignSystem.Typography.callout.weight(.medium))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+            content()
+        }
+    }
+
+    private func filterChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.xs)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func sizePresetButton(_ label: String, minSize: Int?, maxSize: Int?) -> some View {
+        let isSelected = filterSizeMin == minSize && filterSizeMax == maxSize
+        return Button(action: {
+            if isSelected {
+                filterSizeMin = nil
+                filterSizeMax = nil
+            } else {
+                filterSizeMin = minSize
+                filterSizeMax = maxSize
+            }
+        }) {
+            Text(label)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.xs)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var sizeRangeText: String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+
+        if let min = filterSizeMin, let max = filterSizeMax {
+            return "\(formatter.string(fromByteCount: Int64(min))) - \(formatter.string(fromByteCount: Int64(max)))"
+        } else if let min = filterSizeMin {
+            return "> \(formatter.string(fromByteCount: Int64(min)))"
+        } else if let max = filterSizeMax {
+            return "< \(formatter.string(fromByteCount: Int64(max)))"
+        }
+        return ""
+    }
+
+    private func clearFilters() {
+        filterTypes.removeAll()
+        filterSizeMin = nil
+        filterSizeMax = nil
+        filterDateFrom = nil
+        filterDateTo = nil
+    }
+
+    // MARK: - Duplicates Tab Content
+    @State private var showMovePanel = false
+    @State private var actionFeedback: String? = nil
+    @State private var previewImagePath: String? = nil
+
+    private var duplicatesTabContent: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                // Duplicates header
+                duplicatesHeader
+                    .padding(.horizontal, DesignSystem.Spacing.xl)
+                    .padding(.top, DesignSystem.Spacing.lg)
+
+                // Content
+                if duplicatesManager.isScanning {
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        Spacer()
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Scanning for duplicates...")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Text("This may take a moment for large libraries")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Spacer()
+                    }
+                } else if let error = duplicatesManager.errorMessage {
+                    VStack(spacing: DesignSystem.Spacing.md) {
+                        Spacer()
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(DesignSystem.Colors.warning)
+                        Text("Error scanning")
+                            .font(DesignSystem.Typography.headline)
+                        Text(error)
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                        Spacer()
+                    }
+                    .padding()
+                } else if duplicatesManager.groups.isEmpty {
+                    duplicatesEmptyState
+                } else {
+                    duplicatesResultsList
+                }
+
+                // Action bar
+                if !duplicatesManager.groups.isEmpty && duplicatesManager.totalSelected > 0 {
+                    duplicatesActionBar
+                }
+
+                // Feedback toast
+                if let feedback = actionFeedback {
+                    Text(feedback)
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .background(Capsule().fill(DesignSystem.Colors.success))
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, DesignSystem.Spacing.md)
+                }
+            }
+
+            // Image preview overlay
+            if let previewPath = previewImagePath {
+                imagePreviewOverlay(path: previewPath)
+            }
+        }
+    }
+
+    private func imagePreviewOverlay(path: String) -> some View {
+        ZStack {
+            // Dimmed background
+            Color.black.opacity(0.85)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        previewImagePath = nil
+                    }
+                }
+
+            VStack(spacing: DesignSystem.Spacing.lg) {
+                // Close button
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            previewImagePath = nil
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding()
+                }
+
+                Spacer()
+
+                // Preview image
+                if let nsImage = NSImage(contentsOfFile: path) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 600, maxHeight: 500)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
+                        .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+                }
+
+                // File info
+                VStack(spacing: DesignSystem.Spacing.xs) {
+                    Text(URL(fileURLWithPath: path).lastPathComponent)
+                        .font(DesignSystem.Typography.headline)
+                        .foregroundColor(.white)
+
+                    Text(formattedFileSize(for: path))
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+
+                // Action buttons
+                HStack(spacing: DesignSystem.Spacing.lg) {
+                    Button(action: {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    }) {
+                        HStack(spacing: DesignSystem.Spacing.xs) {
+                            Image(systemName: "folder")
+                            Text("Reveal in Finder")
+                        }
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Button(action: {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                    }) {
+                        HStack(spacing: DesignSystem.Spacing.xs) {
+                            Image(systemName: "arrow.up.right.square")
+                            Text("Open")
+                        }
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .background(Capsule().fill(DesignSystem.Colors.accent))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                Spacer()
+            }
+        }
+        .transition(.opacity)
+    }
+
+    private func formattedFileSize(for path: String) -> String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? Int64 else {
+            return ""
+        }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+
+    private var duplicatesHeader: some View {
+        VStack(spacing: DesignSystem.Spacing.md) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Find Duplicates")
+                        .font(DesignSystem.Typography.title2)
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    if !duplicatesManager.groups.isEmpty {
+                        Text("\(duplicatesManager.totalDuplicates) duplicate\(duplicatesManager.totalDuplicates == 1 ? "" : "s") in \(duplicatesManager.groups.count) group\(duplicatesManager.groups.count == 1 ? "" : "s")")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                Spacer()
+
+                // Threshold slider
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    Text("Similarity:")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    Slider(value: $duplicatesManager.threshold, in: 0.85...0.99, step: 0.01)
+                        .frame(width: 100)
+
+                    Text("\(Int(duplicatesManager.threshold * 100))%")
+                        .font(DesignSystem.Typography.caption.monospacedDigit())
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .frame(width: 35)
+                }
+
+                Button(action: { duplicatesManager.scanForDuplicates() }) {
+                    HStack(spacing: DesignSystem.Spacing.xs) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Scan")
+                    }
+                    .font(DesignSystem.Typography.callout.weight(.medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accent)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(duplicatesManager.isScanning)
+            }
+
+            // Quick actions when groups exist
+            if !duplicatesManager.groups.isEmpty {
+                HStack {
+                    Button(action: { duplicatesManager.autoSelectAllSmaller() }) {
+                        HStack(spacing: DesignSystem.Spacing.xs) {
+                            Image(systemName: "checkmark.circle")
+                            Text("Auto-select smaller files")
+                        }
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Spacer()
+                }
+            }
+        }
+        .padding(.bottom, DesignSystem.Spacing.md)
+    }
+
+    private var duplicatesEmptyState: some View {
+        VStack(spacing: DesignSystem.Spacing.lg) {
+            Spacer()
+
+            Image(systemName: "square.on.square.dashed")
+                .font(.system(size: 48, weight: .light))
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+            VStack(spacing: DesignSystem.Spacing.sm) {
+                Text("No duplicates found")
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                Text("Click Scan to search your indexed images for duplicates")
+                    .font(DesignSystem.Typography.callout)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private var duplicatesResultsList: some View {
+        ScrollView {
+            LazyVStack(spacing: DesignSystem.Spacing.lg) {
+                ForEach(duplicatesManager.groups) { group in
+                    duplicateGroupCard(group)
+                }
+            }
+            .padding(DesignSystem.Spacing.xl)
+        }
+    }
+
+    private func duplicateGroupCard(_ group: DuplicateGroup) -> some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Group header
+            HStack {
+                Text("Group \(group.id)")
+                    .font(DesignSystem.Typography.headline)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                Text("\(group.images.count) images")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Spacer()
+
+                Button(action: { duplicatesManager.autoSelectSmaller(groupId: group.id) }) {
+                    Text("Keep largest")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            // Images grid
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
+                ForEach(Array(group.images.enumerated()), id: \.element.path) { index, image in
+                    duplicateImageCard(image, isFirst: index == 0, groupId: group.id)
+                }
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .fill(colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+        )
+    }
+
+    private func duplicateImageCard(_ image: DuplicateImage, isFirst: Bool, groupId: Int) -> some View {
+        VStack(spacing: DesignSystem.Spacing.sm) {
+            // Image thumbnail
+            ZStack(alignment: .topLeading) {
+                // Clickable image area
+                ZStack {
+                    Rectangle()
+                        .fill(colorScheme == .dark ? Color.black.opacity(0.3) : Color.gray.opacity(0.1))
+
+                    AsyncThumbnailView(path: image.path, contentMode: .fit)
+                }
+                .frame(height: 140)
+                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                        .stroke(image.isSelected ? DesignSystem.Colors.error : (isFirst ? DesignSystem.Colors.success : DesignSystem.Colors.border.opacity(0.5)), lineWidth: image.isSelected || isFirst ? 2 : 1)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        previewImagePath = image.path
+                    }
+                }
+
+                // Top row: Badge on left, checkbox on right
+                HStack {
+                    // Best quality badge
+                    if isFirst {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 8))
+                            Text("Best")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(DesignSystem.Colors.success))
+                    }
+
+                    Spacer()
+
+                    // Selection checkbox
+                    Button(action: {
+                        duplicatesManager.toggleSelection(groupId: groupId, imagePath: image.path)
+                    }) {
+                        ZStack {
+                            Circle()
+                                .fill(image.isSelected ? DesignSystem.Colors.error : Color.white.opacity(0.9))
+                                .frame(width: 24, height: 24)
+                                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+
+                            if image.isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.white)
+                            } else {
+                                Circle()
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1.5)
+                                    .frame(width: 22, height: 22)
+                            }
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(DesignSystem.Spacing.sm)
+
+                // Preview hint on hover
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Image(systemName: "eye.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                        Spacer()
+                    }
+                    .padding(.bottom, DesignSystem.Spacing.sm)
+                }
+                .opacity(0.7)
+            }
+
+            // Image info
+            VStack(alignment: .leading, spacing: 3) {
+                Text(URL(fileURLWithPath: image.path).lastPathComponent)
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HStack(spacing: 6) {
+                    // Size with icon
+                    HStack(spacing: 2) {
+                        Image(systemName: "doc")
+                            .font(.system(size: 9))
+                        Text(image.formattedSize)
+                    }
+                    .font(DesignSystem.Typography.caption2)
+                    .foregroundColor(isFirst ? DesignSystem.Colors.success : DesignSystem.Colors.secondaryText)
+
+                    // Match percentage
+                    HStack(spacing: 2) {
+                        Image(systemName: "percent")
+                            .font(.system(size: 8))
+                        Text("\(Int(image.similarity * 100))%")
+                    }
+                    .font(DesignSystem.Typography.caption2)
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(DesignSystem.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md + 2)
+                .fill(image.isSelected ? DesignSystem.Colors.error.opacity(0.1) : Color.clear)
+        )
+    }
+
+    private var duplicatesActionBar: some View {
+        HStack(spacing: DesignSystem.Spacing.lg) {
+            Text("\(duplicatesManager.totalSelected) selected")
+                .font(DesignSystem.Typography.callout)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+            Spacer()
+
+            Button(action: {
+                showMovePanel = true
+            }) {
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    Image(systemName: "folder")
+                    Text("Move to Folder")
+                }
+                .font(DesignSystem.Typography.callout)
+                .foregroundColor(DesignSystem.Colors.accent)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .background(
+                    Capsule()
+                        .stroke(DesignSystem.Colors.accent, lineWidth: 1)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .fileImporter(isPresented: $showMovePanel, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result {
+                    duplicatesManager.moveSelected(to: url) { moved, failed in
+                        withAnimation {
+                            actionFeedback = "Moved \(moved) file\(moved == 1 ? "" : "s")"
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation { actionFeedback = nil }
+                        }
+                    }
+                }
+            }
+
+            Button(action: {
+                duplicatesManager.deleteSelected { deleted, failed in
+                    withAnimation {
+                        actionFeedback = "Moved \(deleted) file\(deleted == 1 ? "" : "s") to Trash"
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation { actionFeedback = nil }
+                    }
+                }
+            }) {
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    Image(systemName: "trash")
+                    Text("Move to Trash")
+                }
+                .font(DesignSystem.Typography.callout)
+                .foregroundColor(.white)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .background(
+                    Capsule()
+                        .fill(DesignSystem.Colors.error)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                .fill(colorScheme == .dark ? DesignSystem.Colors.darkTertiaryBackground : DesignSystem.Colors.tertiaryBackground)
+        )
+        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(.bottom, DesignSystem.Spacing.lg)
+    }
+
     // MARK: - Modern Search Bar
     @FocusState private var isSearchFocused: Bool
 
@@ -2817,13 +3946,12 @@ struct ContentView: View {
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
 
-            TextField(isIndexing ? "Indexing in progress..." : "Search your images with natural language...", text: $searchText)
+            TextField(isIndexing ? "Search indexed images (indexing in progress)..." : "Search your images with natural language...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(DesignSystem.Typography.body)
                 .focused($isSearchFocused)
-                .disabled(isIndexing)
                 .onSubmit {
-                    if !searchManager.isSearching && !searchText.isEmpty && !isIndexing {
+                    if !searchManager.isSearching && !searchText.isEmpty {
                         performSearch()
                     }
                     // Keep focus after searching
@@ -2835,9 +3963,6 @@ struct ContentView: View {
                     // Cancel previous timer
                     searchDebounceTimer?.invalidate()
 
-                    // Don't search while indexing
-                    if isIndexing { return }
-
                     // Clear results if search is empty
                     if newValue.isEmpty {
                         searchManager.clearResults()
@@ -2846,7 +3971,7 @@ struct ContentView: View {
 
                     // Debounce: wait 400ms before searching
                     searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                        if !searchManager.isSearching && !newValue.isEmpty && !self.isIndexing {
+                        if !searchManager.isSearching && !newValue.isEmpty {
                             performSearch()
                         }
                     }
@@ -2910,6 +4035,29 @@ struct ContentView: View {
                     removal: .scale(scale: 0.9).combined(with: .opacity)
                 ))
             }
+
+            // Filter button
+            Button(action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showFilterSidebar.toggle()
+                }
+            }) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: showFilterSidebar ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(activeFilterCount > 0 || showFilterSidebar ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+
+                    if activeFilterCount > 0 {
+                        Text("\(activeFilterCount)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 14, height: 14)
+                            .background(Circle().fill(DesignSystem.Colors.accent))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(DesignSystem.Spacing.lg)
         .background(
@@ -2996,6 +4144,17 @@ struct ContentView: View {
                 }
 
                 Spacer()
+
+                // Cancel button
+                Button(action: { cancelIndexing() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Cancel")
+                    }
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.error)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
             .font(DesignSystem.Typography.caption)
             .foregroundColor(DesignSystem.Colors.secondaryText)
@@ -3010,6 +4169,25 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
                 .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
         )
+    }
+
+    private func cancelIndexing() {
+        if let process = indexingProcess, process.isRunning {
+            process.terminate()
+        }
+        DispatchQueue.main.async {
+            isIndexing = false
+            indexingProcess = nil
+            indexingPercent = 0
+            indexingETA = ""
+            indexingProgress = ""
+            indexingBatchInfo = ""
+            indexingSpeed = 0
+            indexingElapsed = 0
+            batchTimes = []
+            // Reload index stats since partial index was saved
+            loadIndexStats()
+        }
     }
 
     // MARK: - Indexing Report View
@@ -3648,6 +4826,11 @@ struct ContentView: View {
             let process = Process()
             let pipe = Pipe()
 
+            // Store process reference for cancellation
+            DispatchQueue.main.async {
+                self.indexingProcess = process
+            }
+
             process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
             process.arguments = [config.embeddingScriptPath, url.path]
 
@@ -3678,13 +4861,16 @@ struct ContentView: View {
                 process.terminationHandler = { _ in
                     DispatchQueue.main.async {
                         self.isIndexing = false
-                        // Reload recent images after indexing
+                        self.indexingProcess = nil
+                        // Reload recent images and stats after indexing
                         self.loadRecentImages()
+                        self.loadIndexStats()
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.isIndexing = false
+                    self.indexingProcess = nil
                     self.indexingProgress = "Error: \(error.localizedDescription)"
                 }
             }
