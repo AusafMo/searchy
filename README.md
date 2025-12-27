@@ -75,16 +75,32 @@ Access via the gear icon in the header.
 - Real-time results with 400ms debounce
 - Similarity scores displayed as color-coded percentages
 - Adjustable threshold to filter weak matches
+- Filter results by file type, date range, and size
+
+**Duplicate Detection**
+- Find visually similar images across your library
+- Adjustable similarity threshold (85-99%)
+- Auto-select smaller duplicates for cleanup
+- Preview images before deleting
+- Move or trash duplicates in bulk
 
 **Spotlight-Style Interface**
 - Global hotkey `⌘⇧Space` summons a floating search window
 - Displays recent images on launch
 - Fully keyboard-navigable
+- Click images to preview full-size
 
 **Auto-Indexing**
 - Monitors configured directories automatically
 - Supports custom directories with prefix, suffix, or regex filters
 - Incremental indexing — only processes new files
+- Search while indexing is in progress
+- Cancel indexing anytime
+
+**Smart Filtering**
+- Automatically skips system directories (Library, node_modules, site-packages, etc.)
+- Ignores hidden files and build artifacts
+- Focuses only on your actual photos
 
 **Zero-Config Setup**
 - Automatic Python installation (via Homebrew or standalone)
@@ -225,6 +241,7 @@ The app expects a FastAPI/HTTP server. Implement these endpoints:
 | `/search` | POST | `{"query": str, "n_results": int, "threshold": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
 | `/recent` | GET | `?n=int` | `{"results": [{"path": str, "similarity": float}, ...]}` |
 | `/index-count` | GET | — | `{"count": int}` |
+| `/duplicates` | POST | `{"threshold": float, "data_dir": str}` | `{"groups": [...], "total_duplicates": int}` |
 
 #### 3. Script Interface
 
@@ -312,9 +329,9 @@ Options:
 - [x] Recent images display
 - [x] Fast indexing with image resizing
 - [x] Bundled .app distribution with auto-setup
-- [ ] Duplicate image detection
+- [x] Duplicate image detection
+- [x] Date, size, and file type filters
 - [ ] Alternative/smaller models
-- [ ] Date, size, and file type filters
 
 ---
 
