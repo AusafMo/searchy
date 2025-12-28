@@ -1747,6 +1747,9 @@ struct SpotlightSearchView: View {
     @State private var hasPerformedSearch = false
     @State private var isLoadingRecent = false
     @State private var searchDebounceTimer: Timer?
+    @State private var pastedImage: NSImage? = nil
+    @State private var isDropTargeted = false
+    @State private var keyMonitor: Any? = nil
     let previousApp: NSRunningApplication?
     @Environment(\.colorScheme) var colorScheme
     @FocusState private var isSearchFocused: Bool
@@ -1800,60 +1803,100 @@ struct SpotlightSearchView: View {
         VStack(spacing: 0) {
                 // Compact search bar
                 HStack(spacing: DesignSystem.Spacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.6))
+                    // Show pasted image or search icon
+                    if let image = pastedImage {
+                        ZStack(alignment: .topTrailing) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 28, height: 28)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.white.opacity(0.8), lineWidth: 2)
+                                )
 
-                    TextField("Search images...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(DesignSystem.Typography.title)
-                        .foregroundColor(.white)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            if !searchManager.isSearching && !searchText.isEmpty {
-                                // Cancel debounce timer and search immediately
-                                searchDebounceTimer?.invalidate()
-                                performSearch()
+                            Button(action: {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    pastedImage = nil
+                                    hasPerformedSearch = false
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                                    .background(Circle().fill(Color.black.opacity(0.6)))
                             }
+                            .buttonStyle(PlainButtonStyle())
+                            .offset(x: 5, y: -5)
                         }
-                        .onChange(of: searchText) { oldValue, newValue in
-                            selectedIndex = 0
 
-                            // Cancel any existing timer
-                            searchDebounceTimer?.invalidate()
+                        Text("Finding similar...")
+                            .font(DesignSystem.Typography.title)
+                            .foregroundColor(.white.opacity(0.7))
 
-                            // If search text is empty, show recent images
-                            if newValue.isEmpty {
-                                hasPerformedSearch = false
-                                return
-                            }
+                        Spacer()
 
-                            // Debounce: wait 400ms after user stops typing before searching
-                            searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                                if !searchManager.isSearching && !newValue.isEmpty {
+                        if searchManager.isSearching {
+                            ProgressView()
+                                .scaleEffect(1.0)
+                        }
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color.black.opacity(0.6))
+
+                        TextField("Search images...", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(DesignSystem.Typography.title)
+                            .foregroundColor(.white)
+                            .focused($isSearchFocused)
+                            .onSubmit {
+                                if !searchManager.isSearching && !searchText.isEmpty {
+                                    // Cancel debounce timer and search immediately
+                                    searchDebounceTimer?.invalidate()
                                     performSearch()
                                 }
                             }
-                        }
-
-                    if searchManager.isSearching {
-                        ProgressView()
-                            .scaleEffect(1.0)
-                            .transition(.scale.combined(with: .opacity))
-                    } else if !searchText.isEmpty {
-                        Button(action: {
-                            withAnimation {
-                                searchText = ""
+                            .onChange(of: searchText) { oldValue, newValue in
                                 selectedIndex = 0
-                                hasPerformedSearch = false
+
+                                // Cancel any existing timer
+                                searchDebounceTimer?.invalidate()
+
+                                // If search text is empty, show recent images
+                                if newValue.isEmpty {
+                                    hasPerformedSearch = false
+                                    return
+                                }
+
+                                // Debounce: wait 400ms after user stops typing before searching
+                                searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                                    if !searchManager.isSearching && !newValue.isEmpty {
+                                        performSearch()
+                                    }
+                                }
                             }
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(Color.black.opacity(0.4))
+
+                        if searchManager.isSearching {
+                            ProgressView()
+                                .scaleEffect(1.0)
+                                .transition(.scale.combined(with: .opacity))
+                        } else if !searchText.isEmpty {
+                            Button(action: {
+                                withAnimation {
+                                    searchText = ""
+                                    selectedIndex = 0
+                                    hasPerformedSearch = false
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(Color.black.opacity(0.4))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .transition(.scale.combined(with: .opacity))
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .padding(DesignSystem.Spacing.md)
@@ -1861,14 +1904,16 @@ struct SpotlightSearchView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
                         .stroke(
-                            LinearGradient(
-                                colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.5
+                            isDropTargeted ?
+                                LinearGradient(colors: [Color.white, Color.white.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing) :
+                                LinearGradient(colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            lineWidth: isDropTargeted ? 3 : 1.5
                         )
                 )
+                .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
+                    handleDroppedImage(providers: providers)
+                    return true
+                }
                 .padding(.horizontal, DesignSystem.Spacing.md)
 
                 // Results area
@@ -1954,9 +1999,13 @@ struct SpotlightSearchView: View {
         .onAppear {
             // Load recent images and focus search field
             loadRecentImages()
+            setupPasteMonitor()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
             }
+        }
+        .onDisappear {
+            removePasteMonitor()
         }
         .onChange(of: searchManager.isSearching) { _, _ in
             // Always restore focus on any search state change
@@ -2061,6 +2110,88 @@ struct SpotlightSearchView: View {
         selectedIndex = 0
         hasPerformedSearch = true
         searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
+    }
+
+    // MARK: - Paste/Drop Handling
+    private func setupPasteMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Check for Backspace/Delete to clear pasted image
+            if self.pastedImage != nil && (event.keyCode == 51 || event.keyCode == 117) {
+                DispatchQueue.main.async {
+                    self.pastedImage = nil
+                    self.hasPerformedSearch = false
+                }
+                return nil // Consume the event
+            }
+
+            // Check for Cmd+V
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                let pasteboard = NSPasteboard.general
+                if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil),
+                       let image = images.first as? NSImage {
+                        DispatchQueue.main.async {
+                            self.pastedImage = image
+                            self.hasPerformedSearch = true
+                            self.saveAndSearchImage(image)
+                        }
+                        return nil // Consume the event
+                    }
+                }
+            }
+            return event
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    private func handleDroppedImage(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      let image = NSImage(contentsOf: url) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.hasPerformedSearch = true
+                    self.searchManager.findSimilar(imagePath: url.path)
+                }
+            }
+        } else if provider.hasItemConformingToTypeIdentifier("public.image") {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.hasPerformedSearch = true
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func saveAndSearchImage(_ image: NSImage) {
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFile = tempDir.appendingPathComponent("searchy_paste_\(UUID().uuidString).png")
+
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return
+        }
+
+        do {
+            try pngData.write(to: tempFile)
+            searchManager.findSimilar(imagePath: tempFile.path)
+        } catch {
+            print("Failed to save pasted image: \(error)")
+        }
     }
 
     private func copyImageAtIndex(_ index: Int) {
@@ -2709,6 +2840,7 @@ struct ImageCard: View {
     let result: SearchResult
     var showSimilarity: Bool = false
     var cardHeight: CGFloat = 200
+    var onFindSimilar: ((String) -> Void)? = nil
 
     @State private var isHovered = false
     @State private var showCopied = false
@@ -2858,6 +2990,18 @@ struct ImageCard: View {
             }
             .buttonStyle(PlainButtonStyle())
 
+            if onFindSimilar != nil {
+                Button(action: { onFindSimilar?(result.path) }) {
+                    Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.white.opacity(0.2)).background(.ultraThinMaterial).clipShape(Circle()))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Find similar images")
+            }
+
             Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
                 Image(systemName: "folder")
                     .font(.system(size: 13, weight: .medium))
@@ -2904,6 +3048,11 @@ struct ImageCard: View {
         }
         Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
             Label("Reveal in Finder", systemImage: "folder")
+        }
+        if onFindSimilar != nil {
+            Button(action: { onFindSimilar?(result.path) }) {
+                Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+            }
         }
         Divider()
         Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: result.path)) }) {
@@ -3271,6 +3420,59 @@ class SearchManager: ObservableObject {
             }
         }
     }
+
+    func findSimilar(imagePath: String, numberOfResults: Int = 20) {
+        guard !isSearching else { return }
+
+        DispatchQueue.main.async {
+            self.isSearching = true
+            self.errorMessage = nil
+            self.results = []
+            self.searchStats = nil
+        }
+
+        Task {
+            do {
+                let response = try await self.performFindSimilar(imagePath: imagePath, numberOfResults: numberOfResults)
+                DispatchQueue.main.async {
+                    self.results = response.results
+                    self.searchStats = response.stats
+                    self.isSearching = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = error.localizedDescription
+                    self.isSearching = false
+                }
+            }
+        }
+    }
+
+    private func performFindSimilar(imagePath: String, numberOfResults: Int) async throws -> SearchResponse {
+        guard let serverURL = await self.serverURL else {
+            throw NSError(domain: "Server not ready", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server is still starting up. Please wait a moment."])
+        }
+        let url = serverURL.appendingPathComponent("similar")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "image_path": imagePath,
+            "top_k": numberOfResults,
+            "data_dir": "/Users/ausaf/Library/Application Support/searchy"
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let response = try JSONDecoder().decode(SearchResponse.self, from: data)
+
+        if let errorMessage = response.error {
+            throw NSError(domain: "SearchError", code: 0, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        return response
+    }
 }
 
 // MARK: - Indexing Progress Models
@@ -3525,6 +3727,9 @@ struct ContentView: View {
     @State private var searchDebounceTimer: Timer?
     @State private var recentImages: [SearchResult] = []
     @State private var isLoadingRecent = false
+    @State private var pastedImage: NSImage? = nil
+    @State private var isDropTargeted = false
+    @State private var keyMonitor: Any? = nil
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -3572,6 +3777,7 @@ struct ContentView: View {
         .onAppear {
             loadRecentImages()
             loadIndexStats()
+            setupPasteMonitor()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -3579,6 +3785,7 @@ struct ContentView: View {
         }
         .onDisappear {
             searchManager.cancelSearch()
+            removePasteMonitor()
         }
     }
 
@@ -3849,7 +4056,13 @@ struct ContentView: View {
                 GridItem(.flexible(), spacing: 20)
             ], spacing: 24) {
                 ForEach(results) { result in
-                    ImageCard(result: result, showSimilarity: true)
+                    ImageCard(
+                        result: result,
+                        showSimilarity: true,
+                        onFindSimilar: { path in
+                            searchManager.findSimilar(imagePath: path)
+                        }
+                    )
                 }
             }
         }
@@ -4641,72 +4854,117 @@ struct ContentView: View {
 
     private var modernSearchBar: some View {
         HStack(spacing: 12) {
-            // Simple search icon
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(DesignSystem.Colors.tertiaryText)
+            // Pasted image preview or search icon
+            if let image = pastedImage {
+                // Show pasted image thumbnail
+                ZStack(alignment: .topTrailing) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(DesignSystem.Colors.accent, lineWidth: 2)
+                        )
 
-            // Clean text field
-            TextField("Search your images with natural language...", text: $searchText)
-                .textFieldStyle(PlainTextFieldStyle())
-                .font(.system(size: 14))
-                .focused($isSearchFocused)
-                .onSubmit {
-                    if !searchManager.isSearching && !searchText.isEmpty {
-                        performSearch()
+                    // Clear button
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            pastedImage = nil
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        isSearchFocused = true
-                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .offset(x: 6, y: -6)
                 }
-                .onChange(of: searchText) { oldValue, newValue in
-                    searchDebounceTimer?.invalidate()
-                    if newValue.isEmpty {
-                        searchManager.clearResults()
-                        return
-                    }
-                    searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                        if !searchManager.isSearching && !newValue.isEmpty {
+
+                Text("Finding similar images...")
+                    .font(.system(size: 14))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Spacer()
+
+                if searchManager.isSearching {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                }
+            } else {
+                // Normal search mode
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                // Clean text field
+                TextField("Search by text or drop an image here...", text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 14))
+                    .focused($isSearchFocused)
+                    .onSubmit {
+                        if !searchManager.isSearching && !searchText.isEmpty {
                             performSearch()
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isSearchFocused = true
+                        }
+                    }
+                    .onChange(of: searchText) { oldValue, newValue in
+                        // Clear pasted image when user starts typing
+                        if pastedImage != nil && !newValue.isEmpty {
+                            pastedImage = nil
+                        }
+                        searchDebounceTimer?.invalidate()
+                        if newValue.isEmpty {
+                            searchManager.clearResults()
+                            return
+                        }
+                        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                            if !searchManager.isSearching && !newValue.isEmpty {
+                                performSearch()
+                            }
+                        }
+                    }
+
+                // Right side: clear button, loading, or filter
+                if searchManager.isSearching {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                        .transition(.opacity)
+                } else if !searchText.isEmpty {
+                    Button(action: { searchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .transition(.opacity)
+                }
+
+                // Filter button (subtle) - only in text search mode
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        showFilterSidebar.toggle()
+                    }
+                }) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(activeFilterCount > 0 ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+
+                        if activeFilterCount > 0 {
+                            Circle()
+                                .fill(DesignSystem.Colors.accent)
+                                .frame(width: 6, height: 6)
+                                .offset(x: 2, y: -2)
                         }
                     }
                 }
-
-            // Right side: clear button, loading, or filter
-            if searchManager.isSearching {
-                ProgressView()
-                    .scaleEffect(0.65)
-                    .transition(.opacity)
-            } else if !searchText.isEmpty {
-                Button(action: { searchText = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                }
                 .buttonStyle(PlainButtonStyle())
-                .transition(.opacity)
             }
-
-            // Filter button (subtle)
-            Button(action: {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showFilterSidebar.toggle()
-                }
-            }) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(activeFilterCount > 0 ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-
-                    if activeFilterCount > 0 {
-                        Circle()
-                            .fill(DesignSystem.Colors.accent)
-                            .frame(width: 6, height: 6)
-                            .offset(x: 2, y: -2)
-                    }
-                }
-            }
-            .buttonStyle(PlainButtonStyle())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -4754,6 +5012,22 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: isSearchFocused)
         .contentShape(Rectangle())
         .onTapGesture { isSearchFocused = true }
+        .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDroppedImage(providers: providers)
+            return true
+        }
+        .overlay(
+            Group {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(DesignSystem.Colors.accent, lineWidth: 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                        )
+                }
+            }
+        )
     }
 
     // MARK: - Indexing Progress View
@@ -5166,7 +5440,12 @@ struct ContentView: View {
                         GridItem(.flexible(), spacing: 20)
                     ], spacing: 24) {
                         ForEach(recentImages.prefix(8)) { result in
-                            ImageCard(result: result)
+                            ImageCard(
+                                result: result,
+                                onFindSimilar: { path in
+                                    searchManager.findSimilar(imagePath: path)
+                                }
+                            )
                         }
                     }
                     .padding(20)
@@ -5316,11 +5595,17 @@ struct ContentView: View {
                     ForEach(searchManager.results.filter { result in
                         result.similarity >= SearchPreferences.shared.similarityThreshold
                     }) { result in
-                        ImageCard(result: result, showSimilarity: true)
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.8).combined(with: .opacity),
-                                removal: .scale(scale: 0.9).combined(with: .opacity)
-                            ))
+                        ImageCard(
+                            result: result,
+                            showSimilarity: true,
+                            onFindSimilar: { path in
+                                searchManager.findSimilar(imagePath: path)
+                            }
+                        )
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.8).combined(with: .opacity),
+                            removal: .scale(scale: 0.9).combined(with: .opacity)
+                        ))
                     }
                 }
             }
@@ -5333,7 +5618,105 @@ struct ContentView: View {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
         searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
     }
-    
+
+    // MARK: - Image Paste/Drop Handling
+    private func setupPasteMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Check for Backspace/Delete to clear pasted image
+            if self.pastedImage != nil && (event.keyCode == 51 || event.keyCode == 117) {
+                DispatchQueue.main.async {
+                    self.pastedImage = nil
+                    self.searchManager.clearResults()
+                }
+                return nil // Consume the event
+            }
+
+            // Check for Cmd+V
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                // Check if clipboard has an image
+                let pasteboard = NSPasteboard.general
+                if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil),
+                       let image = images.first as? NSImage {
+                        DispatchQueue.main.async {
+                            self.pastedImage = image
+                            self.saveAndSearchImage(image)
+                        }
+                        return nil // Consume the event
+                    }
+                }
+            }
+            return event // Let other events pass through
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    private func handleImagePaste(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        // Try to load as image data
+        if provider.hasItemConformingToTypeIdentifier("public.image") {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func handleDroppedImage(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        // Try to load as file URL first (for dragged files)
+        if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      let image = NSImage(contentsOf: url) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    // Use the file directly if it exists
+                    self.searchManager.findSimilar(imagePath: url.path)
+                }
+            }
+        } else if provider.hasItemConformingToTypeIdentifier("public.image") {
+            // Fall back to image data
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func saveAndSearchImage(_ image: NSImage) {
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFile = tempDir.appendingPathComponent("searchy_paste_\(UUID().uuidString).png")
+
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return
+        }
+
+        do {
+            try pngData.write(to: tempFile)
+            searchManager.findSimilar(imagePath: tempFile.path)
+        } catch {
+            print("Failed to save pasted image: \(error)")
+        }
+    }
+
     private func selectAndIndexFolder() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false

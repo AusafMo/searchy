@@ -251,6 +251,12 @@ class TextSearchRequest(BaseModel):
     data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
 
 
+class SimilarRequest(BaseModel):
+    image_path: str
+    top_k: int = 20
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+
+
 @app.post("/text-search")
 def text_search(request: TextSearchRequest):
     """
@@ -325,6 +331,40 @@ def text_search(request: TextSearchRequest):
         }
     except Exception as e:
         logger.error(f"Error during text search: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/similar")
+def find_similar_images(request: SimilarRequest):
+    """
+    Find images similar to a given image using CLIP embeddings.
+    """
+    try:
+        logger.info(f"Finding images similar to: {request.image_path}")
+        searcher = get_searcher()
+        results = searcher.find_similar(request.image_path, request.data_dir, request.top_k)
+
+        if "error" in results:
+            raise HTTPException(status_code=400, detail=results["error"])
+
+        # Filter and enrich results with file metadata
+        if "results" in results:
+            filtered_results = []
+            for result in results["results"]:
+                if not is_user_image(result["path"]):
+                    continue
+                metadata = get_file_metadata(result["path"])
+                result["size"] = metadata["size"]
+                result["date"] = metadata["date"]
+                result["type"] = metadata["type"]
+                filtered_results.append(result)
+            results["results"] = filtered_results
+
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding similar images: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
