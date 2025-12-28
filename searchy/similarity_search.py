@@ -89,6 +89,81 @@ class CLIPSearcher:
         embedding = text_features.cpu().numpy()[0]
         return embedding / np.linalg.norm(embedding)
 
+    def generate_image_embedding(self, image_path):
+        """Generate CLIP embedding for an image file."""
+        from PIL import Image
+        try:
+            image = Image.open(image_path)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            inputs = self.processor(images=image, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                image_features = self.model.get_image_features(**inputs)
+
+            embedding = image_features.cpu().numpy()[0]
+            return embedding / np.linalg.norm(embedding)
+        except Exception as e:
+            print(f"Error generating embedding for {image_path}: {e}", file=sys.stderr)
+            return None
+
+    def find_similar(self, image_path, data_dir, top_k=20):
+        """Find images similar to the given image."""
+        try:
+            start_time = time.time()
+
+            # Generate embedding for query image
+            query_embedding = self.generate_image_embedding(image_path)
+            if query_embedding is None:
+                return {"error": f"Could not process image: {image_path}"}
+
+            # Load index
+            filename = os.path.join(data_dir, 'image_index.bin')
+            if not os.path.exists(filename):
+                return {"error": "No images indexed yet. Please index a folder first."}
+
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+
+            embeddings = data['embeddings']
+            image_paths = data['image_paths']
+
+            if len(embeddings) == 0:
+                return {"error": "No images indexed yet."}
+
+            # Compute similarities
+            similarities = embeddings @ query_embedding
+            sorted_indices = np.argsort(similarities)[::-1]
+
+            # Build results, excluding the query image itself
+            results = []
+            for idx in sorted_indices:
+                if image_paths[idx] == image_path:
+                    continue  # Skip the query image
+                if len(results) >= top_k:
+                    break
+                results.append({
+                    "path": image_paths[idx],
+                    "similarity": float(similarities[idx])
+                })
+
+            total_time = time.time() - start_time
+            return {
+                "results": results,
+                "query_image": image_path,
+                "stats": {
+                    "total_time": f"{total_time:.2f}s",
+                    "images_searched": len(embeddings),
+                    "images_per_second": f"{len(embeddings)/total_time:.2f}"
+                }
+            }
+
+        except Exception as e:
+            print(f"Error in find_similar: {e}", file=sys.stderr)
+            return {"error": str(e)}
+
     def search(self, query, data_dir, top_k=5, ocr_weight=0.3):
         try:
             start_time = time.time()
