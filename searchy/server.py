@@ -51,6 +51,7 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int
     data_dir: str
+    ocr_weight: float = 0.3  # Weight for OCR text matching (0-1)
 
 
 class DuplicatesRequest(BaseModel):
@@ -217,12 +218,12 @@ def find_duplicates(request: DuplicatesRequest):
 @app.post("/search")
 def search(request: SearchRequest):
     """
-    Perform a similarity search based on the query.
+    Perform a hybrid search combining semantic similarity and OCR text matching.
     """
     try:
         logger.info(f"Received search request: {request}")
         searcher = get_searcher()
-        results = searcher.search(request.query, request.data_dir, request.top_k)
+        results = searcher.search(request.query, request.data_dir, request.top_k, request.ocr_weight)
 
         # Filter and enrich results with file metadata
         if results and "results" in results:
@@ -242,6 +243,90 @@ def search(request: SearchRequest):
     except Exception as e:
         logger.error(f"Error during search: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class TextSearchRequest(BaseModel):
+    query: str
+    top_k: int = 20
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+
+
+@app.post("/text-search")
+def text_search(request: TextSearchRequest):
+    """
+    Search images by OCR text only (no semantic search).
+    Useful for finding images with specific text content.
+    """
+    try:
+        logger.info(f"Received text search request: {request.query}")
+        start_time = time.time()
+
+        filename = os.path.join(request.data_dir, 'image_index.bin')
+        if not os.path.exists(filename):
+            return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0}}
+
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+
+        if not isinstance(data, dict) or 'image_paths' not in data:
+            return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0}}
+
+        image_paths = data['image_paths']
+        ocr_texts = data.get('ocr_texts', [''] * len(image_paths))
+
+        # Find images with matching OCR text
+        query_lower = request.query.lower()
+        results = []
+
+        for i, (path, ocr_text) in enumerate(zip(image_paths, ocr_texts)):
+            if not ocr_text:
+                continue
+
+            ocr_lower = ocr_text.lower()
+            if query_lower in ocr_lower:
+                # Exact match - highest priority
+                score = 1.0
+            else:
+                # Word-level matching
+                query_words = set(query_lower.split())
+                ocr_words = set(ocr_lower.split())
+                matches = len(query_words & ocr_words)
+                if matches > 0:
+                    score = matches / len(query_words)
+                else:
+                    continue  # No match
+
+            if is_user_image(path):
+                metadata = get_file_metadata(path)
+                results.append({
+                    "path": path,
+                    "similarity": score,
+                    "ocr_text": ocr_text[:300],  # Include found text
+                    "size": metadata["size"],
+                    "date": metadata["date"],
+                    "type": metadata["type"]
+                })
+
+        # Sort by score descending
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        results = results[:request.top_k]
+
+        total_time = time.time() - start_time
+        ocr_count = sum(1 for t in ocr_texts if t.strip())
+
+        return {
+            "results": results,
+            "stats": {
+                "total_time": f"{total_time:.2f}s",
+                "images_searched": len(image_paths),
+                "images_with_ocr": ocr_count,
+                "matches_found": len(results)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error during text search: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @app.get("/status")
 def get_status():

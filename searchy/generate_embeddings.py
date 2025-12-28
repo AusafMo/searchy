@@ -11,6 +11,62 @@ import argparse
 import re
 import time
 
+# OCR support using macOS Vision framework
+try:
+    import Quartz
+    from Foundation import NSURL
+    import Vision
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+    print("OCR not available (install pyobjc-framework-Vision)", file=sys.stderr)
+
+
+def extract_text_from_image(image_path):
+    """Extract text from image using macOS Vision framework."""
+    if not OCR_AVAILABLE:
+        return ""
+
+    try:
+        # Create image source from file
+        image_url = NSURL.fileURLWithPath_(image_path)
+        image_source = Quartz.CGImageSourceCreateWithURL(image_url, None)
+        if not image_source:
+            return ""
+
+        cg_image = Quartz.CGImageSourceCreateImageAtIndex(image_source, 0, None)
+        if not cg_image:
+            return ""
+
+        # Create text recognition request
+        request = Vision.VNRecognizeTextRequest.alloc().init()
+        request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+        request.setUsesLanguageCorrection_(True)
+
+        # Create handler and perform request
+        handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, None)
+        success = handler.performRequests_error_([request], None)
+
+        if not success:
+            return ""
+
+        # Extract recognized text
+        results = request.results()
+        if not results:
+            return ""
+
+        text_parts = []
+        for observation in results:
+            top_candidate = observation.topCandidates_(1)
+            if top_candidate and len(top_candidate) > 0:
+                text_parts.append(top_candidate[0].string())
+
+        return " ".join(text_parts)
+
+    except Exception as e:
+        print(f"OCR error for {image_path}: {e}", file=sys.stderr)
+        return ""
+
 # Global model cache to avoid reloading
 _model = None
 _processor = None
@@ -104,12 +160,14 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     # Load existing index
     existing_embeddings = []
     existing_paths = []
+    existing_ocr_texts = []
     if os.path.exists(output_file):
         print("Loading existing index...", file=sys.stderr)
         with open(output_file, 'rb') as f:
             data = pickle.load(f)
             existing_embeddings = data['embeddings'].tolist()
             existing_paths = data['image_paths']
+            existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
             print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
 
     # Get CLIP model
@@ -144,6 +202,7 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     # Process new files in batches
     embeddings = []
     valid_paths = []
+    ocr_texts = []
 
     # Filter out already indexed files
     files_to_process = [f for f in new_files if f not in existing_paths and os.path.exists(f)]
@@ -194,6 +253,11 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
             embeddings.extend(batch_embeddings.tolist())
             valid_paths.extend(batch_paths)
 
+            # Extract OCR text for each image in batch
+            for img_path in batch_paths:
+                ocr_text = extract_text_from_image(img_path)
+                ocr_texts.append(ocr_text)
+
             print(f"✅ Processed batch {i//batch_size + 1}: {len(batch_paths)} images", file=sys.stderr)
 
         except Exception as e:
@@ -209,6 +273,7 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
                     embedding = embedding / np.linalg.norm(embedding)
                     embeddings.append(embedding)
                     valid_paths.append(path)
+                    ocr_texts.append(extract_text_from_image(path))
                 except Exception as e2:
                     print(f"❌ Error processing {path}: {e2}", file=sys.stderr)
 
@@ -219,19 +284,23 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     # Merge with existing
     all_embeddings = existing_embeddings + embeddings
     all_paths = existing_paths + valid_paths
+    all_ocr_texts = existing_ocr_texts + ocr_texts
     all_embeddings = np.array(all_embeddings)
 
     # Save updated index
     os.makedirs(output_dir, exist_ok=True)
     data = {
         'embeddings': all_embeddings,
-        'image_paths': all_paths
+        'image_paths': all_paths,
+        'ocr_texts': all_ocr_texts
     }
 
     with open(output_file, 'wb') as f:
         pickle.dump(data, f)
 
-    print(f"✅ Index updated: {len(all_paths)} total images (+{len(valid_paths)} new)", file=sys.stderr)
+    # Count images with OCR text
+    ocr_count = sum(1 for t in ocr_texts if t.strip())
+    print(f"✅ Index updated: {len(all_paths)} total images (+{len(valid_paths)} new, {ocr_count} with OCR text)", file=sys.stderr)
 
 def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                    batch_size=64, filter_type=None, filter_value=None):
@@ -240,12 +309,14 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
         output_file = os.path.join(output_dir, 'image_index.bin')
         existing_embeddings = []
         existing_paths = []
+        existing_ocr_texts = []
         if os.path.exists(output_file):
             print("Loading existing index...", file=sys.stderr)
             with open(output_file, 'rb') as f:
                 data = pickle.load(f)
                 existing_embeddings = data['embeddings'].tolist()
                 existing_paths = data['image_paths']
+                existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
                 print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
 
         print("Loading CLIP model...", file=sys.stderr)
@@ -302,7 +373,8 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
             os.makedirs(output_dir, exist_ok=True)
             empty_data = {
                 'embeddings': np.array([]).reshape(0, 512),  # Empty array with correct shape
-                'image_paths': []
+                'image_paths': [],
+                'ocr_texts': []
             }
             with open(output_file, 'wb') as f:
                 pickle.dump(empty_data, f)
@@ -310,6 +382,7 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
         embeddings = []
         valid_paths = []
+        ocr_texts = []
         start_time = time.time()
 
         # Process in batches
@@ -352,6 +425,13 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                 embeddings.extend(batch_embeddings.tolist())
                 valid_paths.extend(batch_paths)
 
+                # Extract OCR text for each image in batch
+                batch_ocr_texts = []
+                for img_path in batch_paths:
+                    ocr_text = extract_text_from_image(img_path)
+                    batch_ocr_texts.append(ocr_text)
+                ocr_texts.extend(batch_ocr_texts)
+
                 batch_num = i // batch_size + 1
                 elapsed = time.time() - start_time
                 images_per_sec = len(valid_paths) / elapsed if elapsed > 0 else 0
@@ -359,12 +439,14 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                 # Save incrementally after each batch (allows searching while indexing)
                 current_all_embeddings = existing_embeddings + embeddings
                 current_all_paths = existing_paths + valid_paths
+                current_all_ocr_texts = existing_ocr_texts + ocr_texts
                 current_all_embeddings_np = np.array(current_all_embeddings)
 
                 os.makedirs(output_dir, exist_ok=True)
                 temp_data = {
                     'embeddings': current_all_embeddings_np,
-                    'image_paths': current_all_paths
+                    'image_paths': current_all_paths,
+                    'ocr_texts': current_all_ocr_texts
                 }
                 with open(output_file, 'wb') as f:
                     pickle.dump(temp_data, f)
@@ -394,6 +476,7 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                         embedding = embedding / np.linalg.norm(embedding)
                         embeddings.append(embedding)
                         valid_paths.append(path)
+                        ocr_texts.append(extract_text_from_image(path))
                     except Exception as e2:
                         print(f"❌ Error: {path}: {e2}", file=sys.stderr)
 
@@ -404,13 +487,15 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
         # Merge with existing
         all_embeddings = existing_embeddings + embeddings
         all_paths = existing_paths + valid_paths
+        all_ocr_texts = existing_ocr_texts + ocr_texts
         all_embeddings = np.array(all_embeddings)
 
         # Save
         os.makedirs(output_dir, exist_ok=True)
         data = {
             'embeddings': all_embeddings,
-            'image_paths': all_paths
+            'image_paths': all_paths,
+            'ocr_texts': all_ocr_texts
         }
 
         with open(output_file, 'wb') as f:
@@ -418,6 +503,7 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
         total_time = time.time() - start_time
         images_per_sec = len(valid_paths) / total_time if total_time > 0 else 0
+        ocr_count = sum(1 for t in ocr_texts if t.strip())
 
         # Output completion report as JSON
         print(json.dumps({
@@ -425,11 +511,12 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
             "total_images": len(all_paths),
             "new_images": len(valid_paths),
             "total_time": round(total_time, 2),
-            "images_per_sec": round(images_per_sec, 1)
+            "images_per_sec": round(images_per_sec, 1),
+            "ocr_extracted": ocr_count
         }), flush=True)
 
         print(f"✅ Total images in index: {len(all_paths)}", file=sys.stderr)
-        print(f"✅ New images added: {len(valid_paths)}", file=sys.stderr)
+        print(f"✅ New images added: {len(valid_paths)} ({ocr_count} with OCR text)", file=sys.stderr)
         print(f"✅ Embeddings shape: {all_embeddings.shape}", file=sys.stderr)
         print(f"✅ Saved to {output_file}", file=sys.stderr)
 

@@ -3,81 +3,609 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+// MARK: - Color Extension for Hex Support
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255,
+            opacity: Double(a) / 255
+        )
+    }
+}
+
+// MARK: - Theme System
+enum AppTheme: String, CaseIterable {
+    case electric = "Electric"
+    case warm = "Warm"
+    case mono = "Mono"
+    case midnight = "Midnight"
+
+    var icon: String {
+        switch self {
+        case .electric: return "bolt.fill"
+        case .warm: return "sun.max.fill"
+        case .mono: return "circle.lefthalf.filled"
+        case .midnight: return "moon.stars.fill"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .electric: return "Vibrant gradients, neon accents"
+        case .warm: return "Amber tones, cozy feel"
+        case .mono: return "Grayscale + one pop color"
+        case .midnight: return "Dark-first, subtle glows"
+        }
+    }
+}
+
+// MARK: - Appearance Mode
+enum AppearanceMode: String, CaseIterable {
+    case system = "System"
+    case light = "Light"
+    case dark = "Dark"
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+// MARK: - Theme Manager
+class ThemeManager: ObservableObject {
+    static let shared = ThemeManager()
+
+    @Published var currentTheme: AppTheme {
+        didSet {
+            UserDefaults.standard.set(currentTheme.rawValue, forKey: "appTheme")
+        }
+    }
+
+    @Published var appearanceMode: AppearanceMode {
+        didSet {
+            UserDefaults.standard.set(appearanceMode.rawValue, forKey: "appearanceMode")
+            applyAppearance()
+        }
+    }
+
+    private init() {
+        if let saved = UserDefaults.standard.string(forKey: "appTheme"),
+           let theme = AppTheme(rawValue: saved) {
+            self.currentTheme = theme
+        } else {
+            self.currentTheme = .electric
+        }
+
+        if let savedAppearance = UserDefaults.standard.string(forKey: "appearanceMode"),
+           let mode = AppearanceMode(rawValue: savedAppearance) {
+            self.appearanceMode = mode
+        } else {
+            self.appearanceMode = .system
+        }
+    }
+
+    func applyAppearance() {
+        DispatchQueue.main.async {
+            switch self.appearanceMode {
+            case .system:
+                NSApp.appearance = nil
+            case .light:
+                NSApp.appearance = NSAppearance(named: .aqua)
+            case .dark:
+                NSApp.appearance = NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+}
+
+// MARK: - Theme Color Definitions
+struct ThemeColors {
+    let lightPrimary: Color      // Page background
+    let lightSecondary: Color    // Cards
+    let lightTertiary: Color     // Inputs
+
+    let darkPrimary: Color       // Page background dark
+    let darkSecondary: Color     // Cards dark
+    let darkTertiary: Color      // Inputs dark
+
+    let accent: Color            // Primary accent
+    let accentHover: Color       // Hover state
+    let accentGradientStart: Color
+    let accentGradientEnd: Color
+
+    let success: Color
+    let error: Color
+    let warning: Color
+
+    // MARK: - Theme Definitions
+    static let electric = ThemeColors(
+        lightPrimary: Color(hex: "F8F7FF"),
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "F0EEFF"),
+        darkPrimary: Color(hex: "0A0A0F"),
+        darkSecondary: Color(hex: "12121A"),
+        darkTertiary: Color(hex: "1A1A25"),
+        accent: Color(hex: "7C3AED"),           // Vivid purple
+        accentHover: Color(hex: "8B5CF6"),
+        accentGradientStart: Color(hex: "7C3AED"),
+        accentGradientEnd: Color(hex: "EC4899"),  // Pink
+        success: Color(hex: "10B981"),
+        error: Color(hex: "EF4444"),
+        warning: Color(hex: "F59E0B")
+    )
+
+    static let warm = ThemeColors(
+        lightPrimary: Color(hex: "FFFBF5"),
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "FEF3E2"),
+        darkPrimary: Color(hex: "1A1612"),
+        darkSecondary: Color(hex: "231F1A"),
+        darkTertiary: Color(hex: "2D2820"),
+        accent: Color(hex: "EA580C"),           // Warm orange
+        accentHover: Color(hex: "F97316"),
+        accentGradientStart: Color(hex: "EA580C"),
+        accentGradientEnd: Color(hex: "FBBF24"),  // Amber
+        success: Color(hex: "22C55E"),
+        error: Color(hex: "DC2626"),
+        warning: Color(hex: "EAB308")
+    )
+
+    static let mono = ThemeColors(
+        lightPrimary: Color(hex: "FAFAFA"),
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "F4F4F5"),
+        darkPrimary: Color(hex: "09090B"),
+        darkSecondary: Color(hex: "18181B"),
+        darkTertiary: Color(hex: "27272A"),
+        accent: Color(hex: "06B6D4"),           // Cyan pop
+        accentHover: Color(hex: "22D3EE"),
+        accentGradientStart: Color(hex: "06B6D4"),
+        accentGradientEnd: Color(hex: "06B6D4"),  // Same - no gradient
+        success: Color(hex: "22C55E"),
+        error: Color(hex: "EF4444"),
+        warning: Color(hex: "EAB308")
+    )
+
+    static let midnight = ThemeColors(
+        lightPrimary: Color(hex: "F1F5F9"),     // Slate tint for light
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "E2E8F0"),
+        darkPrimary: Color(hex: "020617"),      // Near black
+        darkSecondary: Color(hex: "0F172A"),    // Slate 900
+        darkTertiary: Color(hex: "1E293B"),     // Slate 800
+        accent: Color(hex: "38BDF8"),           // Sky blue glow
+        accentHover: Color(hex: "7DD3FC"),
+        accentGradientStart: Color(hex: "38BDF8"),
+        accentGradientEnd: Color(hex: "818CF8"),  // Indigo
+        success: Color(hex: "4ADE80"),
+        error: Color(hex: "FB7185"),
+        warning: Color(hex: "FBBF24")
+    )
+
+    static func current() -> ThemeColors {
+        switch ThemeManager.shared.currentTheme {
+        case .electric: return .electric
+        case .warm: return .warm
+        case .mono: return .mono
+        case .midnight: return .midnight
+        }
+    }
+}
+
 // MARK: - Design System
 struct DesignSystem {
-    // Colors
-    struct Colors {
-        // Primary palette - Claude-inspired
-        static let primaryBackground = Color(nsColor: NSColor(red: 0.98, green: 0.98, blue: 0.99, alpha: 1.0))
-        static let secondaryBackground = Color.white
-        static let tertiaryBackground = Color(nsColor: NSColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0))
 
-        // Dark mode palette
-        static let darkPrimaryBackground = Color(nsColor: NSColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0))
-        static let darkSecondaryBackground = Color(nsColor: NSColor(red: 0.15, green: 0.15, blue: 0.16, alpha: 1.0))
-        static let darkTertiaryBackground = Color(nsColor: NSColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 1.0))
+    // MARK: - Colors (Theme-Aware)
+    struct Colors {
+        // Surface colors - pull from active theme
+        static var primaryBackground: Color { ThemeColors.current().lightPrimary }
+        static var secondaryBackground: Color { ThemeColors.current().lightSecondary }
+        static var tertiaryBackground: Color { ThemeColors.current().lightTertiary }
+
+        static var darkPrimaryBackground: Color { ThemeColors.current().darkPrimary }
+        static var darkSecondaryBackground: Color { ThemeColors.current().darkSecondary }
+        static var darkTertiaryBackground: Color { ThemeColors.current().darkTertiary }
 
         // Accent colors
-        static let accent = Color(nsColor: NSColor(red: 0.33, green: 0.44, blue: 1.0, alpha: 1.0))
-        static let accentHover = Color(nsColor: NSColor(red: 0.28, green: 0.39, blue: 0.95, alpha: 1.0))
+        static var accent: Color { ThemeColors.current().accent }
+        static var accentHover: Color { ThemeColors.current().accentHover }
+        static var accentSubtle: Color { ThemeColors.current().accent.opacity(0.12) }
+        static var accentGradientEnd: Color { ThemeColors.current().accentGradientEnd }
 
-        // Text colors
+        // Accent gradient
+        static var accentGradient: LinearGradient {
+            LinearGradient(
+                colors: [ThemeColors.current().accentGradientStart, ThemeColors.current().accentGradientEnd],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        // Text colors (system adaptive)
         static let primaryText = Color(nsColor: NSColor.labelColor)
         static let secondaryText = Color(nsColor: NSColor.secondaryLabelColor)
         static let tertiaryText = Color(nsColor: NSColor.tertiaryLabelColor)
 
         // Semantic colors
-        static let success = Color(nsColor: NSColor(red: 0.2, green: 0.78, blue: 0.35, alpha: 1.0))
-        static let error = Color(nsColor: NSColor(red: 0.96, green: 0.26, blue: 0.21, alpha: 1.0))
-        static let warning = Color(nsColor: NSColor(red: 1.0, green: 0.73, blue: 0.0, alpha: 1.0))
+        static var success: Color { ThemeColors.current().success }
+        static var error: Color { ThemeColors.current().error }
+        static var warning: Color { ThemeColors.current().warning }
 
         // Borders
-        static let border = Color(nsColor: NSColor.separatorColor).opacity(0.2)
-        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.4)
+        static let border = Color(nsColor: NSColor.separatorColor)
+        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.8)
+
+        // Helper functions
+        static func surface(_ level: Int, for scheme: ColorScheme) -> Color {
+            switch (level, scheme) {
+            case (0, .light): return primaryBackground
+            case (1, .light): return secondaryBackground
+            case (2, .light): return tertiaryBackground
+            case (0, .dark): return darkPrimaryBackground
+            case (1, .dark): return darkSecondaryBackground
+            case (2, .dark): return darkTertiaryBackground
+            default: return scheme == .dark ? darkPrimaryBackground : primaryBackground
+            }
+        }
     }
 
-    // Typography
+    // MARK: - Typography (Friendly, using SF Rounded for headers)
     struct Typography {
+        // Friendly rounded headers - warm and inviting
+        static let displayLarge = Font.system(size: 32, weight: .bold, design: .rounded)
+        static let displayMedium = Font.system(size: 24, weight: .semibold, design: .rounded)
         static let largeTitle = Font.system(size: 28, weight: .bold, design: .rounded)
         static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
         static let title2 = Font.system(size: 17, weight: .semibold, design: .rounded)
-        static let headline = Font.system(size: 15, weight: .semibold, design: .default)
+        static let title3 = Font.system(size: 15, weight: .medium, design: .rounded)
+        static let headline = Font.system(size: 15, weight: .semibold, design: .rounded)
+
+        // Body text - default design for readability
         static let body = Font.system(size: 14, weight: .regular, design: .default)
+        static let bodyMedium = Font.system(size: 14, weight: .medium, design: .default)
         static let callout = Font.system(size: 13, weight: .regular, design: .default)
-        static let caption = Font.system(size: 11, weight: .regular, design: .default)
-        static let caption2 = Font.system(size: 10, weight: .regular, design: .default)
+        static let caption = Font.system(size: 12, weight: .regular, design: .default)
+        static let captionMedium = Font.system(size: 12, weight: .medium, design: .default)
+        static let caption2 = Font.system(size: 11, weight: .regular, design: .default)
+        static let micro = Font.system(size: 10, weight: .medium, design: .default)
+
+        // Monospace for stats/numbers
+        static let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+        static let monoSmall = Font.system(size: 10, weight: .medium, design: .monospaced)
+
+        // Friendly labels - rounded for buttons and badges
+        static let friendlyLabel = Font.system(size: 13, weight: .semibold, design: .rounded)
+        static let friendlySmall = Font.system(size: 11, weight: .medium, design: .rounded)
     }
 
-    // Spacing
+    // MARK: - Spacing
     struct Spacing {
+        static let xxs: CGFloat = 2
         static let xs: CGFloat = 4
         static let sm: CGFloat = 8
         static let md: CGFloat = 12
         static let lg: CGFloat = 16
         static let xl: CGFloat = 24
         static let xxl: CGFloat = 32
+        static let xxxl: CGFloat = 48
     }
 
-    // Corner Radius
+    // MARK: - Corner Radius (Softer, more friendly)
     struct CornerRadius {
-        static let sm: CGFloat = 6
-        static let md: CGFloat = 10
-        static let lg: CGFloat = 14
-        static let xl: CGFloat = 20
+        static let xs: CGFloat = 6
+        static let sm: CGFloat = 10
+        static let md: CGFloat = 14
+        static let lg: CGFloat = 18
+        static let xl: CGFloat = 22
+        static let xxl: CGFloat = 28
+        static let card: CGFloat = 16  // Craft-style card corners
+        static let full: CGFloat = 9999
     }
 
-    // Shadows
+    // MARK: - Shadows (Soft, diffuse - like objects on a surface)
     struct Shadows {
-        static func small(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08)
+        // Craft-style soft shadows - more diffuse, less harsh
+        static func soft(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.25) : Color.black.opacity(0.06)
         }
 
         static func medium(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08)
+        }
+
+        static func lifted(_ colorScheme: ColorScheme) -> Color {
             colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12)
         }
 
-        static func large(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.15)
+        // Legacy compatibility
+        static func small(_ colorScheme: ColorScheme) -> Color { soft(colorScheme) }
+        static func large(_ colorScheme: ColorScheme) -> Color { lifted(colorScheme) }
+
+        static func glow(_ colorScheme: ColorScheme) -> Color {
+            DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.3 : 0.2)
+        }
+
+        struct ShadowParams {
+            let color: Color
+            let radius: CGFloat
+            let x: CGFloat
+            let y: CGFloat
+        }
+
+        // Craft-style card shadow - soft, diffuse, feels like paper
+        static func cardShadow(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(
+                color: scheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08),
+                radius: 16,
+                x: 0,
+                y: 6
+            )
+        }
+
+        // Lifted card shadow - when hovering, feels like picking up
+        static func cardLifted(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(
+                color: scheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12),
+                radius: 24,
+                x: 0,
+                y: 12
+            )
+        }
+
+        static func floatingShadow(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(color: lifted(scheme), radius: scheme == .dark ? 32 : 28, x: 0, y: scheme == .dark ? 16 : 12)
+        }
+    }
+
+    // MARK: - Animation
+    struct Animation {
+        static let springQuick = SwiftUI.Animation.spring(response: 0.25, dampingFraction: 0.8)
+        static let springMedium = SwiftUI.Animation.spring(response: 0.35, dampingFraction: 0.75)
+        static let springBouncy = SwiftUI.Animation.spring(response: 0.4, dampingFraction: 0.65)
+        static let easeOut = SwiftUI.Animation.easeOut(duration: 0.2)
+    }
+}
+
+// MARK: - Theme Switcher View
+struct ThemeSwitcher: View {
+    @ObservedObject var themeManager = ThemeManager.shared
+    @State private var isExpanded = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.xs) {
+            if isExpanded {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            themeManager.currentTheme = theme
+                            isExpanded = false
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: theme.icon)
+                                .font(.system(size: 12, weight: .medium))
+                            if theme == themeManager.currentTheme {
+                                Text(theme.rawValue)
+                                    .font(DesignSystem.Typography.caption)
+                            }
+                        }
+                        .foregroundColor(theme == themeManager.currentTheme ? .white : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, theme == themeManager.currentTheme ? 10 : 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(theme == themeManager.currentTheme ? DesignSystem.Colors.accent : Color.clear)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            } else {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isExpanded = true
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: themeManager.currentTheme.icon)
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accentSubtle)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(DesignSystem.Spacing.xs)
+        .background(
+            Capsule()
+                .fill(colorScheme == .dark ? DesignSystem.Colors.darkTertiaryBackground : DesignSystem.Colors.tertiaryBackground)
+        )
+        .onTapGesture {} // Capture taps
+        .onHover { _ in } // Keep expanded on hover
+    }
+}
+
+// MARK: - Minimal Icon Button
+struct MinimalIconButton: View {
+    let icon: String
+    let tooltip: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(\.isEnabled) var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isEnabled ? (isHovered ? DesignSystem.Colors.primaryText : DesignSystem.Colors.secondaryText) : DesignSystem.Colors.tertiaryText)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isHovered ? (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)) : Color.clear)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .help(tooltip)
+    }
+}
+
+// MARK: - Theme Switcher Compact
+struct ThemeSwitcherCompact: View {
+    @ObservedObject var themeManager = ThemeManager.shared
+    @State private var isHovered = false
+    @State private var showPicker = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: {
+            showPicker.toggle()
+        }) {
+            Image(systemName: themeManager.currentTheme.icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isHovered ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isHovered ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .popover(isPresented: $showPicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Appearance Mode Section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("APPEARANCE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+
+                    HStack(spacing: 4) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                            Button(action: {
+                                withAnimation {
+                                    themeManager.appearanceMode = mode
+                                }
+                            }) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: mode.icon)
+                                        .font(.system(size: 14))
+                                    Text(mode.rawValue)
+                                        .font(.system(size: 10))
+                                }
+                                .foregroundColor(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                Divider()
+                    .padding(.vertical, 8)
+
+                // Theme Section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("THEME")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .padding(.horizontal, 12)
+
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Button(action: {
+                            withAnimation {
+                                themeManager.currentTheme = theme
+                            }
+                        }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: theme.icon)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(theme == themeManager.currentTheme ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                                    .frame(width: 20)
+
+                                Text(theme.rawValue)
+                                    .font(.system(size: 13, weight: theme == themeManager.currentTheme ? .medium : .regular))
+                                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                                Spacer()
+
+                                if theme == themeManager.currentTheme {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(DesignSystem.Colors.accent)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(theme == themeManager.currentTheme ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+            .frame(width: 200)
+        }
+        .help("Change theme")
+        .onAppear {
+            themeManager.applyAppearance()
         }
     }
 }
@@ -1082,40 +1610,29 @@ struct SkeletonView: View {
 }
 
 struct ResultCardSkeleton: View {
-    @StateObject private var prefs = SearchPreferences.shared
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
-            // Image skeleton
+            // Image skeleton - matches ImageCard imageHeight
             SkeletonView()
-                .frame(width: CGFloat(prefs.imageSize), height: CGFloat(prefs.imageSize))
+                .frame(height: 156)
 
-            // Info skeleton
-            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
-                SkeletonView()
-                    .frame(height: 12)
-                    .frame(maxWidth: .infinity)
-
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    SkeletonView()
-                        .frame(width: 60, height: 20)
-                    SkeletonView()
-                        .frame(width: 60, height: 20)
-                }
-            }
-            .padding(DesignSystem.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                colorScheme == .dark ?
-                    DesignSystem.Colors.darkSecondaryBackground :
-                    DesignSystem.Colors.secondaryBackground
-            )
+            // Filename skeleton - matches ImageCard filenameSection
+            SkeletonView()
+                .frame(height: 14)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
         }
-        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+        .frame(height: 200)
+        .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "FEF7EE"))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: 6,
+            x: 0,
+            y: 3
         )
     }
 }
@@ -1223,6 +1740,7 @@ struct ActionButton: View {
 // MARK: - Spotlight Search View
 struct SpotlightSearchView: View {
     @ObservedObject private var searchManager = SearchManager.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var searchText = ""
     @State private var selectedIndex: Int = 0
     @State private var recentImages: [SearchResult] = []
@@ -1654,13 +2172,26 @@ struct SpotlightResultRow: View {
                     .foregroundColor(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
                     .lineLimit(1)
 
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 8))
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 8, weight: .bold))
                     Text("\(Int(result.similarity * 100))%")
-                        .font(DesignSystem.Typography.caption2)
+                        .font(DesignSystem.Typography.caption2.weight(.semibold))
                 }
-                .foregroundColor(similarityColor)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: similarityGradient,
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .shadow(color: similarityColor.opacity(0.4), radius: 4, x: 0, y: 2)
             }
 
             Spacer()
@@ -1746,6 +2277,19 @@ struct SpotlightResultRow: View {
             return DesignSystem.Colors.accent
         } else {
             return DesignSystem.Colors.warning
+        }
+    }
+
+    private var similarityGradient: [Color] {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return [Color(hex: "10B981"), Color(hex: "059669")]
+        } else if percentage >= 60 {
+            return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
+        } else if percentage >= 40 {
+            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+        } else {
+            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
         }
     }
 
@@ -1966,42 +2510,74 @@ struct ResultCardView: View {
                 )
                 .scaleEffect(isPressed ? 0.95 : 1.0)
 
-                // Hover overlay with gradient
-                if isHovered {
+                // Hover overlay with icon-only actions
+                if isHovered && !showingCopyNotification {
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.black.opacity(0), Color.black.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
+                        .fill(Color.black.opacity(0.4))
+                        .overlay(
+                            HStack(spacing: 12) {
+                                // Copy button
+                                Button(action: {
+                                    copyImage(path: result.path)
+                                    showCopyNotification()
+                                }) {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 36, height: 36)
+                                        .background(
+                                            Circle()
+                                                .fill(DesignSystem.Colors.accent)
+                                        )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
+                                // Reveal in Finder button
+                                Button(action: {
+                                    revealInFinder(path: result.path)
+                                }) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 36, height: 36)
+                                        .background(
+                                            Circle()
+                                                .fill(Color.white.opacity(0.25))
+                                        )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
                         )
-                        .allowsHitTesting(false)
                         .transition(.opacity)
                 }
 
-                // Similarity badge with glass effect
+                // Similarity badge with gradient
                 HStack(spacing: DesignSystem.Spacing.xs) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 8))
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 9, weight: .bold))
                     Text("\(Int(result.similarity * 100))%")
-                        .font(DesignSystem.Typography.caption2.weight(.semibold))
+                        .font(DesignSystem.Typography.caption2.weight(.bold))
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.xs + 2)
                 .background(
-                    ZStack {
-                        Capsule()
-                            .fill(similarityColor.opacity(0.9))
-                        Capsule()
-                            .fill(.ultraThinMaterial)
-                            .blendMode(.overlay)
-                    }
-                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: similarityGradient,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: similarityColor.opacity(0.5), radius: 8, x: 0, y: 4)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
                 )
                 .padding(DesignSystem.Spacing.sm)
-                .scaleEffect(isHovered ? 1.05 : 1.0)
+                .scaleEffect(isHovered ? 1.08 : 1.0)
                 .allowsHitTesting(false)
 
                 // Copy notification overlay
@@ -2012,44 +2588,19 @@ struct ResultCardView: View {
                 }
             }
 
-            // Info section with enhanced buttons
-            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                    .lineLimit(1)
-                    .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                // Action buttons with hover states
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    ActionButton(
-                        icon: "doc.on.doc.fill",
-                        title: "Copy",
-                        color: DesignSystem.Colors.accent
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                            copyImage(path: result.path)
-                            showCopyNotification()
-                        }
-                    }
-
-                    ActionButton(
-                        icon: "folder.fill",
-                        title: "Reveal",
-                        color: DesignSystem.Colors.secondaryText
-                    ) {
-                        revealInFinder(path: result.path)
-                    }
-
-                    Spacer()
-                }
-            }
-            .padding(DesignSystem.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                colorScheme == .dark ?
-                    DesignSystem.Colors.darkSecondaryBackground :
-                    DesignSystem.Colors.secondaryBackground
-            )
+            // Minimal info section - just filename
+            Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                .lineLimit(1)
+                .font(DesignSystem.Typography.caption.weight(.medium))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground
+                )
         }
         .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
         .overlay(
@@ -2086,6 +2637,28 @@ struct ResultCardView: View {
                 isHovered = hovering
             }
         }
+        .contextMenu {
+            Button(action: {
+                copyImage(path: result.path)
+                showCopyNotification()
+            }) {
+                Label("Copy Image", systemImage: "doc.on.doc")
+            }
+
+            Button(action: {
+                revealInFinder(path: result.path)
+            }) {
+                Label("Reveal in Finder", systemImage: "folder")
+            }
+
+            Divider()
+
+            Button(action: {
+                NSWorkspace.shared.open(URL(fileURLWithPath: result.path))
+            }) {
+                Label("Open in Preview", systemImage: "eye")
+            }
+        }
     }
 
     private var similarityColor: Color {
@@ -2096,6 +2669,19 @@ struct ResultCardView: View {
             return DesignSystem.Colors.accent
         } else {
             return DesignSystem.Colors.warning
+        }
+    }
+
+    private var similarityGradient: [Color] {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return [Color(hex: "10B981"), Color(hex: "059669")]
+        } else if percentage >= 60 {
+            return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
+        } else if percentage >= 40 {
+            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+        } else {
+            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
         }
     }
 
@@ -2118,141 +2704,218 @@ struct ResultCardView: View {
     }
 }
 
-// MARK: - Recent Image Card
-struct RecentImageCard: View {
+// MARK: - Recent Image Card (Craft-style warm, floating card)
+struct ImageCard: View {
     let result: SearchResult
-    @State private var showingCopyNotification = false
+    var showSimilarity: Bool = false
+    var cardHeight: CGFloat = 200
+
     @State private var isHovered = false
-    @State private var isPressed = false
+    @State private var showCopied = false
     @Environment(\.colorScheme) var colorScheme
 
+    // Craft-style warm tints for card backgrounds
+    private static let warmTints: [Color] = [
+        Color(hex: "FEF7EE"),  // Warm cream/peach (like Craft)
+        Color(hex: "FDF4F0"),  // Soft coral
+        Color(hex: "F5F3FF"),  // Soft lavender
+        Color(hex: "EEF7FF"),  // Soft sky
+        Color(hex: "F0FDF4"),  // Soft mint
+        Color(hex: "FFFBEB"),  // Soft yellow
+    ]
+
+    private var cardTint: Color {
+        let hash = abs(result.path.hashValue)
+        return colorScheme == .dark ?
+            Color(hex: "2C2C2E") :
+            Self.warmTints[hash % Self.warmTints.count]
+    }
+
+    private var imageHeight: CGFloat {
+        cardHeight - 44  // Reserve space for filename section
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Image container
-            ZStack(alignment: .center) {
-                if let image = NSImage(contentsOfFile: result.path) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 150, height: 150)
-                        .clipped()
-                } else {
-                    Rectangle()
-                        .fill(colorScheme == .dark ?
-                            DesignSystem.Colors.darkTertiaryBackground :
-                            DesignSystem.Colors.tertiaryBackground)
-                        .frame(width: 150, height: 150)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .font(.system(size: 32))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        )
-                }
-
-                // Hover overlay
-                if isHovered {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.3))
-                        .overlay(
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                Button(action: {
-                                    copyImage(path: result.path)
-                                    showCopyNotification()
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "doc.on.doc.fill")
-                                        Text("Copy")
-                                    }
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(DesignSystem.Colors.accent))
-                                }
-                                .buttonStyle(PlainButtonStyle())
-
-                                Button(action: {
-                                    NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "folder.fill")
-                                        Text("Reveal")
-                                    }
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.white.opacity(0.3)))
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        )
-                        .transition(.opacity)
-                }
-
-                // Copy notification
-                if showingCopyNotification {
-                    CopyNotification(isShowing: $showingCopyNotification)
-                        .allowsHitTesting(false)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .scaleEffect(isPressed ? 0.95 : 1.0)
-
-            // Filename
-            Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                .lineLimit(1)
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(DesignSystem.Colors.primaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    colorScheme == .dark ?
-                        DesignSystem.Colors.darkSecondaryBackground :
-                        DesignSystem.Colors.secondaryBackground
-                )
+        VStack(alignment: .leading, spacing: 0) {
+            imageSection
+            filenameSection
         }
-        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(
-                    isHovered ?
-                        DesignSystem.Colors.accent.opacity(0.5) :
-                        DesignSystem.Colors.border,
-                    lineWidth: isHovered ? 1.5 : 1
-                )
-        )
+        .frame(minHeight: cardHeight, maxHeight: cardHeight)
+        .background(cardTint)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        // Subtle shadow
         .shadow(
-            color: isHovered ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-            radius: isHovered ? 12 : 4,
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
             x: 0,
-            y: isHovered ? 6 : 2
+            y: isHovered ? 6 : 3
         )
+        // Subtle lift on hover
         .scaleEffect(isHovered ? 1.02 : 1.0)
-        .onHover { hovering in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                isHovered = hovering
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .animation(.easeOut(duration: 0.2), value: showCopied)
+        .onHover { isHovered = $0 }
+        .onTapGesture(count: 2) { handleCopy() }
+        .contextMenu { contextMenuContent }
+    }
+
+    private var imageSection: some View {
+        ZStack(alignment: .topTrailing) {
+            imageContent
+            if showSimilarity {
+                similarityBadge
+            }
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+        }
+        .frame(height: imageHeight)
+        .clipped()
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 12,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 12
+            )
+        )
+    }
+
+    private var similarityBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 9, weight: .bold))
+            Text("\(Int(result.similarity * 100))%")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+        )
+        .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 4, y: 2)
+        .padding(8)
+    }
+
+    private var imageContent: some View {
+        GeometryReader { geo in
+            if let image = NSImage(contentsOfFile: result.path) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(hex: "F8F8F8"))
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.system(size: 32, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText.opacity(0.3))
+                    )
             }
         }
-        .onTapGesture(count: 2) {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                isPressed = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                    isPressed = false
+        .frame(height: imageHeight)
+    }
+
+    private var hoverOverlay: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.1), Color.black.opacity(0.5)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay(hoverButtons, alignment: .bottom)
+            .transition(.opacity)
+    }
+
+    private var hoverButtons: some View {
+        HStack(spacing: 10) {
+            Button(action: handleCopy) {
+                HStack(spacing: 5) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Copy")
+                        .font(DesignSystem.Typography.friendlySmall)
                 }
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(DesignSystem.Colors.accent)
+                )
             }
-            copyImage(path: result.path)
-            showCopyNotification()
+            .buttonStyle(PlainButtonStyle())
+
+            Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
+                Image(systemName: "folder")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color.white.opacity(0.2)).background(.ultraThinMaterial).clipShape(Circle()))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.bottom, 12)
+    }
+
+    private var copiedFeedback: some View {
+        Rectangle()
+            .fill(Color.black.opacity(0.6))
+            .overlay(
+                VStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.success)
+                    Text("Copied!")
+                        .font(DesignSystem.Typography.friendlyLabel)
+                        .foregroundColor(.white)
+                }
+            )
+            .transition(.opacity)
+    }
+
+    private var filenameSection: some View {
+        Text(URL(fileURLWithPath: result.path).lastPathComponent)
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundColor(colorScheme == .dark ? .white.opacity(0.9) : Color(hex: "1D1D1F"))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button(action: { copyImage(path: result.path) }) {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
+            Label("Reveal in Finder", systemImage: "folder")
+        }
+        Divider()
+        Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: result.path)) }) {
+            Label("Open in Preview", systemImage: "eye")
         }
     }
 
-    private func showCopyNotification() {
-        showingCopyNotification = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showingCopyNotification = false
+    private func handleCopy() {
+        copyImage(path: result.path)
+        withAnimation(.easeOut(duration: 0.15)) { showCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            withAnimation { showCopied = false }
         }
     }
 
@@ -2263,6 +2926,9 @@ struct RecentImageCard: View {
         }
     }
 }
+
+// Backward compatibility alias
+typealias RecentImageCard = ImageCard
 
 struct DoubleClickImageView: View {
     let filePath: String
@@ -2304,6 +2970,9 @@ struct DoubleClickImageView: View {
                 DispatchQueue.main.async {
                     self.image = resizedImage
                 }
+            } else {
+                print("⚠️ DoubleClickImageView failed to load: \(filePath)")
+                print("   Exists: \(FileManager.default.fileExists(atPath: filePath))")
             }
         }
     }
@@ -2634,6 +3303,13 @@ struct IndexStats {
 enum AppTab: String, CaseIterable {
     case search = "Search"
     case duplicates = "Duplicates"
+
+    var icon: String {
+        switch self {
+        case .search: return "magnifyingglass"
+        case .duplicates: return "square.on.square"
+        }
+    }
 }
 
 // MARK: - Duplicates Models
@@ -2824,6 +3500,7 @@ class DuplicatesManager: ObservableObject {
 struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
     @ObservedObject private var duplicatesManager = DuplicatesManager.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var activeTab: AppTab = .search
     @State private var searchText = ""
     @State private var isIndexing = false
@@ -2852,23 +3529,32 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // Background gradient
-            LinearGradient(
-                colors: colorScheme == .dark ?
-                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
-                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            // Craft-style soft gradient background
+            Group {
+                if colorScheme == .dark {
+                    Color(hex: "1C1C1E")
+                } else {
+                    // Soft lavender-blue gradient like Craft
+                    LinearGradient(
+                        colors: [
+                            Color(hex: "E8E4F4"),  // Soft lavender top
+                            Color(hex: "F4F1FA"),  // Lighter middle
+                            Color(hex: "FAFAFA")   // Almost white bottom
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Modern header
+                // Friendly header
                 modernHeader
 
-                // Tab Picker
+                // Tab Picker with more padding
                 tabPicker
-                    .padding(.top, DesignSystem.Spacing.md)
+                    .padding(.top, DesignSystem.Spacing.lg)
 
                 // Main content area based on active tab
                 if activeTab == .search {
@@ -2877,6 +3563,7 @@ struct ContentView: View {
                     duplicatesTabContent
                 }
             }
+            .padding(.horizontal, DesignSystem.Spacing.md)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -2895,154 +3582,133 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Modern Header
+    // MARK: - Header (Friendly, Craft-style)
     private var modernHeader: some View {
-        HStack(spacing: DesignSystem.Spacing.md) {
-            // App title with animated icon
-            HStack(spacing: DesignSystem.Spacing.sm) {
+        HStack(spacing: DesignSystem.Spacing.lg) {
+            // Friendly logo - warm, inviting
+            HStack(spacing: 10) {
+                // Photo icon instead of tech magnifying glass
                 ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.15),
-                                    DesignSystem.Colors.accent.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.Colors.accent.opacity(0.12))
+                        .frame(width: 32, height: 32)
                     Image(systemName: "photo.stack.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Searchy")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-
-                    if searchManager.isSearching {
-                        Text("Searching...")
-                            .font(DesignSystem.Typography.caption2)
-                            .foregroundColor(DesignSystem.Colors.accent)
-                            .transition(.opacity)
-                    } else if !searchManager.results.isEmpty {
-                        Text("\(searchManager.results.count) results")
-                            .font(DesignSystem.Typography.caption2)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.2), value: searchManager.isSearching)
-                .animation(.easeInOut(duration: 0.2), value: searchManager.results.count)
+                Text("Searchy")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
             }
 
             Spacer()
 
-            // Action buttons with status indicator
+            // Friendly icon buttons
             HStack(spacing: DesignSystem.Spacing.sm) {
+                // Indexing indicator (only when active)
                 if isIndexing {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
+                    HStack(spacing: 6) {
                         ProgressView()
-                            .scaleEffect(0.7)
-                        Text("Indexing...")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.accent)
+                            .scaleEffect(0.6)
+                        Text("\(Int(indexingPercent))%")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
                     }
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(DesignSystem.Colors.accent.opacity(0.1))
-                    )
-                    .transition(.scale.combined(with: .opacity))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(DesignSystem.Colors.accent.opacity(0.1))
+                    .clipShape(Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
 
-                ModernButton(
-                    icon: "plus.square.fill",
-                    title: "Index Folder",
-                    style: .secondary,
-                    isDisabled: isIndexing
-                ) {
-                    if !isIndexing {
-                        selectAndIndexFolder()
-                    }
+                MinimalIconButton(icon: "plus", tooltip: "Add folder") {
+                    if !isIndexing { selectAndIndexFolder() }
                 }
+                .disabled(isIndexing)
 
-                ModernButton(
-                    icon: "arrow.triangle.2.circlepath",
-                    title: "Replace Index",
-                    style: .secondary,
-                    isDisabled: isIndexing
-                ) {
-                    if !isIndexing {
-                        selectAndReplaceIndex()
-                    }
+                MinimalIconButton(icon: "arrow.clockwise", tooltip: "Replace index") {
+                    if !isIndexing { selectAndReplaceIndex() }
                 }
+                .disabled(isIndexing)
 
-                ModernButton(
-                    icon: "gearshape.fill",
-                    title: nil,
-                    style: .tertiary,
-                    isDisabled: false
-                ) {
+                MinimalIconButton(icon: "gearshape", tooltip: "Settings") {
                     isShowingSettings = true
                 }
+
+                // Theme switcher - compact
+                ThemeSwitcherCompact()
             }
         }
-        .padding(.horizontal, DesignSystem.Spacing.xl)
-        .padding(.vertical, DesignSystem.Spacing.lg)
-        .background(
-            (colorScheme == .dark ?
-                DesignSystem.Colors.darkSecondaryBackground :
-                DesignSystem.Colors.secondaryBackground)
-                .opacity(0.7)
-                .background(.ultraThinMaterial)
-        )
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(DesignSystem.Colors.border.opacity(0.5))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-        )
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
-    // MARK: - Tab Picker
+    // MARK: - Tab Picker (Minimal)
     private var tabPicker: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
+        HStack(spacing: 2) {
             ForEach(AppTab.allCases, id: \.self) { tab in
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        activeTab = tab
-                    }
-                }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        Image(systemName: tab == .search ? "magnifyingglass" : "square.on.square")
-                            .font(.system(size: 12, weight: .medium))
-                        Text(tab.rawValue)
-                            .font(DesignSystem.Typography.callout.weight(.medium))
-                    }
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(activeTab == tab ? DesignSystem.Colors.accent : Color.clear)
-                    )
-                    .foregroundColor(activeTab == tab ? .white : DesignSystem.Colors.secondaryText)
-                }
-                .buttonStyle(PlainButtonStyle())
+                tabButton(for: tab)
             }
         }
-        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(3)
+        .background(
+            colorScheme == .dark ?
+                Color.white.opacity(0.04) :
+                Color.black.opacity(0.03)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func tabButton(for tab: AppTab) -> some View {
+        let isActive = activeTab == tab
+        return Button(action: {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                activeTab = tab
+            }
+        }) {
+            tabButtonContent(for: tab, isActive: isActive)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func tabButtonContent(for tab: AppTab, isActive: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: tab.icon)
+                .font(.system(size: 11, weight: .medium))
+            Text(tab.rawValue)
+                .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+        }
+        .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(tabButtonBackground(isActive: isActive))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(tabButtonBorder(isActive: isActive))
+    }
+
+    private func tabButtonBackground(isActive: Bool) -> some View {
+        Group {
+            if isActive {
+                LinearGradient(
+                    colors: [
+                        DesignSystem.Colors.accent.opacity(0.15),
+                        DesignSystem.Colors.accentGradientEnd.opacity(0.1)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            } else {
+                Color.clear
+            }
+        }
+    }
+
+    private func tabButtonBorder(isActive: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 8)
+            .stroke(
+                isActive ? DesignSystem.Colors.accent.opacity(0.4) : Color.clear,
+                lineWidth: isActive ? 1 : 0
+            )
     }
 
     // MARK: - Search Tab Content
@@ -3134,11 +3800,6 @@ struct ContentView: View {
             result.similarity >= SearchPreferences.shared.similarityThreshold
         }
 
-        let columns = Array(
-            repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
-            count: SearchPreferences.shared.gridColumns
-        )
-
         return VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
             // Stats header
             if SearchPreferences.shared.showStats, let stats = searchManager.searchStats {
@@ -3181,9 +3842,14 @@ struct ContentView: View {
                 .padding(.bottom, DesignSystem.Spacing.sm)
             }
 
-            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20)
+            ], spacing: 24) {
                 ForEach(results) { result in
-                    ResultCardView(result: result)
+                    ImageCard(result: result, showSimilarity: true)
                 }
             }
         }
@@ -3197,41 +3863,55 @@ struct ContentView: View {
         return count
     }
 
-    // MARK: - Filter Sidebar
+    // MARK: - Filter Sidebar (Craft/Linear style)
     private var filterSidebar: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
-            // Header
+        VStack(alignment: .leading, spacing: 0) {
+            // Header - clean and minimal
             HStack {
                 Text("Filters")
-                    .font(DesignSystem.Typography.headline)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
 
-                Button(action: { clearFilters() }) {
-                    Text("Clear")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
+                if activeFilterCount > 0 {
+                    Button(action: { clearFilters() }) {
+                        Text("Clear all")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
 
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         showFilterSidebar = false
                     }
                 }) {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
 
-            Divider()
+            // Subtle separator
+            Rectangle()
+                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
                     // File Type Section
-                    filterSection(title: "File Type") {
+                    filterSection(title: "File Type", icon: "doc.richtext") {
                         let types = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff"]
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: DesignSystem.Spacing.sm) {
                             ForEach(types, id: \.self) { type in
@@ -3247,7 +3927,7 @@ struct ContentView: View {
                     }
 
                     // Size Section
-                    filterSection(title: "File Size") {
+                    filterSection(title: "File Size", icon: "externaldrive") {
                         VStack(spacing: DesignSystem.Spacing.sm) {
                             HStack {
                                 sizePresetButton("< 1 MB", minSize: nil, maxSize: 1_000_000)
@@ -3273,7 +3953,7 @@ struct ContentView: View {
                     }
 
                     // Date Section
-                    filterSection(title: "Date Range") {
+                    filterSection(title: "Date Range", icon: "calendar") {
                         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
                             HStack {
                                 Text("From:")
@@ -3321,47 +4001,66 @@ struct ContentView: View {
                         }
                     }
                 }
+                .padding(.top, 20)
+                .padding(.horizontal, 20)
             }
-
-            Spacer()
         }
-        .padding(DesignSystem.Spacing.lg)
-        .frame(width: 220)
+        .frame(width: 260)
         .background(
-            colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground
+            // Craft-style warm sidebar background
+            colorScheme == .dark ?
+                Color(hex: "252528") :
+                Color.white.opacity(0.9)
         )
-        .overlay(
-            Rectangle()
-                .frame(width: 1)
-                .foregroundColor(DesignSystem.Colors.border)
-                .frame(maxHeight: .infinity),
-            alignment: .leading
+        .background(.ultraThinMaterial)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 20,
+                topTrailingRadius: 20
+            )
+        )
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: 20,
+            x: -5,
+            y: 0
         )
     }
 
-    private func filterSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-            Text(title)
-                .font(DesignSystem.Typography.callout.weight(.medium))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+    // Craft/Linear style section header
+    private func filterSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .frame(width: 20)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+            }
+
             content()
+                .padding(.leading, 28) // Indent content under icon
         }
+        .padding(.vertical, 4)
     }
 
     private func filterChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(DesignSystem.Typography.caption)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
                 .background(
-                    Capsule()
-                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isSelected ?
+                            DesignSystem.Colors.accent :
+                            (colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
                 )
         }
         .buttonStyle(PlainButtonStyle())
@@ -3379,17 +4078,16 @@ struct ContentView: View {
             }
         }) {
             Text(label)
-                .font(DesignSystem.Typography.caption)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
                 .background(
-                    Capsule()
-                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isSelected ?
+                            DesignSystem.Colors.accent :
+                            (colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
                 )
         }
         .buttonStyle(PlainButtonStyle())
@@ -3596,9 +4294,13 @@ struct ContentView: View {
         VStack(spacing: DesignSystem.Spacing.md) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Find Duplicates")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.on.square.badge.person.crop")
+                            .font(.system(size: 18, weight: .medium))
+                        Text("Find Duplicates")
+                            .font(DesignSystem.Typography.title2)
+                    }
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                     if !duplicatesManager.groups.isEmpty {
                         Text("\(duplicatesManager.totalDuplicates) duplicate\(duplicatesManager.totalDuplicates == 1 ? "" : "s") in \(duplicatesManager.groups.count) group\(duplicatesManager.groups.count == 1 ? "" : "s")")
@@ -3860,9 +4562,13 @@ struct ContentView: View {
 
     private var duplicatesActionBar: some View {
         HStack(spacing: DesignSystem.Spacing.lg) {
-            Text("\(duplicatesManager.totalSelected) selected")
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13))
+                Text("\(duplicatesManager.totalSelected) selected")
+                    .font(DesignSystem.Typography.callout)
+            }
+            .foregroundColor(DesignSystem.Colors.secondaryText)
 
             Spacer()
 
@@ -3934,42 +4640,31 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var modernSearchBar: some View {
-        HStack(spacing: DesignSystem.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(DesignSystem.Colors.accent.opacity(isSearchFocused ? 0.15 : 0.1))
-                    .frame(width: 32, height: 32)
+        HStack(spacing: 12) {
+            // Simple search icon
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
 
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(isSearchFocused ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
-
-            TextField(isIndexing ? "Search indexed images (indexing in progress)..." : "Search your images with natural language...", text: $searchText)
+            // Clean text field
+            TextField("Search your images with natural language...", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
-                .font(DesignSystem.Typography.body)
+                .font(.system(size: 14))
                 .focused($isSearchFocused)
                 .onSubmit {
                     if !searchManager.isSearching && !searchText.isEmpty {
                         performSearch()
                     }
-                    // Keep focus after searching
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         isSearchFocused = true
                     }
                 }
                 .onChange(of: searchText) { oldValue, newValue in
-                    // Cancel previous timer
                     searchDebounceTimer?.invalidate()
-
-                    // Clear results if search is empty
                     if newValue.isEmpty {
                         searchManager.clearResults()
                         return
                     }
-
-                    // Debounce: wait 400ms before searching
                     searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
                         if !searchManager.isSearching && !newValue.isEmpty {
                             performSearch()
@@ -3977,123 +4672,88 @@ struct ContentView: View {
                     }
                 }
 
-            if !searchText.isEmpty {
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        searchText = ""
-                    }
-                }) {
-                    ZStack {
-                        Circle()
-                            .fill(DesignSystem.Colors.tertiaryText.opacity(0.1))
-                            .frame(width: 20, height: 20)
-
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                .transition(.scale.combined(with: .opacity))
-            }
-
+            // Right side: clear button, loading, or filter
             if searchManager.isSearching {
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                    Text("Searching")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
-                }
-                .transition(.scale.combined(with: .opacity))
+                ProgressView()
+                    .scaleEffect(0.65)
+                    .transition(.opacity)
             } else if !searchText.isEmpty {
-                Button(action: { performSearch() }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        Text("Search")
-                            .font(DesignSystem.Typography.callout.weight(.semibold))
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 14))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, x: 0, y: 4)
-                    )
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
                 }
                 .buttonStyle(PlainButtonStyle())
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .scale(scale: 0.9).combined(with: .opacity)
-                ))
+                .transition(.opacity)
             }
 
-            // Filter button
+            // Filter button (subtle)
             Button(action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                withAnimation(.easeOut(duration: 0.2)) {
                     showFilterSidebar.toggle()
                 }
             }) {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: showFilterSidebar ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 20))
-                        .foregroundColor(activeFilterCount > 0 || showFilterSidebar ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(activeFilterCount > 0 ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
 
                     if activeFilterCount > 0 {
-                        Text("\(activeFilterCount)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 14, height: 14)
-                            .background(Circle().fill(DesignSystem.Colors.accent))
-                            .offset(x: 4, y: -4)
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 6, height: 6)
+                            .offset(x: 2, y: -2)
                     }
                 }
             }
             .buttonStyle(PlainButtonStyle())
         }
-        .padding(DesignSystem.Spacing.lg)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground)
-                .shadow(
-                    color: isSearchFocused ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-                    radius: isSearchFocused ? 12 : 8,
-                    x: 0,
-                    y: isSearchFocused ? 4 : 2
-                )
+            ZStack {
+                // Base background
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+
+                // Gradient glow when focused
+                if isSearchFocused {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    DesignSystem.Colors.accent.opacity(0.08),
+                                    DesignSystem.Colors.accentGradientEnd.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(
                     isSearchFocused ?
                         LinearGradient(
-                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
+                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ) :
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                    lineWidth: isSearchFocused ? 1.5 : 1
+                        LinearGradient(colors: [Color.clear], startPoint: .leading, endPoint: .trailing),
+                    lineWidth: isSearchFocused ? 2 : 0
                 )
         )
-        .scaleEffect(isSearchFocused ? 1.01 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
+        .shadow(
+            color: isSearchFocused ? DesignSystem.Colors.accent.opacity(0.3) : Color.clear,
+            radius: isSearchFocused ? 12 : 0,
+            x: 0,
+            y: 0
+        )
+        .animation(.easeOut(duration: 0.2), value: isSearchFocused)
         .contentShape(Rectangle())
-        .onTapGesture {
-            isSearchFocused = true
-        }
-        .padding(.top, DesignSystem.Spacing.xl)
+        .onTapGesture { isSearchFocused = true }
     }
 
     // MARK: - Indexing Progress View
@@ -4247,45 +4907,36 @@ struct ContentView: View {
 
     // MARK: - Index Stats View
     private func indexStatsView(_ stats: IndexStats) -> some View {
-        HStack(spacing: DesignSystem.Spacing.lg) {
-            // Database icon
-            Image(systemName: "cylinder.split.1x2")
-                .font(.system(size: 20))
-                .foregroundColor(DesignSystem.Colors.accent)
-
-            // Stats
-            HStack(spacing: DesignSystem.Spacing.xl) {
-                Label("\(stats.totalImages) images", systemImage: "photo.stack")
-
-                Label(stats.fileSize, systemImage: "internaldrive")
-
-                if let lastMod = stats.lastModified {
-                    Label(formatRelativeDate(lastMod), systemImage: "clock")
-                }
+        // Minimal inline stats with icons
+        HStack(spacing: 16) {
+            HStack(spacing: 5) {
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 11))
+                Text("\(stats.totalImages) indexed")
+                    .font(.system(size: 12))
             }
-            .font(DesignSystem.Typography.caption)
-            .foregroundColor(DesignSystem.Colors.secondaryText)
+            .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+            if let lastMod = stats.lastModified {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 10))
+                    Text(formatRelativeDate(lastMod))
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(DesignSystem.Colors.tertiaryText.opacity(0.7))
+            }
 
             Spacer()
 
-            // Refresh button
             Button(action: { loadIndexStats() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .font(.system(size: 11))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
             }
             .buttonStyle(.plain)
+            .opacity(0.6)
         }
-        .padding(DesignSystem.Spacing.md)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .fill(DesignSystem.Colors.accent.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(DesignSystem.Colors.accent.opacity(0.15), lineWidth: 1)
-        )
     }
 
     private func loadIndexStats() {
@@ -4450,88 +5101,80 @@ struct ContentView: View {
 
     // MARK: - Recent Images Section
     private var recentImagesSection: some View {
-        VStack(spacing: DesignSystem.Spacing.md) {
-            // Header with title and refresh button
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent Images")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-                    Text("8 most recent images from your indexed folders")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                }
+        VStack(alignment: .leading, spacing: 20) {
+            // Friendly section header
+            HStack(spacing: 8) {
+                Text("Recent Photos")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                 Spacer()
 
-                Button(action: {
-                    loadRecentImages()
-                }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        if isLoadingRecent {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text("Refresh")
-                    }
-                    .font(DesignSystem.Typography.callout.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                            .fill(DesignSystem.Colors.accent.opacity(0.1))
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(isLoadingRecent)
-            }
-            .padding(.horizontal, DesignSystem.Spacing.md)
-
-            // Recent images grid - use frame to prevent layout shifts
-            Group {
-                if isLoadingRecent && recentImages.isEmpty {
-                    VStack(spacing: DesignSystem.Spacing.md) {
-                        Spacer()
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text("Loading recent images...")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Spacer()
-                    }
-                } else if recentImages.isEmpty {
-                    VStack(spacing: DesignSystem.Spacing.md) {
-                        Spacer()
-                        Image(systemName: "photo.stack")
-                            .font(.system(size: 48, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        Text("No recent images")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Text("Index a folder to see recent images here")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        Spacer()
-                    }
+                if isLoadingRecent {
+                    ProgressView()
+                        .scaleEffect(0.6)
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 150, maximum: 200), spacing: DesignSystem.Spacing.md)
-                        ], spacing: DesignSystem.Spacing.md) {
-                            ForEach(recentImages.prefix(8)) { result in
-                                RecentImageCard(result: result)
-                            }
+                    Button(action: { loadRecentImages() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Refresh")
+                                .font(.system(size: 12, weight: .medium))
                         }
-                        .padding(DesignSystem.Spacing.md)
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Grid with more spacing
+            if recentImages.isEmpty && !isLoadingRecent {
+                // Friendly empty state
+                VStack(spacing: 16) {
+                    Spacer()
+                    ZStack {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent.opacity(0.1))
+                            .frame(width: 80, height: 80)
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 32, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.accent.opacity(0.6))
+                    }
+                    VStack(spacing: 6) {
+                        Text("No photos yet")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                        Text("Add a folder to start browsing your images")
+                            .font(.system(size: 13))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20)
+                    ], spacing: 24) {
+                        ForEach(recentImages.prefix(8)) { result in
+                            ImageCard(result: result)
+                        }
+                    }
+                    .padding(20)
+                }
+            }
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, 8)
     }
 
     // MARK: - Error View
@@ -4656,13 +5299,13 @@ struct ContentView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Grid of results or skeletons
-            let columns = Array(
-                repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
-                count: SearchPreferences.shared.gridColumns
-            )
-
-            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
+            // Grid of results or skeletons - consistent card sizing
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20)
+            ], spacing: 24) {
                 if searchManager.isSearching && searchManager.results.isEmpty {
                     // Show skeleton loaders while searching
                     ForEach(0..<12, id: \.self) { _ in
@@ -4673,7 +5316,7 @@ struct ContentView: View {
                     ForEach(searchManager.results.filter { result in
                         result.similarity >= SearchPreferences.shared.similarityThreshold
                     }) { result in
-                        ResultCardView(result: result)
+                        ImageCard(result: result, showSimilarity: true)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.8).combined(with: .opacity),
                                 removal: .scale(scale: 0.9).combined(with: .opacity)

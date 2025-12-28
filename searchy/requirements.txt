@@ -7,3 +7,7 @@ transformers
 watchdog
 fastapi
 uvicorn
+# OCR support (macOS Vision framework)
+pyobjc-core
+pyobjc-framework-Quartz
+pyobjc-framework-Vision
