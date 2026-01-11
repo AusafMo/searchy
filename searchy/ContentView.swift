@@ -1762,98 +1762,6 @@ struct SettingsView: View {
                         )
                     }
 
-                    // AI Model Section
-                    AIModelSettingsSection()
-
-                    // Watched Directories Section
-                    SettingsSection(title: "Watched Directories", icon: "eye") {
-                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-                            Text("Manage directories that are automatically monitored for new images")
-                                .font(DesignSystem.Typography.caption)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                            // Directory List
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                ForEach(dirManager.watchedDirectories) { directory in
-                                    WatchedDirectoryRow(directory: directory, onDelete: {
-                                        dirManager.removeDirectory(directory)
-                                    })
-                                }
-                            }
-
-                            // Action Buttons
-                            HStack(spacing: DesignSystem.Spacing.md) {
-                                // Re-index All Button
-                                Button(action: {
-                                    performReindex()
-                                }) {
-                                    HStack(spacing: DesignSystem.Spacing.sm) {
-                                        if isReindexing {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                                .tint(.white)
-                                        } else {
-                                            Image(systemName: "arrow.clockwise")
-                                        }
-                                        Text("Re-index All")
-                                    }
-                                    .font(DesignSystem.Typography.callout.weight(.medium))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, DesignSystem.Spacing.md)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .disabled(isReindexing)
-
-                                // Add Directory Button
-                                Button(action: {
-                                    isShowingAddDirectorySheet = true
-                                }) {
-                                    HStack(spacing: DesignSystem.Spacing.sm) {
-                                        Image(systemName: "plus.circle.fill")
-                                        Text("Add Directory")
-                                    }
-                                    .font(DesignSystem.Typography.callout.weight(.medium))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, DesignSystem.Spacing.md)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        .padding(DesignSystem.Spacing.lg)
-                        .background(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                                .fill(colorScheme == .dark ?
-                                    DesignSystem.Colors.darkSecondaryBackground :
-                                    DesignSystem.Colors.secondaryBackground)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
-                        )
-                    }
-
                     // Server Settings Section
                     SettingsSection(title: "Server", icon: "server.rack") {
                         SettingsGroup(title: "Configuration") {
@@ -2497,9 +2405,9 @@ struct SpotlightSearchView: View {
                     .padding(DesignSystem.Spacing.xxl)
                 } else if !displayResults.isEmpty {
                     ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: false) {
+                        ScrollView(.vertical, showsIndicators: true) {
                             VStack(spacing: DesignSystem.Spacing.sm) {
-                                ForEach(Array(displayResults.prefix(8).enumerated()), id: \.element.id) { index, result in
+                                ForEach(Array(displayResults.enumerated()), id: \.element.id) { index, result in
                                     SpotlightResultRow(
                                         result: result,
                                         isSelected: index == selectedIndex,
@@ -2516,7 +2424,7 @@ struct SpotlightSearchView: View {
                             .padding(DesignSystem.Spacing.sm)
                             .animation(nil, value: selectedIndex)
                         }
-                        .frame(maxHeight: 350)
+                        .frame(maxHeight: 400)
                         .animation(nil, value: selectedIndex)
                         .background(resultsBackground)
                         .overlay(
@@ -4045,7 +3953,7 @@ class SearchManager: ObservableObject {
                 let url = serverURL.appendingPathComponent("recent")
                 var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
                 components.queryItems = [
-                    URLQueryItem(name: "top_k", value: "8"),
+                    URLQueryItem(name: "top_k", value: "50"),
                     URLQueryItem(name: "data_dir", value: "/Users/ausaf/Library/Application Support/searchy")
                 ]
 
@@ -4152,12 +4060,165 @@ struct IndexStats {
     let lastModified: Date?
 }
 
+// MARK: - Setup Tab Helper Views
+
+struct SetupModelRow: View {
+    let model: CLIPModelInfo
+    let isSelected: Bool
+    let isChanging: Bool
+    let onSelect: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                // Selection indicator
+                Circle()
+                    .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
+                    .frame(width: 8, height: 8)
+                    .overlay(
+                        Circle()
+                            .stroke(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.border, lineWidth: 1.5)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.name)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundColor(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
+
+                    Text("\(model.embeddingDim)-dim • \(model.sizeMB)MB")
+                        .font(.system(size: 10))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+            }
+            .padding(.horizontal, DesignSystem.Spacing.sm)
+            .padding(.vertical, DesignSystem.Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.08) :
+                        (colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02)))
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isChanging)
+        .opacity(isChanging && !isSelected ? 0.5 : 1)
+    }
+}
+
+struct SetupDirectoryRow: View {
+    let directory: WatchedDirectory
+    let onDelete: () -> Void
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 14))
+                .foregroundColor(DesignSystem.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(URL(fileURLWithPath: directory.path).lastPathComponent)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(1)
+
+                Text(directory.path)
+                    .font(.system(size: 10))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            // Filter badge if present
+            if directory.filterType != .all && !directory.filter.isEmpty {
+                Text(directory.filter)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accent.opacity(0.1))
+                    )
+            }
+
+            // Delete button on hover
+            if isHovered {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.sm)
+        .padding(.vertical, DesignSystem.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+struct SetupStatRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(color)
+                .frame(width: 24)
+
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+            Spacer()
+
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+        }
+        .padding(.horizontal, DesignSystem.Spacing.sm)
+        .padding(.vertical, DesignSystem.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+        )
+    }
+}
+
 // MARK: - App Tabs
 enum AppTab: String, CaseIterable {
     case faces = "Faces"
     case search = "Searchy"
     case duplicates = "Duplicates"
     case favorites = "Favorites"
+    case setup = "Setup"
 
     var icon: String {
         switch self {
@@ -4165,6 +4226,7 @@ enum AppTab: String, CaseIterable {
         case .search: return "magnifyingglass"
         case .duplicates: return "doc.on.doc"
         case .favorites: return "heart.fill"
+        case .setup: return "slider.horizontal.3"
         }
     }
 
@@ -4770,6 +4832,8 @@ struct ContentView: View {
     @ObservedObject private var favoritesManager = FavoritesManager.shared
     @ObservedObject private var faceManager = FaceManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var modelSettings = ModelSettings.shared
+    @ObservedObject private var dirManager = DirectoryManager.shared
     @State private var activeTab: AppTab = .search
     @State private var selectedPerson: Person? = nil
     @State private var searchText = ""
@@ -4839,6 +4903,8 @@ struct ContentView: View {
                     duplicatesTabContent
                 case .favorites:
                     favoritesTabContent
+                case .setup:
+                    setupTabContent
                 }
             }
             .padding(.horizontal, DesignSystem.Spacing.md)
@@ -5274,6 +5340,384 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             favoritesManager.refreshFavoriteImages()
+        }
+    }
+
+    // MARK: - Setup Tab Content
+    private var setupTabContent: some View {
+        ScrollView {
+            VStack(spacing: DesignSystem.Spacing.xxl) {
+                // Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Setup")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+
+                        Text("Configure your search index and AI model")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+                .padding(.top, DesignSystem.Spacing.md)
+
+                // Three column layout for cards
+                HStack(alignment: .top, spacing: DesignSystem.Spacing.xl) {
+                    // Model Card
+                    setupModelCard
+
+                    // Directories Card
+                    setupDirectoriesCard
+
+                    // Stats Card
+                    setupStatsCard
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+
+                Spacer()
+            }
+            .padding(.bottom, DesignSystem.Spacing.xxl)
+        }
+    }
+
+    private var setupModelCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "cpu")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("AI Model")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                if modelSettings.isChangingModel {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            Divider()
+
+            // Current Model
+            if modelSettings.isLoading {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading model info...")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .padding(DesignSystem.Spacing.sm)
+            } else if modelSettings.currentModelName.isEmpty {
+                // No model loaded
+                VStack(spacing: DesignSystem.Spacing.sm) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                        Text("No model loaded")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+
+                    Button(action: {
+                        // Load the default model
+                        modelSettings.changeModel(to: "openai/clip-vit-base-patch32") { _, _ in }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10))
+                            Text("Load Default Model")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.08))
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(modelSettings.currentModelDisplayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        Label(modelSettings.currentDevice, systemImage: "cpu")
+                        Label("\(modelSettings.currentEmbeddingDim)-dim", systemImage: "number")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .padding(DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.Colors.accent.opacity(0.08))
+                )
+            }
+
+            // Model Selection
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                Text("Available Models")
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                ForEach(modelSettings.availableModels) { model in
+                    SetupModelRow(
+                        model: model,
+                        isSelected: modelSettings.currentModelName == model.id,
+                        isChanging: modelSettings.isChangingModel
+                    ) {
+                        changeModelFromSetup(to: model.id, newDim: model.embeddingDim)
+                    }
+                }
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            modelSettings.fetchCurrentModel()
+        }
+    }
+
+    private var setupDirectoriesCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "folder")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Watched Directories")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { addNewDirectory() }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            // Directory List
+            if dirManager.watchedDirectories.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 32, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No directories added")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.xl)
+            } else {
+                VStack(spacing: DesignSystem.Spacing.sm) {
+                    ForEach(dirManager.watchedDirectories) { directory in
+                        SetupDirectoryRow(directory: directory) {
+                            dirManager.removeDirectory(directory)
+                        }
+                    }
+                }
+            }
+
+            // Quick add button
+            Button(action: { addNewDirectory() }) {
+                HStack {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Add Directory")
+                        .font(DesignSystem.Typography.caption.weight(.medium))
+                }
+                .foregroundColor(DesignSystem.Colors.accent)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+                        .background(DesignSystem.Colors.accent.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private var setupStatsCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "chart.bar")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Index Stats")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { loadIndexStats() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            if let stats = indexStats {
+                VStack(spacing: DesignSystem.Spacing.md) {
+                    // Total Images
+                    SetupStatRow(
+                        icon: "photo.stack",
+                        label: "Total Images",
+                        value: "\(stats.totalImages.formatted())",
+                        color: DesignSystem.Colors.accent
+                    )
+
+                    // Index Size
+                    SetupStatRow(
+                        icon: "externaldrive",
+                        label: "Index Size",
+                        value: stats.fileSize,
+                        color: .orange
+                    )
+
+                    // Last Updated
+                    if let lastMod = stats.lastModified {
+                        SetupStatRow(
+                            icon: "clock",
+                            label: "Last Updated",
+                            value: formatRelativeDate(lastMod),
+                            color: .green
+                        )
+                    }
+
+                    // Directories Count
+                    SetupStatRow(
+                        icon: "folder",
+                        label: "Directories",
+                        value: "\(dirManager.watchedDirectories.count)",
+                        color: .purple
+                    )
+                }
+            } else {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading stats...")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.xl)
+            }
+
+            Divider()
+
+            // Quick Actions
+            VStack(spacing: DesignSystem.Spacing.sm) {
+                Button(action: { if !isIndexing { selectAndIndexFolder() } }) {
+                    HStack {
+                        Image(systemName: "plus.circle")
+                        Text("Add to Index")
+                        Spacer()
+                    }
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(DesignSystem.Colors.accent.opacity(0.08))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isIndexing)
+
+                Button(action: { if !isIndexing { selectAndReplaceIndex() } }) {
+                    HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Rebuild Index")
+                        Spacer()
+                    }
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(.orange)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.orange.opacity(0.08))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isIndexing)
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatRelativeDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func addNewDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a directory to watch for images"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            let newDir = WatchedDirectory(path: url.path)
+            dirManager.addDirectory(newDir)
+        }
+    }
+
+    @State private var showingModelChangeAlert = false
+    @State private var pendingModelChange: (id: String, dim: Int)?
+
+    private func changeModelFromSetup(to modelId: String, newDim: Int) {
+        guard modelId != modelSettings.currentModelName else { return }
+
+        // Check if embedding dimension changes (requires reindex)
+        if newDim != modelSettings.currentEmbeddingDim {
+            pendingModelChange = (modelId, newDim)
+            showingModelChangeAlert = true
+        } else {
+            modelSettings.changeModel(to: modelId) { _, _ in }
         }
     }
 
@@ -6625,12 +7069,6 @@ struct ContentView: View {
         }
     }
 
-    private func formatRelativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
     private func formatDuration(_ seconds: Double) -> String {
         if seconds < 60 {
             return String(format: "%.1fs", seconds)
@@ -6798,7 +7236,7 @@ struct ContentView: View {
                         GridItem(.flexible(), spacing: 20),
                         GridItem(.flexible(), spacing: 20)
                     ], spacing: 24) {
-                        ForEach(recentImages.prefix(8)) { result in
+                        ForEach(recentImages) { result in
                             ImageCard(
                                 result: result,
                                 onFindSimilar: { path in
