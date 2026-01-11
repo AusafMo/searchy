@@ -1997,13 +1997,152 @@ extension UTType {
 class ImageCache {
     static let shared = ImageCache()
     private var cache = NSCache<NSString, NSImage>()
-    
+
     func image(for path: String) -> NSImage? {
         return cache.object(forKey: path as NSString)
     }
-    
+
     func setImage(_ image: NSImage, for path: String) {
         cache.setObject(image, forKey: path as NSString)
+    }
+
+    func clear() {
+        cache.removeAllObjects()
+    }
+}
+
+// MARK: - Efficient Thumbnail Service
+/// Uses CGImageSource to load only thumbnail data from images, not the full file.
+/// This is much faster and uses less memory than loading full images and resizing.
+class ThumbnailService {
+    static let shared = ThumbnailService()
+
+    private let cache = NSCache<NSString, NSImage>()
+    private let queue = DispatchQueue(label: "com.searchy.thumbnails", qos: .userInitiated, attributes: .concurrent)
+
+    private init() {
+        // Allow up to 500 thumbnails in cache
+        cache.countLimit = 500
+    }
+
+    /// Generate a cache key that includes size for different thumbnail sizes
+    private func cacheKey(for path: String, size: Int) -> NSString {
+        return "\(path)_\(size)" as NSString
+    }
+
+    /// Get cached thumbnail if available
+    func cachedThumbnail(for path: String, size: Int) -> NSImage? {
+        return cache.object(forKey: cacheKey(for: path, size: size))
+    }
+
+    /// Load thumbnail efficiently using CGImageSource
+    /// This reads only the necessary bytes from the file, not the entire image
+    func loadThumbnail(for path: String, maxSize: Int, completion: @escaping (NSImage?) -> Void) {
+        let key = cacheKey(for: path, size: maxSize)
+
+        // Check cache first
+        if let cached = cache.object(forKey: key) {
+            DispatchQueue.main.async {
+                completion(cached)
+            }
+            return
+        }
+
+        // Load on background queue
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            let url = URL(fileURLWithPath: path)
+
+            guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            // Options for thumbnail generation
+            let options: [CFString: Any] = [
+                kCGImageSourceThumbnailMaxPixelSize: maxSize,
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,  // Apply EXIF orientation
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+                // Fallback: try loading full image if thumbnail fails (for some formats)
+                self.loadFallbackThumbnail(for: path, maxSize: maxSize, completion: completion)
+                return
+            }
+
+            let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+
+            // Cache it
+            self.cache.setObject(thumbnail, forKey: key)
+
+            DispatchQueue.main.async {
+                completion(thumbnail)
+            }
+        }
+    }
+
+    /// Fallback for formats that don't support CGImageSource thumbnails well
+    private func loadFallbackThumbnail(for path: String, maxSize: Int, completion: @escaping (NSImage?) -> Void) {
+        guard let image = NSImage(contentsOfFile: path) else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+
+        let size = image.size
+        let scale = min(CGFloat(maxSize) / size.width, CGFloat(maxSize) / size.height, 1.0)
+        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+
+        let thumbnail = NSImage(size: newSize)
+        thumbnail.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize),
+                   from: NSRect(origin: .zero, size: size),
+                   operation: .copy,
+                   fraction: 1.0)
+        thumbnail.unlockFocus()
+
+        let key = cacheKey(for: path, size: maxSize)
+        cache.setObject(thumbnail, forKey: key)
+
+        DispatchQueue.main.async {
+            completion(thumbnail)
+        }
+    }
+
+    /// Synchronous thumbnail load (for when you need it immediately)
+    func loadThumbnailSync(for path: String, maxSize: Int) -> NSImage? {
+        let key = cacheKey(for: path, size: maxSize)
+
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let url = URL(fileURLWithPath: path)
+
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            return nil
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        cache.setObject(thumbnail, forKey: key)
+
+        return thumbnail
+    }
+
+    func clearCache() {
+        cache.removeAllObjects()
     }
 }
 
@@ -2703,26 +2842,37 @@ struct SpotlightResultRow: View {
     let onSelect: () -> Void
     @State private var isHovered = false
     @State private var showingCopyNotification = false
+    @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
+
+    private let thumbnailSize = 50
 
     var body: some View {
         HStack(spacing: DesignSystem.Spacing.sm) {
             // Thumbnail
-            if let image = NSImage(contentsOfFile: result.path) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
-                            .stroke(isSelected ?
-                                DesignSystem.Colors.accent.opacity(0.5) :
-                                DesignSystem.Colors.border.opacity(0.3),
-                                lineWidth: isSelected ? 1.5 : 1)
-                    )
-                    .shadow(color: isSelected ? DesignSystem.Colors.accent.opacity(0.2) : .clear,
-                           radius: 4, x: 0, y: 2)
+            Group {
+                if let image = thumbnail {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                }
+            }
+            .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                    .stroke(isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.5) :
+                        DesignSystem.Colors.border.opacity(0.3),
+                        lineWidth: isSelected ? 1.5 : 1)
+            )
+            .shadow(color: isSelected ? DesignSystem.Colors.accent.opacity(0.2) : .clear,
+                   radius: 4, x: 0, y: 2)
+            .onAppear {
+                loadThumbnail()
             }
 
             // Info
@@ -2857,6 +3007,17 @@ struct SpotlightResultRow: View {
         showingCopyNotification = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             showingCopyNotification = false
+        }
+    }
+
+    private func loadThumbnail() {
+        let size = thumbnailSize * 2  // 2x for retina
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: result.path, size: size) {
+            self.thumbnail = cached
+            return
+        }
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: size) { thumb in
+            self.thumbnail = thumb
         }
     }
 
@@ -3267,6 +3428,9 @@ struct ResultCardView: View {
 // MARK: - Person Card for Face Recognition
 struct PersonCard: View {
     let person: Person
+    @State private var thumbnail: NSImage?
+
+    private let thumbnailSize = 100
 
     var body: some View {
         VStack(spacing: 8) {
@@ -3276,17 +3440,16 @@ struct PersonCard: View {
                     .fill(DesignSystem.Colors.secondaryBackground)
                     .shadow(color: Color.black.opacity(0.1), radius: 4, y: 2)
 
-                if let thumbnailPath = person.thumbnailPath,
-                   let nsImage = NSImage(contentsOfFile: thumbnailPath) {
-                    Image(nsImage: nsImage)
+                if let image = thumbnail {
+                    Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 100, height: 100)
+                        .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
                         .clipShape(Circle())
                 } else {
                     Circle()
                         .fill(DesignSystem.Colors.accent.opacity(0.1))
-                        .frame(width: 100, height: 100)
+                        .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
                         .overlay(
                             Image(systemName: "person.fill")
                                 .font(.system(size: 40))
@@ -3295,6 +3458,9 @@ struct PersonCard: View {
                 }
             }
             .frame(width: 120, height: 120)
+            .onAppear {
+                loadThumbnail()
+            }
 
             // Person name and count
             VStack(spacing: 2) {
@@ -3316,6 +3482,18 @@ struct PersonCard: View {
         )
         .contentShape(Rectangle())
     }
+
+    private func loadThumbnail() {
+        guard let path = person.thumbnailPath else { return }
+        let size = thumbnailSize * 2  // 2x for retina
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: size) {
+            self.thumbnail = cached
+            return
+        }
+        ThumbnailService.shared.loadThumbnail(for: path, maxSize: size) { thumb in
+            self.thumbnail = thumb
+        }
+    }
 }
 
 // MARK: - Recent Image Card (Craft-style warm, floating card)
@@ -3327,6 +3505,7 @@ struct ImageCard: View {
 
     @State private var isHovered = false
     @State private var showCopied = false
+    @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
 
     // Craft-style warm tints for card backgrounds
@@ -3463,7 +3642,7 @@ struct ImageCard: View {
 
     private var imageContent: some View {
         GeometryReader { geo in
-            if let image = NSImage(contentsOfFile: result.path) {
+            if let image = thumbnail {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -3473,13 +3652,30 @@ struct ImageCard: View {
                 Rectangle()
                     .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(hex: "F8F8F8"))
                     .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 32, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText.opacity(0.3))
+                        ProgressView()
+                            .scaleEffect(0.8)
                     )
             }
         }
         .frame(height: imageHeight)
+        .onAppear {
+            loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() {
+        let maxSize = Int(cardHeight * 2)  // 2x for retina
+
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: result.path, size: maxSize) {
+            self.thumbnail = cached
+            return
+        }
+
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: maxSize) { thumb in
+            self.thumbnail = thumb
+        }
     }
 
     private var hoverOverlay: some View {
@@ -3629,65 +3825,26 @@ struct DoubleClickImageView: View {
     }
 
     private func loadImage() {
-        if let cachedImage = ImageCache.shared.image(for: filePath) {
-            self.image = cachedImage
+        let maxSize = Int(prefs.imageSize) * 2  // 2x for retina
+
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: filePath, size: maxSize) {
+            self.image = cached
             return
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let loadedImage = NSImage(contentsOfFile: filePath) {
-                let maxSize = CGFloat(SearchPreferences.shared.imageSize)
-                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
-                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
-                ImageCache.shared.setImage(resizedImage, for: filePath)
-                DispatchQueue.main.async {
-                    self.image = resizedImage
-                }
-            } else {
-                print("⚠️ DoubleClickImageView failed to load: \(filePath)")
-                print("   Exists: \(FileManager.default.fileExists(atPath: filePath))")
-            }
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: filePath, maxSize: maxSize) { thumbnail in
+            self.image = thumbnail
         }
-    }
-
-    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
-        let imageWidth = image.size.width
-        let imageHeight = image.size.height
-
-        let widthRatio = maxSize / imageWidth
-        let heightRatio = maxSize / imageHeight
-
-        let ratio = min(widthRatio, heightRatio)
-
-        return NSSize(
-            width: imageWidth * ratio,
-            height: imageHeight * ratio
-        )
-    }
-
-    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
-        let newImage = NSImage(size: targetSize)
-
-        newImage.lockFocus()
-
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: targetSize).fill()
-
-        image.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1.0
-        )
-
-        newImage.unlockFocus()
-        return newImage
     }
 }
 
 // MARK: - Async Thumbnail View
+/// Efficiently loads thumbnails using CGImageSource (reads minimal bytes from file)
 struct AsyncThumbnailView: View {
     let path: String
+    var maxSize: Int = 200
     var contentMode: ContentMode = .fill
     @State private var image: NSImage?
 
@@ -3707,51 +3864,21 @@ struct AsyncThumbnailView: View {
             }
         }
         .onAppear {
-            loadImage()
+            loadThumbnail()
         }
     }
 
-    private func loadImage() {
-        if let cachedImage = ImageCache.shared.image(for: path) {
-            self.image = cachedImage
+    private func loadThumbnail() {
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: maxSize) {
+            self.image = cached
             return
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let loadedImage = NSImage(contentsOfFile: path) {
-                let maxSize: CGFloat = 200
-                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
-                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
-                ImageCache.shared.setImage(resizedImage, for: path)
-                DispatchQueue.main.async {
-                    self.image = resizedImage
-                }
-            }
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: path, maxSize: maxSize) { thumbnail in
+            self.image = thumbnail
         }
-    }
-
-    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
-        let imageWidth = image.size.width
-        let imageHeight = image.size.height
-        let widthRatio = maxSize / imageWidth
-        let heightRatio = maxSize / imageHeight
-        let ratio = min(widthRatio, heightRatio)
-        return NSSize(width: imageWidth * ratio, height: imageHeight * ratio)
-    }
-
-    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
-        let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: targetSize).fill()
-        image.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1.0
-        )
-        newImage.unlockFocus()
-        return newImage
     }
 }
 
