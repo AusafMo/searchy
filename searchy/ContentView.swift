@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import Vision
 
 // MARK: - Color Extension for Hex Support
 extension Color {
@@ -733,6 +734,136 @@ class IndexingSettings: ObservableObject {
     }
 }
 
+// MARK: - Model Settings (AI Model Configuration)
+struct CLIPModelInfo: Identifiable {
+    let id: String  // model_name from HuggingFace
+    let name: String
+    let description: String
+    let embeddingDim: Int
+    let sizeMB: Int
+}
+
+class ModelSettings: ObservableObject {
+    static let shared = ModelSettings()
+
+    @Published var currentModelName: String = ""
+    @Published var currentModelDisplayName: String = ""
+    @Published var currentDevice: String = ""
+    @Published var currentEmbeddingDim: Int = 512
+    @Published var availableModels: [CLIPModelInfo] = []
+    @Published var isLoading: Bool = false
+    @Published var isChangingModel: Bool = false
+    @Published var errorMessage: String? = nil
+    @Published var requiresReindex: Bool = false
+
+    private let serverURL = "http://127.0.0.1:7860"
+
+    private init() {
+        // Pre-populate with known models (will be updated from server)
+        availableModels = [
+            CLIPModelInfo(id: "openai/clip-vit-base-patch32", name: "CLIP ViT-B/32", description: "Fast, good balance of speed and accuracy", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "openai/clip-vit-base-patch16", name: "CLIP ViT-B/16", description: "More accurate than B/32, slower", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "openai/clip-vit-large-patch14", name: "CLIP ViT-L/14", description: "High accuracy, requires more memory", embeddingDim: 768, sizeMB: 1710),
+            CLIPModelInfo(id: "openai/clip-vit-large-patch14-336", name: "CLIP ViT-L/14@336px", description: "Highest accuracy, processes 336px images", embeddingDim: 768, sizeMB: 1710),
+            CLIPModelInfo(id: "laion/CLIP-ViT-B-32-laion2B-s34B-b79K", name: "LAION CLIP ViT-B/32", description: "Trained on LAION-2B dataset", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K", name: "LAION CLIP ViT-H/14", description: "Large model, very accurate", embeddingDim: 1024, sizeMB: 3940)
+        ]
+    }
+
+    func fetchCurrentModel() {
+        isLoading = true
+        errorMessage = nil
+
+        guard let url = URL(string: "\(serverURL)/model") else { return }
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+
+                if let error = error {
+                    self?.errorMessage = "Failed to connect: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self?.errorMessage = "Invalid response"
+                    return
+                }
+
+                if let status = json["status"] as? String, status == "not_loaded" {
+                    self?.currentModelName = ""
+                    self?.currentModelDisplayName = "No model loaded"
+                    return
+                }
+
+                self?.currentModelName = json["model_name"] as? String ?? ""
+                self?.currentDevice = json["device"] as? String ?? "unknown"
+                self?.currentEmbeddingDim = json["embedding_dim"] as? Int ?? 512
+                self?.currentModelDisplayName = json["name"] as? String ?? self?.currentModelName ?? ""
+            }
+        }.resume()
+    }
+
+    func changeModel(to modelId: String, completion: @escaping (Bool, String?) -> Void) {
+        isChangingModel = true
+        errorMessage = nil
+        requiresReindex = false
+
+        guard let url = URL(string: "\(serverURL)/model") else {
+            completion(false, "Invalid URL")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = ["model_name": modelId]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isChangingModel = false
+
+                if let error = error {
+                    self?.errorMessage = error.localizedDescription
+                    completion(false, error.localizedDescription)
+                    return
+                }
+
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self?.errorMessage = "Invalid response"
+                    completion(false, "Invalid response")
+                    return
+                }
+
+                let status = json["status"] as? String ?? "error"
+
+                if status == "success" {
+                    self?.currentModelName = json["new_model"] as? String ?? modelId
+                    self?.currentEmbeddingDim = json["new_embedding_dim"] as? Int ?? 512
+                    self?.requiresReindex = json["reindex_required"] as? Bool ?? false
+
+                    // Update display name from our known models
+                    if let model = self?.availableModels.first(where: { $0.id == modelId }) {
+                        self?.currentModelDisplayName = model.name
+                    } else {
+                        self?.currentModelDisplayName = modelId
+                    }
+
+                    completion(true, self?.requiresReindex == true ? "Re-indexing required due to different embedding dimensions" : nil)
+                } else {
+                    let message = json["message"] as? String ?? "Failed to change model"
+                    self?.errorMessage = message
+                    completion(false, message)
+                }
+            }
+        }.resume()
+    }
+}
+
 // MARK: - Watched Directory Model
 struct WatchedDirectory: Identifiable, Codable, Equatable {
     var id: UUID
@@ -922,6 +1053,301 @@ struct SettingsGroup<Content: View>: View {
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
                 .stroke(DesignSystem.Colors.border, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - AI Model Settings Section
+struct AIModelSettingsSection: View {
+    @ObservedObject private var modelSettings = ModelSettings.shared
+    @State private var selectedModelId: String = ""
+    @State private var showingConfirmation = false
+    @State private var showingReindexAlert = false
+    @State private var pendingModelId: String = ""
+    @State private var customModelName: String = ""
+    @State private var showingCustomModelInput = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        SettingsSection(title: "AI Model", icon: "cpu") {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+                // Current Model Info
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                    HStack {
+                        Text("Current Model")
+                            .font(DesignSystem.Typography.callout.weight(.medium))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                        Spacer()
+                        if modelSettings.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                    }
+
+                    if !modelSettings.currentModelDisplayName.isEmpty {
+                        HStack(spacing: DesignSystem.Spacing.md) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(modelSettings.currentModelDisplayName)
+                                    .font(DesignSystem.Typography.body.weight(.semibold))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+
+                                HStack(spacing: DesignSystem.Spacing.md) {
+                                    Label(modelSettings.currentDevice, systemImage: "cpu")
+                                    Label("\(modelSettings.currentEmbeddingDim)-dim", systemImage: "number")
+                                }
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                            Spacer()
+                        }
+                        .padding(DesignSystem.Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(colorScheme == .dark ?
+                                    DesignSystem.Colors.darkTertiaryBackground :
+                                    DesignSystem.Colors.tertiaryBackground)
+                        )
+                    }
+                }
+
+                Divider()
+
+                // Model Selection
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                    Text("Change Model")
+                        .font(DesignSystem.Typography.callout.weight(.medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("Select a different CLIP model from HuggingFace")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    // Model Picker
+                    ForEach(modelSettings.availableModels) { model in
+                        ModelSelectionRow(
+                            model: model,
+                            isSelected: modelSettings.currentModelName == model.id,
+                            isCurrent: modelSettings.currentModelName == model.id,
+                            onSelect: {
+                                if model.id != modelSettings.currentModelName {
+                                    pendingModelId = model.id
+                                    // Check if dimensions are different
+                                    if model.embeddingDim != modelSettings.currentEmbeddingDim {
+                                        showingConfirmation = true
+                                    } else {
+                                        changeModel(to: model.id)
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    // Custom Model Input
+                    DisclosureGroup("Use Custom Model", isExpanded: $showingCustomModelInput) {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                            Text("Enter a HuggingFace model name (e.g., openai/clip-vit-base-patch32)")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                            HStack {
+                                TextField("Model name", text: $customModelName)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(DesignSystem.Typography.body)
+                                    .padding(DesignSystem.Spacing.sm)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                            .fill(colorScheme == .dark ?
+                                                DesignSystem.Colors.darkTertiaryBackground :
+                                                DesignSystem.Colors.tertiaryBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                                    )
+
+                                Button(action: {
+                                    if !customModelName.isEmpty {
+                                        pendingModelId = customModelName
+                                        showingConfirmation = true
+                                    }
+                                }) {
+                                    Text("Load")
+                                        .font(DesignSystem.Typography.callout.weight(.medium))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                                        .padding(.vertical, DesignSystem.Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                                .fill(DesignSystem.Colors.accent)
+                                        )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(customModelName.isEmpty || modelSettings.isChangingModel)
+                            }
+                        }
+                        .padding(.top, DesignSystem.Spacing.sm)
+                    }
+                    .font(DesignSystem.Typography.callout)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                // Error message
+                if let error = modelSettings.errorMessage {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(DesignSystem.Colors.error)
+                        Text(error)
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.error)
+                    }
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .fill(DesignSystem.Colors.error.opacity(0.1))
+                    )
+                }
+
+                // Re-index warning
+                if modelSettings.requiresReindex {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("Re-indexing required! The new model has different embedding dimensions.")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(.orange)
+                    }
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .fill(Color.orange.opacity(0.1))
+                    )
+                }
+
+                // Loading overlay
+                if modelSettings.isChangingModel {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading model...")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    .padding(DesignSystem.Spacing.md)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                            .fill(colorScheme == .dark ?
+                                DesignSystem.Colors.darkTertiaryBackground :
+                                DesignSystem.Colors.tertiaryBackground)
+                    )
+                }
+            }
+            .padding(DesignSystem.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                    .fill(colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                    .stroke(DesignSystem.Colors.border, lineWidth: 1)
+            )
+        }
+        .onAppear {
+            modelSettings.fetchCurrentModel()
+        }
+        .alert("Change Model?", isPresented: $showingConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Change & Re-index") {
+                changeModel(to: pendingModelId)
+            }
+        } message: {
+            Text("This model has different embedding dimensions. Your image index will need to be rebuilt, which may take some time.")
+        }
+    }
+
+    private func changeModel(to modelId: String) {
+        modelSettings.changeModel(to: modelId) { success, message in
+            if success && modelSettings.requiresReindex {
+                showingReindexAlert = true
+            }
+        }
+    }
+}
+
+// MARK: - Model Selection Row
+struct ModelSelectionRow: View {
+    let model: CLIPModelInfo
+    let isSelected: Bool
+    let isCurrent: Bool
+    let onSelect: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: DesignSystem.Spacing.md) {
+                // Selection indicator
+                ZStack {
+                    Circle()
+                        .stroke(isCurrent ? DesignSystem.Colors.accent : DesignSystem.Colors.border, lineWidth: 2)
+                        .frame(width: 20, height: 20)
+
+                    if isCurrent {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 12, height: 12)
+                    }
+                }
+
+                // Model info
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(model.name)
+                            .font(DesignSystem.Typography.body.weight(.medium))
+                            .foregroundColor(isCurrent ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
+
+                        if isCurrent {
+                            Text("Current")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                        }
+                    }
+
+                    Text(model.description)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        Label("\(model.embeddingDim)-dim", systemImage: "number")
+                        Label("\(model.sizeMB) MB", systemImage: "internaldrive")
+                    }
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+
+                Spacer()
+            }
+            .padding(DesignSystem.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .fill(isCurrent ?
+                        DesignSystem.Colors.accent.opacity(0.1) :
+                        (colorScheme == .dark ?
+                            DesignSystem.Colors.darkTertiaryBackground :
+                            DesignSystem.Colors.tertiaryBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .stroke(isCurrent ? DesignSystem.Colors.accent : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -1335,6 +1761,9 @@ struct SettingsView: View {
                                 .stroke(DesignSystem.Colors.border, lineWidth: 1)
                         )
                     }
+
+                    // AI Model Section
+                    AIModelSettingsSection()
 
                     // Watched Directories Section
                     SettingsSection(title: "Watched Directories", icon: "eye") {
@@ -2835,6 +3264,60 @@ struct ResultCardView: View {
     }
 }
 
+// MARK: - Person Card for Face Recognition
+struct PersonCard: View {
+    let person: Person
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Face thumbnail
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(DesignSystem.Colors.secondaryBackground)
+                    .shadow(color: Color.black.opacity(0.1), radius: 4, y: 2)
+
+                if let thumbnailPath = person.thumbnailPath,
+                   let nsImage = NSImage(contentsOfFile: thumbnailPath) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 100, height: 100)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(DesignSystem.Colors.accent.opacity(0.1))
+                        .frame(width: 100, height: 100)
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 40))
+                                .foregroundColor(DesignSystem.Colors.accent.opacity(0.5))
+                        )
+                }
+            }
+            .frame(width: 120, height: 120)
+
+            // Person name and count
+            VStack(spacing: 2) {
+                Text(person.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(1)
+
+                Text("\(person.faceCount) photos")
+                    .font(.system(size: 11))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(DesignSystem.Colors.secondaryBackground)
+                .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
+        )
+        .contentShape(Rectangle())
+    }
+}
+
 // MARK: - Recent Image Card (Craft-style warm, floating card)
 struct ImageCard: View {
     let result: SearchResult
@@ -2893,11 +3376,31 @@ struct ImageCard: View {
     }
 
     private var imageSection: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             imageContent
+
+            // Top trailing - similarity badge
             if showSimilarity {
-                similarityBadge
+                VStack {
+                    HStack {
+                        Spacer()
+                        similarityBadge
+                    }
+                    Spacer()
+                }
             }
+
+            // Top leading - favorite button (show on hover)
+            if isHovered {
+                VStack {
+                    HStack {
+                        favoriteButton
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+
             if isHovered && !showCopied { hoverOverlay }
             if showCopied { copiedFeedback }
         }
@@ -2911,6 +3414,27 @@ struct ImageCard: View {
                 topTrailingRadius: 12
             )
         )
+    }
+
+    private var favoriteButton: some View {
+        let isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        return Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                FavoritesManager.shared.toggleFavorite(result.path)
+            }
+        }) {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(isFavorite ? .red : .white)
+                .padding(8)
+                .background(
+                    Circle()
+                        .fill(isFavorite ? Color.white : Color.black.opacity(0.4))
+                        .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(8)
     }
 
     private var similarityBadge: some View {
@@ -3503,14 +4027,22 @@ struct IndexStats {
 
 // MARK: - App Tabs
 enum AppTab: String, CaseIterable {
-    case search = "Search"
+    case faces = "Faces"
+    case search = "Searchy"
     case duplicates = "Duplicates"
+    case favorites = "Favorites"
 
     var icon: String {
         switch self {
+        case .faces: return "person.2"
         case .search: return "magnifyingglass"
-        case .duplicates: return "square.on.square"
+        case .duplicates: return "doc.on.doc"
+        case .favorites: return "heart.fill"
         }
+    }
+
+    var isMainTab: Bool {
+        self == .search
     }
 }
 
@@ -3699,11 +4231,420 @@ class DuplicatesManager: ObservableObject {
     }
 }
 
+// MARK: - Favorites Manager
+class FavoritesManager: ObservableObject {
+    static let shared = FavoritesManager()
+
+    @Published var favorites: Set<String> = []
+    @Published var favoriteImages: [SearchResult] = []
+    @Published var isLoading = false
+
+    private let favoritesFileURL: URL
+
+    private init() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let searchyDir = appSupport.appendingPathComponent("searchy")
+        try? FileManager.default.createDirectory(at: searchyDir, withIntermediateDirectories: true)
+        favoritesFileURL = searchyDir.appendingPathComponent("favorites.json")
+        loadFavorites()
+    }
+
+    private func loadFavorites() {
+        guard FileManager.default.fileExists(atPath: favoritesFileURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: favoritesFileURL)
+            let paths = try JSONDecoder().decode([String].self, from: data)
+            favorites = Set(paths)
+            refreshFavoriteImages()
+        } catch {
+            print("Failed to load favorites: \(error)")
+        }
+    }
+
+    private func saveFavorites() {
+        do {
+            let data = try JSONEncoder().encode(Array(favorites))
+            try data.write(to: favoritesFileURL)
+        } catch {
+            print("Failed to save favorites: \(error)")
+        }
+    }
+
+    func toggleFavorite(_ path: String) {
+        if favorites.contains(path) {
+            favorites.remove(path)
+        } else {
+            favorites.insert(path)
+        }
+        saveFavorites()
+        refreshFavoriteImages()
+    }
+
+    func isFavorite(_ path: String) -> Bool {
+        favorites.contains(path)
+    }
+
+    func refreshFavoriteImages() {
+        isLoading = true
+        let currentFavorites = Array(favorites)
+
+        Task.detached(priority: .userInitiated) {
+            let images = currentFavorites.compactMap { path -> SearchResult? in
+                guard FileManager.default.fileExists(atPath: path) else { return nil }
+                let url = URL(fileURLWithPath: path)
+                let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+                let size = attrs?[.size] as? Int ?? 0
+                let date = attrs?[.modificationDate] as? Date
+                let dateStr = date.map { ISO8601DateFormatter().string(from: $0) }
+                return SearchResult(
+                    path: path,
+                    similarity: 1.0,
+                    size: size,
+                    date: dateStr,
+                    type: url.pathExtension.lowercased()
+                )
+            }.sorted { ($0.date ?? "") > ($1.date ?? "") }
+
+            await MainActor.run {
+                self.favoriteImages = images
+                self.isLoading = false
+            }
+        }
+    }
+}
+
+// MARK: - Face Detection & Clustering
+
+// MARK: - Face Data Models (matching Python API)
+
+struct FaceData: Codable, Identifiable {
+    let face_id: String
+    let image_path: String
+    let bbox: FaceBBox
+    let confidence: Double
+    let thumbnail_path: String?
+
+    var id: String { face_id }
+    var imagePath: String { image_path }
+    var thumbnailPath: String? { thumbnail_path }
+
+    struct FaceBBox: Codable {
+        let x: Int
+        let y: Int
+        let w: Int
+        let h: Int
+    }
+}
+
+struct FaceCluster: Codable, Identifiable {
+    let cluster_id: String
+    let name: String
+    let face_count: Int
+    let thumbnail_path: String?
+    let faces: [FaceData]
+
+    var id: String { cluster_id }
+    var faceCount: Int { face_count }
+    var thumbnailPath: String? { thumbnail_path }
+}
+
+struct FaceClustersResponse: Codable {
+    let clusters: [FaceCluster]
+    let total_clusters: Int
+    let total_faces: Int
+}
+
+struct FaceScanStatusResponse: Codable {
+    let is_scanning: Bool
+    let progress: Double
+    let status: String
+    let total_to_scan: Int
+    let scanned_count: Int
+    let total_faces: Int
+    let total_clusters: Int
+}
+
+struct FaceNewCountResponse: Codable {
+    let new_count: Int
+    let total_indexed: Int
+    let already_scanned: Int
+}
+
+// Keep legacy types for compatibility with existing views
+struct DetectedFace: Codable, Identifiable {
+    var id = UUID()
+    let imagePath: String
+    let boundingBox: CGRect
+    var embedding: [Float]?
+    var personId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, imagePath, boundingBox, embedding, personId
+    }
+
+    init(id: UUID = UUID(), imagePath: String, boundingBox: CGRect, embedding: [Float]? = nil, personId: String? = nil) {
+        self.id = id
+        self.imagePath = imagePath
+        self.boundingBox = boundingBox
+        self.embedding = embedding
+        self.personId = personId
+    }
+
+    // Create from FaceData (Python API response)
+    init(from faceData: FaceData) {
+        self.id = UUID()
+        self.imagePath = faceData.image_path
+        self.boundingBox = CGRect(
+            x: CGFloat(faceData.bbox.x),
+            y: CGFloat(faceData.bbox.y),
+            width: CGFloat(faceData.bbox.w),
+            height: CGFloat(faceData.bbox.h)
+        )
+        self.embedding = nil
+        self.personId = nil
+    }
+}
+
+struct Person: Identifiable {
+    let id: String
+    var name: String
+    var faces: [DetectedFace]
+    var thumbnailPath: String?
+
+    var faceCount: Int { faces.count }
+
+    // Create from FaceCluster (Python API response)
+    init(from cluster: FaceCluster) {
+        self.id = cluster.cluster_id
+        self.name = cluster.name
+        self.faces = cluster.faces.map { DetectedFace(from: $0) }
+        self.thumbnailPath = cluster.thumbnail_path
+    }
+
+    init(id: String, name: String, faces: [DetectedFace], thumbnailPath: String? = nil) {
+        self.id = id
+        self.name = name
+        self.faces = faces
+        self.thumbnailPath = thumbnailPath
+    }
+}
+
+class FaceManager: ObservableObject {
+    static let shared = FaceManager()
+
+    @Published var people: [Person] = []
+    @Published var isScanning = false
+    @Published var scanProgress: String = ""
+    @Published var scanPercentage: Double = 0
+    @Published var totalFacesDetected = 0
+    @Published var hasScannedBefore = false
+    @Published var newImagesCount = 0
+
+    private let baseURL = "http://localhost:7860"
+    private let dataDir = "/Users/ausaf/Library/Application Support/searchy"
+    private var statusPollTimer: Timer?
+
+    private init() {
+        // Load initial state from Python backend
+        Task {
+            await loadClustersFromAPI()
+            await checkForNewImages()
+        }
+    }
+
+    // MARK: - API Calls
+
+    /// Check for new indexed images that haven't been scanned
+    func checkForNewImages() async {
+        guard let url = URL(string: "\(baseURL)/face-new-count?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceNewCountResponse.self, from: data)
+            await MainActor.run {
+                self.newImagesCount = response.new_count
+                self.hasScannedBefore = response.already_scanned > 0
+            }
+        } catch {
+            print("Failed to check new images: \(error)")
+        }
+    }
+
+    /// Load face clusters from Python backend
+    func loadClustersFromAPI() async {
+        guard let url = URL(string: "\(baseURL)/face-clusters?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceClustersResponse.self, from: data)
+            await MainActor.run {
+                self.people = response.clusters.map { Person(from: $0) }
+                self.totalFacesDetected = response.total_faces
+                self.hasScannedBefore = response.total_faces > 0
+            }
+        } catch {
+            print("Failed to load clusters: \(error)")
+        }
+    }
+
+    /// Start face scanning via Python backend
+    func scanForFaces(fullRescan: Bool = false) {
+        guard !isScanning else { return }
+
+        Task {
+            await MainActor.run {
+                self.isScanning = true
+                self.scanProgress = "Starting face scan..."
+                self.scanPercentage = 0
+            }
+
+            // Call the Python API to start scanning
+            guard let url = URL(string: "\(baseURL)/face-scan") else {
+                await MainActor.run {
+                    self.isScanning = false
+                    self.scanProgress = "Error: Invalid URL"
+                }
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "data_dir": dataDir,
+                "incremental": !fullRescan
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let status = json["status"] as? String {
+                    if status == "started" || status == "already_scanning" {
+                        // Start polling for status
+                        await startStatusPolling()
+                    } else if status == "error" {
+                        let message = json["message"] as? String ?? "Unknown error"
+                        await MainActor.run {
+                            self.isScanning = false
+                            self.scanProgress = "Error: \(message)"
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isScanning = false
+                    self.scanProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Start polling for scan status
+    private func startStatusPolling() async {
+        await MainActor.run {
+            self.statusPollTimer?.invalidate()
+            self.statusPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task {
+                    await self?.pollScanStatus()
+                }
+            }
+        }
+    }
+
+    /// Poll scan status from Python backend
+    private func pollScanStatus() async {
+        guard let url = URL(string: "\(baseURL)/face-scan-status?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceScanStatusResponse.self, from: data)
+
+            await MainActor.run {
+                self.scanProgress = response.status
+                self.scanPercentage = response.progress
+                self.totalFacesDetected = response.total_faces
+
+                if !response.is_scanning {
+                    // Scan complete - stop polling and load results
+                    self.statusPollTimer?.invalidate()
+                    self.statusPollTimer = nil
+                    self.isScanning = false
+                    self.newImagesCount = 0
+
+                    // Load updated clusters
+                    Task {
+                        await self.loadClustersFromAPI()
+                    }
+                }
+            }
+        } catch {
+            print("Failed to poll status: \(error)")
+        }
+    }
+
+    /// Clear all face data via Python backend
+    func clearAllFaces() {
+        Task {
+            guard let url = URL(string: "\(baseURL)/face-clear?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+
+            do {
+                let _ = try await URLSession.shared.data(for: request)
+                await MainActor.run {
+                    self.people = []
+                    self.totalFacesDetected = 0
+                    self.hasScannedBefore = false
+                    self.newImagesCount = 0
+                    self.scanProgress = "All face data cleared"
+                }
+                // Check for new images after clearing
+                await checkForNewImages()
+            } catch {
+                print("Failed to clear faces: \(error)")
+            }
+        }
+    }
+
+    /// Get images for a specific person
+    func getImagesForPerson(_ person: Person) -> [SearchResult] {
+        let uniquePaths = Set(person.faces.map { $0.imagePath })
+        return uniquePaths.compactMap { path -> SearchResult? in
+            guard FileManager.default.fileExists(atPath: path) else { return nil }
+            let url = URL(fileURLWithPath: path)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+            let size = attrs?[.size] as? Int ?? 0
+            let date = attrs?[.modificationDate] as? Date
+            let dateStr = date.map { ISO8601DateFormatter().string(from: $0) }
+            return SearchResult(
+                path: path,
+                similarity: 1.0,
+                size: size,
+                date: dateStr,
+                type: url.pathExtension.lowercased()
+            )
+        }.sorted { ($0.date ?? "") > ($1.date ?? "") }
+    }
+
+    /// Refresh new images count - call from UI
+    func refreshNewImagesCount() {
+        Task {
+            await checkForNewImages()
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
     @ObservedObject private var duplicatesManager = DuplicatesManager.shared
+    @ObservedObject private var favoritesManager = FavoritesManager.shared
+    @ObservedObject private var faceManager = FaceManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var activeTab: AppTab = .search
+    @State private var selectedPerson: Person? = nil
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
@@ -3762,10 +4703,15 @@ struct ContentView: View {
                     .padding(.top, DesignSystem.Spacing.lg)
 
                 // Main content area based on active tab
-                if activeTab == .search {
+                switch activeTab {
+                case .faces:
+                    facesTabContent
+                case .search:
                     searchTabContent
-                } else {
+                case .duplicates:
                     duplicatesTabContent
+                case .favorites:
+                    favoritesTabContent
                 }
             }
             .padding(.horizontal, DesignSystem.Spacing.md)
@@ -3879,15 +4825,16 @@ struct ContentView: View {
     }
 
     private func tabButtonContent(for tab: AppTab, isActive: Bool) -> some View {
-        HStack(spacing: 5) {
+        let isMain = tab.isMainTab
+        return HStack(spacing: isMain ? 6 : 5) {
             Image(systemName: tab.icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: isMain ? 13 : 11, weight: .medium))
             Text(tab.rawValue)
-                .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+                .font(.system(size: isMain ? 15 : 13, weight: isActive ? .semibold : .medium))
         }
         .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, isMain ? 20 : 14)
+        .padding(.vertical, isMain ? 9 : 7)
         .background(tabButtonBackground(isActive: isActive))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(tabButtonBorder(isActive: isActive))
@@ -3916,6 +4863,291 @@ struct ContentView: View {
                 isActive ? DesignSystem.Colors.accent.opacity(0.4) : Color.clear,
                 lineWidth: isActive ? 1 : 0
             )
+    }
+
+    // MARK: - Faces Tab Content
+    private var facesTabContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("People")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    if faceManager.totalFacesDetected > 0 {
+                        Text("\(faceManager.people.count) people • \(faceManager.totalFacesDetected) faces")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                Spacer()
+
+                if faceManager.hasScannedBefore && !faceManager.isScanning {
+                    Button(action: {
+                        faceManager.clearAllFaces()
+                    }) {
+                        Text("Clear")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.trailing, 8)
+                }
+
+                // Show new images badge if there are unscanned images
+                if faceManager.newImagesCount > 0 && !faceManager.isScanning {
+                    Text("\(faceManager.newImagesCount) new")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.orange))
+                        .padding(.trailing, 4)
+                }
+
+                Button(action: {
+                    if faceManager.isScanning {
+                        // Could add cancel functionality
+                    } else {
+                        faceManager.scanForFaces()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        if faceManager.isScanning {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        Text(faceManager.isScanning ? "Scanning..." :
+                             (faceManager.newImagesCount > 0 ? "Scan New" : "Scan Faces"))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(faceManager.isScanning ? Color.gray : DesignSystem.Colors.accent)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(faceManager.isScanning)
+            }
+            .padding(.bottom, DesignSystem.Spacing.md)
+            .onAppear {
+                faceManager.refreshNewImagesCount()
+            }
+
+            // Scanning progress
+            if faceManager.isScanning {
+                VStack(spacing: 12) {
+                    ProgressView(value: faceManager.scanPercentage)
+                        .progressViewStyle(LinearProgressViewStyle())
+                        .frame(height: 4)
+
+                    Text(faceManager.scanProgress)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .padding(.bottom, DesignSystem.Spacing.lg)
+            }
+
+            // Content
+            if selectedPerson != nil {
+                personDetailView
+            } else if faceManager.people.isEmpty && !faceManager.isScanning {
+                // Empty state
+                VStack(spacing: DesignSystem.Spacing.lg) {
+                    Spacer()
+
+                    Image(systemName: "person.2.circle")
+                        .font(.system(size: 64, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                    Text("Face Recognition")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text(faceManager.hasScannedBefore
+                         ? "No faces found in your photos.\nTry scanning more images."
+                         : "Scan your photos to automatically\ndetect and group people.")
+                        .font(DesignSystem.Typography.body)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+
+                    if !faceManager.hasScannedBefore {
+                        Button(action: {
+                            faceManager.scanForFaces()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                Text("Scan for Faces")
+                            }
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(DesignSystem.Colors.accent)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.top, 8)
+                    }
+
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // People grid
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.adaptive(minimum: 120, maximum: 150), spacing: 16)
+                    ], spacing: 16) {
+                        ForEach(faceManager.people) { person in
+                            PersonCard(person: person)
+                                .onTapGesture {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        selectedPerson = person
+                                    }
+                                }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var personDetailView: some View {
+        VStack(spacing: 0) {
+            // Back button and person info
+            HStack {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedPerson = nil
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Spacer()
+
+                if let person = selectedPerson {
+                    Text("\(person.faceCount) photos")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+            }
+            .padding(.bottom, DesignSystem.Spacing.md)
+
+            // Person's photos grid
+            if let person = selectedPerson {
+                let images = faceManager.getImagesForPerson(person)
+                if images.isEmpty {
+                    VStack {
+                        Spacer()
+                        Text("No photos available")
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Spacer()
+                    }
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 12)
+                        ], spacing: 12) {
+                            ForEach(images) { result in
+                                ImageCard(result: result, onFindSimilar: { _ in })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Favorites Tab Content
+    private var favoritesTabContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Favorites")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("\(favoritesManager.favoriteImages.count) images")
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, DesignSystem.Spacing.lg)
+            .padding(.vertical, DesignSystem.Spacing.md)
+
+            if favoritesManager.isLoading {
+                Spacer()
+                ProgressView()
+                    .scaleEffect(1.2)
+                Spacer()
+            } else if favoritesManager.favoriteImages.isEmpty {
+                Spacer()
+                VStack(spacing: DesignSystem.Spacing.lg) {
+                    Image(systemName: "heart.slash")
+                        .font(.system(size: 64, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                    Text("No Favorites Yet")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("Hover over any image and click the heart\nto add it to your favorites.")
+                        .font(DesignSystem.Typography.body)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20)
+                    ], spacing: 24) {
+                        ForEach(favoritesManager.favoriteImages) { result in
+                            ImageCard(
+                                result: result,
+                                showSimilarity: false,
+                                onFindSimilar: { path in
+                                    activeTab = .search
+                                    searchManager.findSimilar(imagePath: path)
+                                }
+                            )
+                        }
+                    }
+                    .padding(DesignSystem.Spacing.lg)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            favoritesManager.refreshFavoriteImages()
+        }
     }
 
     // MARK: - Search Tab Content

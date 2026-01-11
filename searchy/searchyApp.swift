@@ -664,11 +664,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let setupManager = SetupManager.shared
         setupManager.checkSetupStatus()
 
+        print("🔍 isSetupComplete = \(setupManager.isSetupComplete)")
+
         if setupManager.isSetupComplete {
             // Setup complete - proceed normally
+            print("🚀 Calling proceedWithAppLaunch...")
             proceedWithAppLaunch()
+            print("✅ proceedWithAppLaunch returned")
         } else {
             // Show setup window
+            print("📋 Showing setup window...")
             showSetupWindow()
         }
 
@@ -701,7 +706,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.onSetupComplete()
+            Task { @MainActor in
+                self?.onSetupComplete()
+            }
         }
 
         // Also observe the SetupManager directly
@@ -732,14 +739,107 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func proceedWithAppLaunch() {
+        print("📍 proceedWithAppLaunch started")
+
         // Create main window programmatically - don't rely on SwiftUI WindowGroup
+        print("📍 About to create main window...")
         createMainWindow()
+        print("📍 Main window created")
+
+        // Show the window on first launch
+        if let window = mainWindow {
+            print("📍 About to show window...")
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            print("✅ Main window shown")
+        } else {
+            print("❌ mainWindow is nil!")
+        }
 
         print("✅ Main window configured")
 
         Task {
             await startFastAPIServer()
+            await syncDirectoriesOnStartup()
             await startImageWatcher()
+        }
+    }
+
+    @MainActor
+    private func syncDirectoriesOnStartup() async {
+        print("🔄 Checking for new images since last run...")
+
+        guard let serverURL = self.serverURL else {
+            print("❌ Server URL not available for sync")
+            return
+        }
+
+        let dirManager = DirectoryManager.shared
+        let indexingSettings = IndexingSettings.shared
+        let setupManager = SetupManager.shared
+
+        // Build the sync request
+        let directories = dirManager.watchedDirectories.map { dir -> [String: Any] in
+            var filterType = "all"
+            switch dir.filterType {
+            case .all: filterType = "all"
+            case .startsWith: filterType = "starts-with"
+            case .endsWith: filterType = "ends-with"
+            case .contains: filterType = "contains"
+            case .regex: filterType = "regex"
+            }
+            return [
+                "path": dir.path,
+                "filter_type": filterType,
+                "filter_value": dir.filter
+            ]
+        }
+
+        let requestBody: [String: Any] = [
+            "data_dir": setupManager.appSupportPath,
+            "directories": directories,
+            "fast_indexing": indexingSettings.enableFastIndexing,
+            "max_dimension": indexingSettings.maxDimension,
+            "batch_size": indexingSettings.batchSize
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            print("❌ Failed to serialize sync request")
+            return
+        }
+
+        let url = serverURL.appendingPathComponent("sync")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jsonData
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let status = json["status"] as? String ?? "unknown"
+                    let newImages = json["new_images"] as? Int ?? 0
+                    let cleanedUp = json["cleaned_up"] as? Int ?? 0
+
+                    if cleanedUp > 0 {
+                        print("🗑️ Startup sync: removed \(cleanedUp) deleted images from index")
+                    }
+
+                    if status == "started" {
+                        print("✅ Startup sync: indexing \(newImages) new images in background")
+                    } else if status == "no_new_images" {
+                        print("✅ Startup sync: all images already indexed")
+                    } else {
+                        print("ℹ️ Startup sync status: \(status)")
+                    }
+                }
+            } else {
+                print("⚠️ Sync request failed with status: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            }
+        } catch {
+            print("❌ Startup sync error: \(error.localizedDescription)")
         }
     }
 
@@ -769,8 +869,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func createMainWindow() {
+        print("📍 createMainWindow: Creating ContentView...")
         let contentView = ContentView()
+        print("📍 createMainWindow: ContentView created, creating NSHostingView...")
         let hostingView = NSHostingView(rootView: contentView)
+        print("📍 createMainWindow: NSHostingView created, creating NSWindow...")
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 650),
@@ -786,6 +889,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         window.delegate = windowController
 
         mainWindow = window
+        print("📍 createMainWindow: Window configured")
         print("✅ Created main window programmatically")
     }
     
@@ -1111,6 +1215,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 watcherScript,
                 directory.path,
                 dataDir,
+                "--server-url", "http://127.0.0.1:\(assignedPort)",
                 "--max-dimension", String(indexingSettings.maxDimension),
                 "--batch-size", String(indexingSettings.batchSize)
             ]
