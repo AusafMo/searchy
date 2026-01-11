@@ -1,15 +1,25 @@
-import torch
-from PIL import Image
+"""
+Generate CLIP embeddings for images using the centralized ModelManager.
+
+Supports:
+- Batch processing with GPU acceleration
+- OCR text extraction via macOS Vision
+- Incremental indexing
+- Fast indexing with image resizing
+"""
+
 import os
 import pickle
 import numpy as np
-from tqdm import tqdm
-from transformers import CLIPProcessor, CLIPModel
 import sys
 import json
 import argparse
 import re
 import time
+from PIL import Image
+
+# Import centralized model manager
+from clip_model import model_manager, get_device
 
 # OCR support using macOS Vision framework
 try:
@@ -67,41 +77,6 @@ def extract_text_from_image(image_path):
         print(f"OCR error for {image_path}: {e}", file=sys.stderr)
         return ""
 
-# Global model cache to avoid reloading
-_model = None
-_processor = None
-_device = None
-
-def get_device():
-    """Get the best available device (MPS for Apple Silicon, CUDA, or CPU)"""
-    global _device
-    if _device is None:
-        if torch.backends.mps.is_available():
-            _device = torch.device("mps")
-            print(f"🚀 Using Apple Metal (MPS) acceleration", file=sys.stderr)
-        elif torch.cuda.is_available():
-            _device = torch.device("cuda")
-            print(f"🚀 Using CUDA GPU acceleration", file=sys.stderr)
-        else:
-            _device = torch.device("cpu")
-            print(f"💻 Using CPU (no GPU acceleration available)", file=sys.stderr)
-    return _device
-
-def get_model_and_processor():
-    """Get or load CLIP model (singleton pattern) with GPU support"""
-    global _model, _processor
-    if _model is None or _processor is None:
-        model_name = "openai/clip-vit-base-patch32"
-        print(f"Loading {model_name}...", file=sys.stderr)
-        _model = CLIPModel.from_pretrained(model_name, token=False)
-        _processor = CLIPProcessor.from_pretrained(model_name, token=False)
-
-        # Move model to GPU if available
-        device = get_device()
-        _model = _model.to(device)
-
-        print(f"✅ Successfully loaded {model_name} on {device}", file=sys.stderr)
-    return _model, _processor
 
 def resize_image_for_fast_indexing(image, max_dimension=384):
     """Resize image to max dimension while preserving aspect ratio"""
@@ -117,6 +92,7 @@ def resize_image_for_fast_indexing(image, max_dimension=384):
         new_width = int(width * (max_dimension / height))
 
     return image.resize((new_width, new_height), Image.LANCZOS)
+
 
 def matches_filter(filename, filter_type, filter_value):
     """Check if filename matches the filter criteria"""
@@ -139,11 +115,31 @@ def matches_filter(filename, filter_type, filter_value):
             return False
     return True
 
+
+# Directories to skip (system, packages, caches, etc.)
+SKIP_DIRS = {
+    'site-packages', 'node_modules', 'vendor', '__pycache__',
+    'env', 'venv', '.venv', 'virtualenv',
+    'Library', 'Caches', 'cache', '.cache',
+    'build', 'dist', 'target', '.git', '.svn',
+    'DerivedData', 'xcuserdata', 'Pods',
+    '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
+}
+
+
+def is_user_image(path):
+    """Check if path is a user image (not system/package file)."""
+    if os.path.basename(path).startswith('.'):
+        return False
+    parts = path.split(os.sep)
+    return not any(part in SKIP_DIRS for part in parts)
+
+
 def index_images_with_clip(output_dir, incremental=False, new_files=None,
                            fast_indexing=True, max_dimension=384, batch_size=64,
                            filter_type=None, filter_value=None):
     """
-    Index images with CLIP embeddings
+    Index images with CLIP embeddings using the centralized ModelManager.
 
     Args:
         output_dir: Directory to save the index
@@ -170,25 +166,9 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
             existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
             print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
 
-    # Get CLIP model
-    model, processor = get_model_and_processor()
+    # Ensure model is loaded (uses singleton)
+    model_manager.ensure_loaded()
     device = get_device()
-
-    # Directories to skip (system, packages, caches, etc.)
-    skip_dirs = {
-        'site-packages', 'node_modules', 'vendor', '__pycache__',
-        'env', 'venv', '.venv', 'virtualenv',
-        'Library', 'Caches', 'cache', '.cache',
-        'build', 'dist', 'target', '.git', '.svn',
-        'DerivedData', 'xcuserdata', 'Pods',
-        '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
-    }
-
-    def is_user_image(path):
-        if os.path.basename(path).startswith('.'):
-            return False
-        parts = path.split(os.sep)
-        return not any(part in skip_dirs for part in parts)
 
     # Filter out hidden, system, and package files (handle None)
     if new_files is None:
@@ -232,57 +212,45 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
                 batch_images.append(image)
                 batch_paths.append(img_path)
             except Exception as e:
-                print(f"❌ Error loading {img_path}: {e}", file=sys.stderr)
+                print(f"Error loading {img_path}: {e}", file=sys.stderr)
                 continue
 
         if not batch_images:
             continue
 
         try:
-            # Process batch
-            inputs = processor(images=batch_images, return_tensors="pt", padding=True)
-            inputs = {k: v.to(device) for k, v in inputs.items()}
+            # Process batch using centralized model manager
+            batch_embeddings = model_manager.get_image_embeddings_batch(batch_images, batch_size=len(batch_images))
 
-            with torch.no_grad():
-                image_features = model.get_image_features(**inputs)
+            for emb, path in zip(batch_embeddings, batch_paths):
+                if emb is not None:
+                    embeddings.append(emb)
+                    valid_paths.append(path)
+                    # Extract OCR text
+                    ocr_text = extract_text_from_image(path)
+                    ocr_texts.append(ocr_text)
 
-            # Normalize embeddings
-            batch_embeddings = image_features.cpu().numpy()
-            batch_embeddings = batch_embeddings / np.linalg.norm(batch_embeddings, axis=1, keepdims=True)
-
-            embeddings.extend(batch_embeddings.tolist())
-            valid_paths.extend(batch_paths)
-
-            # Extract OCR text for each image in batch
-            for img_path in batch_paths:
-                ocr_text = extract_text_from_image(img_path)
-                ocr_texts.append(ocr_text)
-
-            print(f"✅ Processed batch {i//batch_size + 1}: {len(batch_paths)} images", file=sys.stderr)
+            print(f"Processed batch {i//batch_size + 1}: {len(batch_paths)} images", file=sys.stderr)
 
         except Exception as e:
-            print(f"❌ Error processing batch: {e}", file=sys.stderr)
+            print(f"Error processing batch: {e}", file=sys.stderr)
             # Fall back to processing one by one
             for img, path in zip(batch_images, batch_paths):
                 try:
-                    inputs = processor(images=img, return_tensors="pt")
-                    inputs = {k: v.to(device) for k, v in inputs.items()}
-                    with torch.no_grad():
-                        features = model.get_image_features(**inputs)
-                    embedding = features.cpu().numpy()[0]
-                    embedding = embedding / np.linalg.norm(embedding)
-                    embeddings.append(embedding)
-                    valid_paths.append(path)
-                    ocr_texts.append(extract_text_from_image(path))
+                    embedding = model_manager.get_image_embedding(img)
+                    if embedding is not None:
+                        embeddings.append(embedding)
+                        valid_paths.append(path)
+                        ocr_texts.append(extract_text_from_image(path))
                 except Exception as e2:
-                    print(f"❌ Error processing {path}: {e2}", file=sys.stderr)
+                    print(f"Error processing {path}: {e2}", file=sys.stderr)
 
     if not embeddings:
         print("No new images were successfully processed", file=sys.stderr)
         return
 
     # Merge with existing
-    all_embeddings = existing_embeddings + embeddings
+    all_embeddings = existing_embeddings + [e.tolist() if hasattr(e, 'tolist') else e for e in embeddings]
     all_paths = existing_paths + valid_paths
     all_ocr_texts = existing_ocr_texts + ocr_texts
     all_embeddings = np.array(all_embeddings)
@@ -300,11 +268,12 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
 
     # Count images with OCR text
     ocr_count = sum(1 for t in ocr_texts if t.strip())
-    print(f"✅ Index updated: {len(all_paths)} total images (+{len(valid_paths)} new, {ocr_count} with OCR text)", file=sys.stderr)
+    print(f"Index updated: {len(all_paths)} total images (+{len(valid_paths)} new, {ocr_count} with OCR text)", file=sys.stderr)
+
 
 def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                    batch_size=64, filter_type=None, filter_value=None):
-    """Process all images in a directory"""
+    """Process all images in a directory using the centralized ModelManager."""
     try:
         output_file = os.path.join(output_dir, 'image_index.bin')
         existing_embeddings = []
@@ -320,25 +289,15 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                 print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
 
         print("Loading CLIP model...", file=sys.stderr)
-        model, processor = get_model_and_processor()
+        model_manager.ensure_loaded()
         device = get_device()
 
         print(f"Scanning for images in {image_dir}...", file=sys.stderr)
         image_paths = []
 
-        # Directories to skip (system, packages, caches, etc.)
-        skip_dirs = {
-            'site-packages', 'node_modules', 'vendor', '__pycache__',
-            'env', 'venv', '.venv', 'virtualenv',
-            'Library', 'Caches', 'cache', '.cache',
-            'build', 'dist', 'target', '.git', '.svn',
-            'DerivedData', 'xcuserdata', 'Pods',
-            '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
-        }
-
         for root, dirs, files in os.walk(image_dir):
             # Skip hidden directories and system directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in skip_dirs]
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
 
             for file in files:
                 # Skip hidden and macOS metadata files
@@ -372,7 +331,7 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
         if not os.path.exists(output_file):
             os.makedirs(output_dir, exist_ok=True)
             empty_data = {
-                'embeddings': np.array([]).reshape(0, 512),  # Empty array with correct shape
+                'embeddings': np.array([]).reshape(0, model_manager.embedding_dim),
                 'image_paths': [],
                 'ocr_texts': []
             }
@@ -404,33 +363,23 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                     batch_images.append(image)
                     batch_paths.append(img_path)
                 except Exception as e:
-                    print(f"❌ Error loading {img_path}: {e}", file=sys.stderr)
+                    print(f"Error loading {img_path}: {e}", file=sys.stderr)
                     continue
 
             if not batch_images:
                 continue
 
             try:
-                # Process batch with GPU
-                inputs = processor(images=batch_images, return_tensors="pt", padding=True)
-                inputs = {k: v.to(device) for k, v in inputs.items()}
+                # Process batch using centralized model manager
+                batch_embeddings = model_manager.get_image_embeddings_batch(batch_images, batch_size=len(batch_images))
 
-                with torch.no_grad():
-                    image_features = model.get_image_features(**inputs)
-
-                # Normalize embeddings
-                batch_embeddings = image_features.cpu().numpy()
-                batch_embeddings = batch_embeddings / np.linalg.norm(batch_embeddings, axis=1, keepdims=True)
-
-                embeddings.extend(batch_embeddings.tolist())
-                valid_paths.extend(batch_paths)
-
-                # Extract OCR text for each image in batch
-                batch_ocr_texts = []
-                for img_path in batch_paths:
-                    ocr_text = extract_text_from_image(img_path)
-                    batch_ocr_texts.append(ocr_text)
-                ocr_texts.extend(batch_ocr_texts)
+                for emb, path in zip(batch_embeddings, batch_paths):
+                    if emb is not None:
+                        embeddings.append(emb.tolist() if hasattr(emb, 'tolist') else emb)
+                        valid_paths.append(path)
+                        # Extract OCR text
+                        ocr_text = extract_text_from_image(path)
+                        ocr_texts.append(ocr_text)
 
                 batch_num = i // batch_size + 1
                 elapsed = time.time() - start_time
@@ -461,24 +410,20 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
                     "images_per_sec": round(images_per_sec, 1),
                     "indexed_total": len(current_all_paths)
                 }), flush=True)
-                print(f"✅ Batch {batch_num}/{total_batches}: {len(batch_paths)} images (index saved)", file=sys.stderr)
+                print(f"Batch {batch_num}/{total_batches}: {len(batch_paths)} images (index saved)", file=sys.stderr)
 
             except Exception as e:
-                print(f"❌ Batch error, falling back to single processing: {e}", file=sys.stderr)
+                print(f"Batch error, falling back to single processing: {e}", file=sys.stderr)
                 # Fall back to single image processing
                 for img, path in zip(batch_images, batch_paths):
                     try:
-                        inputs = processor(images=img, return_tensors="pt")
-                        inputs = {k: v.to(device) for k, v in inputs.items()}
-                        with torch.no_grad():
-                            features = model.get_image_features(**inputs)
-                        embedding = features.cpu().numpy()[0]
-                        embedding = embedding / np.linalg.norm(embedding)
-                        embeddings.append(embedding)
-                        valid_paths.append(path)
-                        ocr_texts.append(extract_text_from_image(path))
+                        embedding = model_manager.get_image_embedding(img)
+                        if embedding is not None:
+                            embeddings.append(embedding.tolist() if hasattr(embedding, 'tolist') else embedding)
+                            valid_paths.append(path)
+                            ocr_texts.append(extract_text_from_image(path))
                     except Exception as e2:
-                        print(f"❌ Error: {path}: {e2}", file=sys.stderr)
+                        print(f"Error: {path}: {e2}", file=sys.stderr)
 
         if not embeddings:
             print("No valid images were processed", file=sys.stderr)
@@ -515,15 +460,16 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
             "ocr_extracted": ocr_count
         }), flush=True)
 
-        print(f"✅ Total images in index: {len(all_paths)}", file=sys.stderr)
-        print(f"✅ New images added: {len(valid_paths)} ({ocr_count} with OCR text)", file=sys.stderr)
-        print(f"✅ Embeddings shape: {all_embeddings.shape}", file=sys.stderr)
-        print(f"✅ Saved to {output_file}", file=sys.stderr)
+        print(f"Total images in index: {len(all_paths)}", file=sys.stderr)
+        print(f"New images added: {len(valid_paths)} ({ocr_count} with OCR text)", file=sys.stderr)
+        print(f"Embeddings shape: {all_embeddings.shape}", file=sys.stderr)
+        print(f"Saved to {output_file}", file=sys.stderr)
 
     except Exception as e:
-        print(f"❌ Failed to process images: {str(e)}", file=sys.stderr)
+        print(f"Failed to process images: {str(e)}", file=sys.stderr)
         import traceback
         print(traceback.format_exc(), file=sys.stderr)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate CLIP embeddings for images")

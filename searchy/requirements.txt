@@ -11,3 +11,6 @@ uvicorn
 pyobjc-core
 pyobjc-framework-Quartz
 pyobjc-framework-Vision
+# Face recognition
+deepface
+tf-keras

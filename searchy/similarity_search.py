@@ -1,55 +1,19 @@
-import torch
-from PIL import Image
+"""
+Similarity Search using centralized CLIP model.
+
+Uses the shared ModelManager for all embedding operations.
+"""
+
 import os
 import pickle
 import numpy as np
-from transformers import CLIPProcessor, CLIPModel
 import sys
 import json
 import time
+from PIL import Image
 
-
-_model = None
-_processor = None
-_device = None
-
-def get_device():
-    """Get the best available device (MPS for Apple Silicon, CUDA, or CPU)"""
-    global _device
-    if _device is None:
-        if torch.backends.mps.is_available():
-            _device = torch.device("mps")
-            print(f"🚀 Using Apple Metal (MPS) acceleration", file=sys.stderr)
-        elif torch.cuda.is_available():
-            _device = torch.device("cuda")
-            print(f"🚀 Using CUDA GPU acceleration", file=sys.stderr)
-        else:
-            _device = torch.device("cpu")
-            print(f"💻 Using CPU", file=sys.stderr)
-    return _device
-
-def get_model_and_processor():
-    global _model, _processor
-    if _model is None or _processor is None:
-        print("Loading CLIP model...", file=sys.stderr)
-        model_name = "openai/clip-vit-base-patch32"
-
-        try:
-            print(f"Loading {model_name}...", file=sys.stderr)
-            _model = CLIPModel.from_pretrained(model_name, token=False)
-            _processor = CLIPProcessor.from_pretrained(model_name, token=False)
-
-            # Move model to GPU if available
-            device = get_device()
-            _model = _model.to(device)
-
-            print(f"✅ Successfully loaded {model_name} on {device}", file=sys.stderr)
-        except Exception as e:
-            print(f"Error loading CLIP model: {e}", file=sys.stderr)
-            raise Exception(f"Could not load CLIP model: {e}")
-
-    return _model, _processor
-
+# Import centralized model manager
+from clip_model import model_manager, get_device
 
 
 def text_match_score(query: str, ocr_text: str) -> float:
@@ -77,34 +41,29 @@ def text_match_score(query: str, ocr_text: str) -> float:
 
 
 class CLIPSearcher:
+    """Search interface using the centralized ModelManager."""
+
     def __init__(self):
-        self.model, self.processor = get_model_and_processor()
+        # Uses the singleton model_manager - no separate model loading
         self.device = get_device()
 
     def generate_text_embedding(self, text):
-        inputs = self.processor(text=text, return_tensors="pt", padding=True)
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        with torch.no_grad():
-            text_features = self.model.get_text_features(**inputs)
-        embedding = text_features.cpu().numpy()[0]
-        return embedding / np.linalg.norm(embedding)
+        """Generate normalized text embedding."""
+        embedding = model_manager.get_text_embedding(text)
+        if embedding is None:
+            raise Exception("Failed to generate text embedding")
+        return embedding
 
     def generate_image_embedding(self, image_path):
         """Generate CLIP embedding for an image file."""
-        from PIL import Image
         try:
             image = Image.open(image_path)
             if image.mode != 'RGB':
                 image = image.convert('RGB')
 
-            inputs = self.processor(images=image, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            embedding = model_manager.get_image_embedding(image)
+            return embedding
 
-            with torch.no_grad():
-                image_features = self.model.get_image_features(**inputs)
-
-            embedding = image_features.cpu().numpy()[0]
-            return embedding / np.linalg.norm(embedding)
         except Exception as e:
             print(f"Error generating embedding for {image_path}: {e}", file=sys.stderr)
             return None
@@ -259,6 +218,7 @@ def main():
 
     searcher = CLIPSearcher()
     searcher.search(query, data_dir, top_k)
+
 
 if __name__ == "__main__":
     main()
