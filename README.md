@@ -111,6 +111,7 @@ Access via the gear icon in the header.
 - All processing runs locally on your machine
 - No network requests after initial setup
 - GPU acceleration via Metal (Apple Silicon)
+- See [Security Audit](security-audit/) for detailed privacy analysis
 
 ---
 
@@ -332,6 +333,27 @@ Options:
 - [x] Duplicate image detection
 - [x] Date, size, and file type filters
 - [ ] Alternative/smaller models
+
+---
+
+## Security & Privacy
+
+Searchy is designed with privacy in mind - all processing happens locally on your device. We maintain a security audit report to ensure transparency about data handling practices.
+
+**What the audit covers:**
+- Data collection and storage practices
+- Network communications security
+- Permissions and entitlements
+- Third-party dependency analysis
+- Privacy compliance considerations
+
+**Key privacy facts:**
+- Images are never uploaded to external servers
+- Embeddings and indexes are stored locally in `~/Library/Application Support/searchy/`
+- Face recognition data (if enabled) is stored locally only
+- The API server only accepts connections from localhost
+
+📄 **[View Full Security Audit](security-audit/AUDIT_v1.1.md)**
 
 ---
 
