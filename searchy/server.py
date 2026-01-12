@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Enable CORS for local HTML testing
+# Enable CORS for local clients only (security: restrict to localhost)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "http://localhost",
+        "http://127.0.0.1",
+    ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
