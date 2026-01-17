@@ -159,28 +159,41 @@ class CLIPSearcher:
             # OCR text matching scores
             ocr_scores = np.array([text_match_score(query, ocr_text) for ocr_text in ocr_texts])
 
-            # Combine scores: use semantic as base, OCR as boost (not reduction)
-            # Only apply OCR boost where there's actually OCR text that matches
-            combined_scores = semantic_scores.copy()
-            for i, (ocr_score, ocr_text) in enumerate(zip(ocr_scores, ocr_texts)):
-                if ocr_text and ocr_score > 0:
-                    # Boost score when OCR matches, but don't reduce semantic scores
-                    combined_scores[i] = semantic_scores[i] + ocr_score * ocr_weight
-                    # Cap at 1.0
-                    combined_scores[i] = min(combined_scores[i], 1.0)
+            # Text-first ranking: exact text matches always come before semantic
+            # Score bands:
+            #   2.0+ = exact text match (query found in OCR)
+            #   1.0-1.99 = partial text match (some words match)
+            #   0.0-0.99 = semantic only (no text match)
 
-            # Extra boost for exact text matches
-            for i, ocr_text in enumerate(ocr_texts):
+            combined_scores = semantic_scores.copy()
+
+            for i, (ocr_score, ocr_text) in enumerate(zip(ocr_scores, ocr_texts)):
                 if ocr_text and query.lower() in ocr_text.lower():
-                    combined_scores[i] = max(combined_scores[i], 0.95)
+                    # Exact text match - always ranks first (2.0 + semantic for sub-sorting)
+                    combined_scores[i] = 2.0 + semantic_scores[i]
+                elif ocr_text and ocr_score > 0:
+                    # Partial text match - ranks second (1.0 + weighted score)
+                    combined_scores[i] = 1.0 + (ocr_score * 0.5) + (semantic_scores[i] * 0.5)
 
             sorted_indices = np.argsort(combined_scores)[::-1]
 
             results = []
             for idx in sorted_indices[:top_k]:
+                # Normalize score for display (internal score can exceed 1.0 for ranking)
+                raw_score = combined_scores[idx]
+                if raw_score >= 2.0:
+                    # Exact text match - show as 95-100%
+                    display_score = 0.95 + min((raw_score - 2.0) * 0.05, 0.05)
+                elif raw_score >= 1.0:
+                    # Partial text match - show as 80-95%
+                    display_score = 0.80 + (raw_score - 1.0) * 0.15
+                else:
+                    # Semantic only - show actual similarity
+                    display_score = raw_score
+
                 result = {
                     "path": image_paths[idx],
-                    "similarity": float(combined_scores[idx])
+                    "similarity": float(min(display_score, 1.0))
                 }
                 # Include OCR text if found
                 if ocr_texts[idx]:
