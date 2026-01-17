@@ -102,7 +102,7 @@ class ThemeManager: ObservableObject {
            let theme = AppTheme(rawValue: saved) {
             self.currentTheme = theme
         } else {
-            self.currentTheme = .electric
+            self.currentTheme = .mono  // Sharp, clean default
         }
 
         if let savedAppearance = UserDefaults.standard.string(forKey: "appearanceMode"),
@@ -180,16 +180,16 @@ struct ThemeColors {
     )
 
     static let mono = ThemeColors(
-        lightPrimary: Color(hex: "FAFAFA"),
-        lightSecondary: Color(hex: "FFFFFF"),
-        lightTertiary: Color(hex: "F4F4F5"),
-        darkPrimary: Color(hex: "09090B"),
-        darkSecondary: Color(hex: "18181B"),
-        darkTertiary: Color(hex: "27272A"),
-        accent: Color(hex: "06B6D4"),           // Cyan pop
-        accentHover: Color(hex: "22D3EE"),
-        accentGradientStart: Color(hex: "06B6D4"),
-        accentGradientEnd: Color(hex: "06B6D4"),  // Same - no gradient
+        lightPrimary: Color(hex: "FFFFFF"),     // Pure white
+        lightSecondary: Color(hex: "FFFFFF"),   // Pure white
+        lightTertiary: Color(hex: "F5F5F5"),    // Very light gray for inputs
+        darkPrimary: Color(hex: "000000"),      // True black
+        darkSecondary: Color(hex: "111111"),    // Near black for cards
+        darkTertiary: Color(hex: "1A1A1A"),     // Slight lift for inputs
+        accent: Color(hex: "888888"),           // Neutral gray - visible on both black and white
+        accentHover: Color(hex: "999999"),
+        accentGradientStart: Color(hex: "888888"),
+        accentGradientEnd: Color(hex: "888888"),  // No gradient
         success: Color(hex: "22C55E"),
         error: Color(hex: "EF4444"),
         warning: Color(hex: "EAB308")
@@ -235,10 +235,20 @@ struct DesignSystem {
         static var darkSecondaryBackground: Color { ThemeColors.current().darkSecondary }
         static var darkTertiaryBackground: Color { ThemeColors.current().darkTertiary }
 
-        // Accent colors
-        static var accent: Color { ThemeColors.current().accent }
-        static var accentHover: Color { ThemeColors.current().accentHover }
-        static var accentSubtle: Color { ThemeColors.current().accent.opacity(0.12) }
+        // Accent colors - mono theme uses adaptive label color
+        static var accent: Color {
+            if ThemeManager.shared.currentTheme == .mono {
+                return Color(nsColor: NSColor.labelColor)  // Black in light, white in dark
+            }
+            return ThemeColors.current().accent
+        }
+        static var accentHover: Color {
+            if ThemeManager.shared.currentTheme == .mono {
+                return Color(nsColor: NSColor.secondaryLabelColor)
+            }
+            return ThemeColors.current().accentHover
+        }
+        static var accentSubtle: Color { accent.opacity(0.12) }
         static var accentGradientEnd: Color { ThemeColors.current().accentGradientEnd }
 
         // Accent gradient
@@ -958,13 +968,7 @@ struct SettingsSection<Content: View>: View {
             HStack(spacing: DesignSystem.Spacing.sm) {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .foregroundColor(DesignSystem.Colors.accent)
                 Text(title)
                     .font(DesignSystem.Typography.title2)
                     .foregroundColor(DesignSystem.Colors.primaryText)
@@ -1553,15 +1557,9 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            // Background
-            LinearGradient(
-                colors: colorScheme == .dark ?
-                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
-                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Clean solid background
+            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Modern Header
@@ -1591,24 +1589,16 @@ struct SettingsView: View {
                         .padding(.vertical, DesignSystem.Spacing.sm)
                         .background(
                             Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .fill(DesignSystem.Colors.accent)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
                 .padding(DesignSystem.Spacing.xl)
                 .background(
-                    (colorScheme == .dark ?
-                        DesignSystem.Colors.darkSecondaryBackground :
-                        DesignSystem.Colors.secondaryBackground)
-                        .opacity(0.8)
-                        .background(.ultraThinMaterial)
+                    colorScheme == .dark ?
+                        Color(hex: "111111") :
+                        Color(hex: "FAFAFA")
                 )
 
                 ScrollView {
@@ -2380,10 +2370,8 @@ struct SpotlightSearchView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
                         .stroke(
-                            isDropTargeted ?
-                                LinearGradient(colors: [Color.white, Color.white.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing) :
-                                LinearGradient(colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                            lineWidth: isDropTargeted ? 3 : 1.5
+                            isDropTargeted ? Color.white : Color.black.opacity(0.1),
+                            lineWidth: isDropTargeted ? 2 : 1
                         )
                 )
                 .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
@@ -2429,14 +2417,7 @@ struct SpotlightSearchView: View {
                         .background(resultsBackground)
                         .overlay(
                             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.5
-                                )
+                                .stroke(Color.black.opacity(0.1), lineWidth: 1)
                         )
                         .padding(.horizontal, DesignSystem.Spacing.md)
                         .padding(.top, DesignSystem.Spacing.sm)
@@ -2801,15 +2782,8 @@ struct SpotlightResultRow: View {
                 .padding(.vertical, 3)
                 .background(
                     Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: similarityGradient,
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .fill(similarityColor)
                 )
-                .shadow(color: similarityColor.opacity(0.4), radius: 4, x: 0, y: 2)
             }
 
             Spacer()
@@ -2821,20 +2795,22 @@ struct SpotlightResultRow: View {
                     showCopyNotification()
                 }) {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(DesignSystem.Colors.accent)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Copy")
 
                 Button(action: {
                     NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
                     onSelect()
                 }) {
                     Image(systemName: "folder")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(DesignSystem.Colors.secondaryText)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Reveal in Finder")
             }
             .opacity((isHovered || isSelected) ? 1 : 0.3)
         }
@@ -3144,37 +3120,31 @@ struct ResultCardView: View {
                     Rectangle()
                         .fill(Color.black.opacity(0.4))
                         .overlay(
-                            HStack(spacing: 12) {
-                                // Copy button
+                            HStack(spacing: 8) {
                                 Button(action: {
                                     copyImage(path: result.path)
                                     showCopyNotification()
                                 }) {
                                     Image(systemName: "doc.on.doc")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.system(size: 12, weight: .medium))
                                         .foregroundColor(.white)
-                                        .frame(width: 36, height: 36)
-                                        .background(
-                                            Circle()
-                                                .fill(DesignSystem.Colors.accent)
-                                        )
+                                        .frame(width: 28, height: 28)
+                                        .background(Circle().fill(Color.black.opacity(0.6)))
                                 }
                                 .buttonStyle(PlainButtonStyle())
+                                .help("Copy")
 
-                                // Reveal in Finder button
                                 Button(action: {
                                     revealInFinder(path: result.path)
                                 }) {
                                     Image(systemName: "folder")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.system(size: 12, weight: .medium))
                                         .foregroundColor(.white)
-                                        .frame(width: 36, height: 36)
-                                        .background(
-                                            Circle()
-                                                .fill(Color.white.opacity(0.25))
-                                        )
+                                        .frame(width: 28, height: 28)
+                                        .background(Circle().fill(Color.black.opacity(0.6)))
                                 }
                                 .buttonStyle(PlainButtonStyle())
+                                .help("Reveal in Finder")
                             }
                         )
                         .transition(.opacity)
@@ -3192,18 +3162,7 @@ struct ResultCardView: View {
                 .padding(.vertical, DesignSystem.Spacing.xs + 2)
                 .background(
                     Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: similarityGradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: similarityColor.opacity(0.5), radius: 8, x: 0, y: 4)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
+                        .fill(similarityColor)
                 )
                 .padding(DesignSystem.Spacing.sm)
                 .scaleEffect(isHovered ? 1.08 : 1.0)
@@ -3235,32 +3194,11 @@ struct ResultCardView: View {
         .overlay(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
                 .stroke(
-                    isHovered ?
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                    lineWidth: isHovered ? 1.5 : 1
+                    isHovered ? DesignSystem.Colors.accent.opacity(0.5) : DesignSystem.Colors.border,
+                    lineWidth: 1
                 )
         )
-        .shadow(
-            color: isHovered ? DesignSystem.Shadows.large(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-            radius: isHovered ? 16 : 6,
-            x: 0,
-            y: isHovered ? 8 : 3
-        )
-        .scaleEffect(isHovered ? 1.03 : 1.0)
-        .rotation3DEffect(
-            .degrees(isHovered ? 2 : 0),
-            axis: (x: 0, y: 1, z: 0),
-            perspective: 1.0
-        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
         .onHover { hovering in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                 isHovered = hovering
@@ -3410,6 +3348,7 @@ struct ImageCard: View {
     var showSimilarity: Bool = false
     var cardHeight: CGFloat = 200
     var onFindSimilar: ((String) -> Void)? = nil
+    @State private var isFavorite: Bool = false
 
     @State private var isHovered = false
     @State private var showCopied = false
@@ -3477,7 +3416,10 @@ struct ImageCard: View {
                 }
             }
 
-            // Top leading - favorite button (show on hover)
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+
+            // Top leading - favorite button (on top of overlay so it's tappable)
             if isHovered {
                 VStack {
                     HStack {
@@ -3487,9 +3429,6 @@ struct ImageCard: View {
                     Spacer()
                 }
             }
-
-            if isHovered && !showCopied { hoverOverlay }
-            if showCopied { copiedFeedback }
         }
         .frame(height: imageHeight)
         .clipped()
@@ -3504,24 +3443,25 @@ struct ImageCard: View {
     }
 
     private var favoriteButton: some View {
-        let isFavorite = FavoritesManager.shared.isFavorite(result.path)
-        return Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                FavoritesManager.shared.toggleFavorite(result.path)
-            }
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
         }) {
             Image(systemName: isFavorite ? "heart.fill" : "heart")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundColor(isFavorite ? .red : .white)
-                .padding(8)
+                .frame(width: 28, height: 28)
                 .background(
                     Circle()
-                        .fill(isFavorite ? Color.white : Color.black.opacity(0.4))
-                        .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                        .fill(isFavorite ? Color.white : Color.black.opacity(0.5))
                 )
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(8)
+        .help(isFavorite ? "Remove from favorites" : "Add to favorites")
+        .padding(6)
+        .onAppear {
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
     }
 
     private var similarityBadge: some View {
@@ -3536,13 +3476,7 @@ struct ImageCard: View {
         .padding(.vertical, 4)
         .background(
             Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .fill(DesignSystem.Colors.accent)
         )
         .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 4, y: 2)
         .padding(8)
@@ -3600,46 +3534,40 @@ struct ImageCard: View {
     }
 
     private var hoverButtons: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Button(action: handleCopy) {
-                HStack(spacing: 5) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Copy")
-                        .font(DesignSystem.Typography.friendlySmall)
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule()
-                        .fill(DesignSystem.Colors.accent)
-                )
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
             }
             .buttonStyle(PlainButtonStyle())
+            .help("Copy")
 
             if onFindSimilar != nil {
                 Button(action: { onFindSimilar?(result.path) }) {
                     Image(systemName: "sparkle.magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.white.opacity(0.2)).background(.ultraThinMaterial).clipShape(Circle()))
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
                 }
                 .buttonStyle(PlainButtonStyle())
-                .help("Find similar images")
+                .help("Find similar")
             }
 
             Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
                 Image(systemName: "folder")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(Color.white.opacity(0.2)).background(.ultraThinMaterial).clipShape(Circle()))
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
             }
             .buttonStyle(PlainButtonStyle())
+            .help("Reveal in Finder")
         }
-        .padding(.bottom, 12)
+        .padding(.bottom, 10)
     }
 
     private var copiedFeedback: some View {
@@ -4229,10 +4157,6 @@ enum AppTab: String, CaseIterable {
         case .setup: return "slider.horizontal.3"
         }
     }
-
-    var isMainTab: Bool {
-        self == .search
-    }
 }
 
 // MARK: - Duplicates Models
@@ -4460,6 +4384,7 @@ class FavoritesManager: ObservableObject {
     }
 
     func toggleFavorite(_ path: String) {
+        objectWillChange.send()  // Force UI update
         if favorites.contains(path) {
             favorites.remove(path)
         } else {
@@ -4835,6 +4760,7 @@ struct ContentView: View {
     @ObservedObject private var modelSettings = ModelSettings.shared
     @ObservedObject private var dirManager = DirectoryManager.shared
     @State private var activeTab: AppTab = .search
+    @Namespace private var tabAnimation
     @State private var selectedPerson: Person? = nil
     @State private var searchText = ""
     @State private var isIndexing = false
@@ -4848,6 +4774,8 @@ struct ContentView: View {
     @State private var indexingSpeed: Double = 0
     @State private var indexingElapsed: Double = 0
     @State private var indexingBatchInfo: String = ""
+    @State private var elapsedTimer: Timer? = nil
+    @State private var indexingStartTime: Date? = nil
     @State private var indexStats: IndexStats? = nil
     @State private var isShowingSettings = false
     @State private var showFilterSidebar = false
@@ -4866,24 +4794,9 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // Craft-style soft gradient background
-            Group {
-                if colorScheme == .dark {
-                    Color(hex: "1C1C1E")
-                } else {
-                    // Soft lavender-blue gradient like Craft
-                    LinearGradient(
-                        colors: [
-                            Color(hex: "E8E4F4"),  // Soft lavender top
-                            Color(hex: "F4F1FA"),  // Lighter middle
-                            Color(hex: "FAFAFA")   // Almost white bottom
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-            }
-            .ignoresSafeArea()
+            // Clean solid background
+            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Friendly header
@@ -4972,8 +4885,8 @@ struct ContentView: View {
                 }
                 .disabled(isIndexing)
 
-                MinimalIconButton(icon: "arrow.clockwise", tooltip: "Replace index") {
-                    if !isIndexing { selectAndReplaceIndex() }
+                MinimalIconButton(icon: "arrow.clockwise", tooltip: "Rebuild index") {
+                    if !isIndexing { rebuildIndex() }
                 }
                 .disabled(isIndexing)
 
@@ -5002,60 +4915,40 @@ struct ContentView: View {
                 Color.white.opacity(0.04) :
                 Color.black.opacity(0.03)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 11))
     }
 
     private func tabButton(for tab: AppTab) -> some View {
         let isActive = activeTab == tab
+
         return Button(action: {
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 activeTab = tab
             }
         }) {
-            tabButtonContent(for: tab, isActive: isActive)
+            HStack(spacing: 6) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 13, weight: .medium))
+                Text(tab.rawValue)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+            }
+            .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+            .scaleEffect(isActive ? 1.08 : 1.0)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-    }
-
-    private func tabButtonContent(for tab: AppTab, isActive: Bool) -> some View {
-        let isMain = tab.isMainTab
-        return HStack(spacing: isMain ? 6 : 5) {
-            Image(systemName: tab.icon)
-                .font(.system(size: isMain ? 13 : 11, weight: .medium))
-            Text(tab.rawValue)
-                .font(.system(size: isMain ? 15 : 13, weight: isActive ? .semibold : .medium))
-        }
-        .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-        .padding(.horizontal, isMain ? 20 : 14)
-        .padding(.vertical, isMain ? 9 : 7)
-        .background(tabButtonBackground(isActive: isActive))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(tabButtonBorder(isActive: isActive))
-    }
-
-    private func tabButtonBackground(isActive: Bool) -> some View {
-        Group {
-            if isActive {
-                LinearGradient(
-                    colors: [
-                        DesignSystem.Colors.accent.opacity(0.15),
-                        DesignSystem.Colors.accentGradientEnd.opacity(0.1)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            } else {
-                Color.clear
+        .background(
+            ZStack {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(DesignSystem.Colors.accent.opacity(0.12))
+                        .matchedGeometryEffect(id: "activeTab", in: tabAnimation)
+                }
             }
-        }
-    }
-
-    private func tabButtonBorder(isActive: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .stroke(
-                isActive ? DesignSystem.Colors.accent.opacity(0.4) : Color.clear,
-                lineWidth: isActive ? 1 : 0
-            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
     // MARK: - Faces Tab Content
@@ -5660,7 +5553,7 @@ struct ContentView: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(isIndexing)
 
-                Button(action: { if !isIndexing { selectAndReplaceIndex() } }) {
+                Button(action: { if !isIndexing { rebuildIndex() } }) {
                     HStack {
                         Image(systemName: "arrow.triangle.2.circlepath")
                         Text("Rebuild Index")
@@ -6772,45 +6665,15 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(
-            ZStack {
-                // Base background
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-
-                // Gradient glow when focused
-                if isSearchFocused {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.08),
-                                    DesignSystem.Colors.accentGradientEnd.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-            }
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    isSearchFocused ?
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(colors: [Color.clear], startPoint: .leading, endPoint: .trailing),
-                    lineWidth: isSearchFocused ? 2 : 0
+                    isSearchFocused ? DesignSystem.Colors.accent : Color.clear,
+                    lineWidth: isSearchFocused ? 1.5 : 0
                 )
-        )
-        .shadow(
-            color: isSearchFocused ? DesignSystem.Colors.accent.opacity(0.3) : Color.clear,
-            radius: isSearchFocused ? 12 : 0,
-            x: 0,
-            y: 0
         )
         .animation(.easeOut(duration: 0.2), value: isSearchFocused)
         .contentShape(Rectangle())
@@ -6915,6 +6778,7 @@ struct ContentView: View {
         DispatchQueue.main.async {
             isIndexing = false
             indexingProcess = nil
+            stopElapsedTimer()
             indexingPercent = 0
             indexingETA = ""
             indexingProgress = ""
@@ -7091,51 +6955,15 @@ struct ContentView: View {
             Spacer()
 
             VStack(spacing: DesignSystem.Spacing.xl) {
-                // Animated icon
+                // Clean icon
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.1),
-                                    DesignSystem.Colors.accent.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 120, height: 120)
-                        .blur(radius: 20)
-
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.3),
-                                    DesignSystem.Colors.accent.opacity(0.1)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2
-                        )
+                        .fill(DesignSystem.Colors.accent.opacity(0.08))
                         .frame(width: 100, height: 100)
-                        .rotationEffect(.degrees(emptyStateIconRotation))
 
                     Image(systemName: "photo.stack")
-                        .font(.system(size: 48, weight: .light))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.6)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .onAppear {
-                    withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
-                        emptyStateIconRotation = 360
-                    }
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
                 }
 
                 VStack(spacing: DesignSystem.Spacing.md) {
@@ -7516,13 +7344,101 @@ struct ContentView: View {
 
     private func selectAndIndexFolder() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
+        panel.message = "Select folder(s) to add (⌘-click for multiple)"
+        panel.prompt = "Add"
 
         panel.begin { response in
-            if response == .OK, let url = panel.url {
-                indexFolder(url)
+            if response == .OK, !panel.urls.isEmpty {
+                addAndIndexFolders(panel.urls)
+            }
+        }
+    }
+
+    private func addAndIndexFolders(_ urls: [URL]) {
+        // Add folders to watched directories (avoid duplicates)
+        let dirManager = DirectoryManager.shared
+        var newFolders: [URL] = []
+
+        for url in urls {
+            let alreadyWatched = dirManager.watchedDirectories.contains { $0.path == url.path }
+            if !alreadyWatched {
+                dirManager.addDirectory(WatchedDirectory(path: url.path))
+                newFolders.append(url)
+            }
+        }
+
+        guard !newFolders.isEmpty else {
+            indexingProgress = "Folders already in watch list"
+            return
+        }
+
+        // Incremental index - only new folders, keep existing index
+        let folderCount = newFolders.count
+        let folderText = folderCount == 1 ? "folder" : "folders"
+        print("Adding \(folderCount) new \(folderText) to index")
+        isIndexing = true
+        indexingReport = nil
+        resetIndexingState()
+        indexingProgress = "Indexing \(folderCount) new \(folderText)..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let config = AppConfig.shared
+            let process = Process()
+            let pipe = Pipe()
+
+            // Store process reference for cancellation
+            DispatchQueue.main.async {
+                self.indexingProcess = process
+            }
+
+            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
+            // Pass new folder paths - incremental indexing (no index deletion)
+            process.arguments = [config.embeddingScriptPath] + newFolders.map { $0.path }
+
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            let resourcesPath = Bundle.main.resourcePath ?? ""
+            process.environment = [
+                "PYTHONPATH": resourcesPath,
+                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONUNBUFFERED": "1"
+            ]
+            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
+
+            do {
+                try process.run()
+
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if !data.isEmpty {
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("Received output: \(output)")
+                            self.parseIndexingOutput(output)
+                        }
+                    }
+                }
+
+                process.terminationHandler = { _ in
+                    DispatchQueue.main.async {
+                        self.isIndexing = false
+                        self.indexingProcess = nil
+                        self.stopElapsedTimer()
+                        // Reload recent images and stats after indexing
+                        self.loadRecentImages()
+                        self.loadIndexStats()
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isIndexing = false
+                    self.indexingProcess = nil
+                    self.stopElapsedTimer()
+                    self.indexingProgress = "Error: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -7635,17 +7551,59 @@ struct ContentView: View {
         indexingSpeed = 0
         indexingElapsed = 0
         indexingBatchInfo = ""
+        startElapsedTimer()
     }
 
-    private func indexFolder(_ url: URL) {
-        print("Starting indexing for url: \(url.path)")
+    private func startElapsedTimer() {
+        // Stop existing timer if any
+        elapsedTimer?.invalidate()
+        indexingStartTime = Date()
+        indexingElapsed = 0
+
+        // Create timer on main thread
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if let start = self.indexingStartTime {
+                self.indexingElapsed = Date().timeIntervalSince(start)
+            }
+        }
+    }
+
+    private func stopElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        indexingStartTime = nil
+    }
+
+
+    private func rebuildIndex() {
+        let directories = DirectoryManager.shared.watchedDirectories
+        guard !directories.isEmpty else {
+            indexingProgress = "No folders configured. Add folders first."
+            return
+        }
+
+        let folderCount = directories.count
+        let folderText = folderCount == 1 ? "folder" : "folders"
+        print("Rebuilding index from \(folderCount) watched \(folderText)")
         isIndexing = true
         indexingReport = nil
         resetIndexingState()
-        indexingProgress = "Starting indexing..."
+        indexingProgress = "Clearing existing index..."
 
         DispatchQueue.global(qos: .userInitiated).async {
             let config = AppConfig.shared
+
+            // Delete existing index files
+            let indexPath = "\(config.baseDirectory)/image_index.bin"
+            let indexPklPath = "\(config.baseDirectory)/image_index.pkl"
+            try? FileManager.default.removeItem(atPath: indexPath)
+            try? FileManager.default.removeItem(atPath: indexPklPath)
+
+            DispatchQueue.main.async {
+                self.indexingProgress = "Rebuilding index from \(folderCount) \(folderText)..."
+            }
+
+            // Index all watched directories
             let process = Process()
             let pipe = Pipe()
 
@@ -7655,7 +7613,8 @@ struct ContentView: View {
             }
 
             process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
-            process.arguments = [config.embeddingScriptPath, url.path]
+            // Pass all watched folder paths as arguments
+            process.arguments = [config.embeddingScriptPath] + directories.map { $0.path }
 
             process.standardOutput = pipe
             process.standardError = pipe
@@ -7685,7 +7644,8 @@ struct ContentView: View {
                     DispatchQueue.main.async {
                         self.isIndexing = false
                         self.indexingProcess = nil
-                        // Reload recent images and stats after indexing
+                        self.stopElapsedTimer()
+                        // Reload recent images after re-indexing
                         self.loadRecentImages()
                         self.loadIndexStats()
                     }
@@ -7694,88 +7654,7 @@ struct ContentView: View {
                 DispatchQueue.main.async {
                     self.isIndexing = false
                     self.indexingProcess = nil
-                    self.indexingProgress = "Error: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func selectAndReplaceIndex() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.message = "Select a folder to replace the current index"
-        panel.prompt = "Replace Index"
-
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                replaceAndIndexFolder(url)
-            }
-        }
-    }
-
-    private func replaceAndIndexFolder(_ url: URL) {
-        print("Replacing index with folder: \(url.path)")
-        isIndexing = true
-        indexingReport = nil
-        resetIndexingState()
-        indexingProgress = "Clearing existing index..."
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let config = AppConfig.shared
-
-            // Delete existing index files
-            let indexPath = "\(config.baseDirectory)/image_index.bin"
-            let indexPklPath = "\(config.baseDirectory)/image_index.pkl"
-            try? FileManager.default.removeItem(atPath: indexPath)
-            try? FileManager.default.removeItem(atPath: indexPklPath)
-
-            DispatchQueue.main.async {
-                self.indexingProgress = "Starting fresh index..."
-            }
-
-            // Now index the new folder
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
-            process.arguments = [config.embeddingScriptPath, url.path]
-
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            let resourcesPath = Bundle.main.resourcePath ?? ""
-            process.environment = [
-                "PYTHONPATH": resourcesPath,
-                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-                "PYTHONUNBUFFERED": "1"
-            ]
-            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
-
-            do {
-                try process.run()
-
-                pipe.fileHandleForReading.readabilityHandler = { handle in
-                    let data = handle.availableData
-                    if !data.isEmpty {
-                        if let output = String(data: data, encoding: .utf8) {
-                            print("Received output: \(output)")
-                            self.parseIndexingOutput(output)
-                        }
-                    }
-                }
-
-                process.terminationHandler = { _ in
-                    DispatchQueue.main.async {
-                        self.isIndexing = false
-                        // Reload recent images after re-indexing
-                        self.loadRecentImages()
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isIndexing = false
+                    self.stopElapsedTimer()
                     self.indexingProgress = "Error: \(error.localizedDescription)"
                 }
             }

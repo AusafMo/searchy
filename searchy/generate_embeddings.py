@@ -271,9 +271,17 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     print(f"Index updated: {len(all_paths)} total images (+{len(valid_paths)} new, {ocr_count} with OCR text)", file=sys.stderr)
 
 
-def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
+def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384,
                    batch_size=64, filter_type=None, filter_value=None):
-    """Process all images in a directory using the centralized ModelManager."""
+    """Process all images in one or more directories using the centralized ModelManager.
+
+    Args:
+        image_dirs: Single directory path (str) or list of directory paths
+    """
+    # Normalize to list
+    if isinstance(image_dirs, str):
+        image_dirs = [image_dirs]
+
     try:
         output_file = os.path.join(output_dir, 'image_index.bin')
         existing_embeddings = []
@@ -292,32 +300,34 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
         model_manager.ensure_loaded()
         device = get_device()
 
-        print(f"Scanning for images in {image_dir}...", file=sys.stderr)
+        print(f"Scanning for images in {len(image_dirs)} folder(s)...", file=sys.stderr)
         image_paths = []
 
-        for root, dirs, files in os.walk(image_dir):
-            # Skip hidden directories and system directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
+        for image_dir in image_dirs:
+            print(f"  Scanning: {image_dir}", file=sys.stderr)
+            for root, dirs, files in os.walk(image_dir):
+                # Skip hidden directories and system directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
 
-            for file in files:
-                # Skip hidden and macOS metadata files
-                if file.startswith('.'):
-                    continue
+                for file in files:
+                    # Skip hidden and macOS metadata files
+                    if file.startswith('.'):
+                        continue
 
-                if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
-                    # Apply filter if specified
-                    if filter_type and filter_value:
-                        if not matches_filter(file, filter_type, filter_value):
-                            continue
+                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
+                        # Apply filter if specified
+                        if filter_type and filter_value:
+                            if not matches_filter(file, filter_type, filter_value):
+                                continue
 
-                    full_path = os.path.join(root, file)
-                    if full_path not in existing_paths:
-                        image_paths.append(full_path)
-                    else:
-                        print(f"Skipping already indexed: {file}", file=sys.stderr)
+                        full_path = os.path.join(root, file)
+                        if full_path not in existing_paths:
+                            image_paths.append(full_path)
+                        else:
+                            print(f"Skipping already indexed: {file}", file=sys.stderr)
 
         if not image_paths:
-            print(f"No new images found in {image_dir}", file=sys.stderr)
+            print(f"No new images found in specified folders", file=sys.stderr)
             return
 
         total_images = len(image_paths)
@@ -473,7 +483,7 @@ def process_images(image_dir, output_dir, fast_indexing=True, max_dimension=384,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate CLIP embeddings for images")
-    parser.add_argument("image_dir", help="Directory containing images to index")
+    parser.add_argument("image_dirs", nargs='+', help="Directory(s) containing images to index")
     parser.add_argument("--output-dir", default="/Users/ausaf/Library/Application Support/searchy",
                         help="Directory to save the index")
     parser.add_argument("--fast", action="store_true", default=True,
@@ -492,12 +502,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.image_dir):
-        print(f"Error: Directory '{args.image_dir}' does not exist", file=sys.stderr)
-        sys.exit(1)
+    # Validate all directories exist
+    for image_dir in args.image_dirs:
+        if not os.path.exists(image_dir):
+            print(f"Error: Directory '{image_dir}' does not exist", file=sys.stderr)
+            sys.exit(1)
 
     process_images(
-        args.image_dir,
+        args.image_dirs,
         args.output_dir,
         fast_indexing=args.fast,
         max_dimension=args.max_dimension,
