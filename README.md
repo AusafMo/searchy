@@ -111,7 +111,7 @@ Access via the gear icon in the header.
 - All processing runs locally on your machine
 - No network requests after initial setup
 - GPU acceleration via Metal (Apple Silicon)
-- See [Security Audit](security-audit/) for detailed privacy analysis
+- See [Security & Privacy](#security--privacy) for our threat model and decisions
 
 ---
 
@@ -338,22 +338,75 @@ Options:
 
 ## Security & Privacy
 
-Searchy is designed with privacy in mind - all processing happens locally on your device. We maintain a security audit report to ensure transparency about data handling practices.
+Searchy runs entirely on your device. No cloud, no telemetry, no external requests after initial model download. This section explains our security decisions transparently—including what we deliberately chose *not* to implement.
 
-**What the audit covers:**
-- Data collection and storage practices
-- Network communications security
-- Permissions and entitlements
-- Third-party dependency analysis
-- Privacy compliance considerations
+### Threat Model
 
-**Key privacy facts:**
-- Images are never uploaded to external servers
-- Embeddings and indexes are stored locally in `~/Library/Application Support/searchy/`
-- Face recognition data (if enabled) is stored locally only
-- The API server only accepts connections from localhost
+We consider two attack paths:
 
-📄 **[View Full Security Audit](security-audit/AUDIT_v1.1.md)**
+| Path | Scenario | Our Focus |
+|------|----------|-----------|
+| **Path 1** | Searchy is the attack vector (how an attacker gets in) | **Hardened** |
+| **Path 2** | Attacker already has system access | Limited value in additional measures |
+
+### What We Hardened (Path 1)
+
+These protect against Searchy being used as an entry point:
+
+| Measure | Why |
+|---------|-----|
+| **CORS restricted to localhost** | Prevents malicious websites from querying your local API to enumerate images |
+| **Server binds to 127.0.0.1** | API not accessible from other machines on your network |
+| **Dependencies pinned** | Reduces supply chain attack surface from malicious package updates |
+
+### What We Didn't Do (and Why)
+
+| Suggestion | Why We Skipped It |
+|------------|-------------------|
+| **Encrypt face embeddings** | If an attacker has access to read `~/Library/Application Support/searchy/`, they can already access your original images in `~/Pictures`. Encrypting the index while leaving source images unencrypted is security theater. |
+| **API authentication tokens** | The API only accepts localhost connections. Any process that can call the API can also read the index files directly. Authentication adds complexity without security benefit. |
+| **Encrypt the image index** | Same reasoning as biometrics—the original images aren't encrypted, so encrypting their embeddings doesn't protect anything meaningful. |
+| **Sandbox the app** | Would break the core functionality (indexing user-selected directories). We use runtime permissions instead. |
+
+### When Encryption *Would* Help
+
+Encrypting index files would provide value if:
+- Your `~/Library/Application Support/` syncs to iCloud (embeddings would be uploaded)
+- Multiple users share the machine with separate accounts
+- You want defense-in-depth regardless of practical threat model
+
+We may add optional encryption in the future for these scenarios.
+
+### What's Stored Locally
+
+```
+~/Library/Application Support/searchy/
+├── image_index.bin      # Image embeddings + file paths (pickle)
+├── face_index.pkl       # Face embeddings if face recognition enabled
+├── model_config.json    # Selected CLIP model
+└── venv/                # Isolated Python environment
+```
+
+**Data collected:**
+- File paths of indexed images
+- CLIP embeddings (512-1024 dimensional vectors)
+- OCR-extracted text from images (if text is detected)
+- Face embeddings (only if face recognition feature is used)
+
+**Not collected:**
+- Search queries (in-memory only, not persisted)
+- Usage analytics or telemetry
+- Any data sent to external servers
+
+### Known Limitations
+
+1. **Pickle deserialization** — The index uses Python pickle format, which can execute arbitrary code if the file is tampered with. If an attacker can write to your Application Support folder, they could replace the index with a malicious one. We're evaluating safer serialization formats.
+
+2. **HuggingFace model loading** — Models are downloaded from HuggingFace without checksum verification. A compromised model could execute code on load.
+
+3. **No biometric consent flow** — Face recognition indexes faces without explicit opt-in consent. This may have legal implications in jurisdictions like Illinois (BIPA).
+
+📄 **[Full Security Audit](security-audit/AUDIT_v1.2.md)** — Detailed findings with severity ratings
 
 ---
 
