@@ -2157,6 +2157,319 @@ struct ExampleQueryChip: View {
     }
 }
 
+// MARK: - Filter Capsule
+struct FilterCapsule: View {
+    let label: String
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isActive ?
+                            DesignSystem.Colors.accent.opacity(0.12) :
+                            (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.04))
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isHovered ? 1.03 : 1.0)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Masonry Grid (Bento Layout)
+struct MasonryGrid<Content: View, Item: Identifiable>: View {
+    let items: [Item]
+    let columns: Int
+    let spacing: CGFloat
+    let content: (Item) -> Content
+
+    init(items: [Item], columns: Int = 4, spacing: CGFloat = 12, @ViewBuilder content: @escaping (Item) -> Content) {
+        self.items = items
+        self.columns = columns
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            ForEach(0..<columns, id: \.self) { columnIndex in
+                LazyVStack(spacing: spacing) {
+                    ForEach(itemsForColumn(columnIndex)) { item in
+                        content(item)
+                    }
+                }
+            }
+        }
+    }
+
+    private func itemsForColumn(_ column: Int) -> [Item] {
+        items.enumerated().compactMap { index, item in
+            index % columns == column ? item : nil
+        }
+    }
+}
+
+// MARK: - Masonry Image Card (Dynamic Height)
+struct MasonryImageCard: View {
+    let result: SearchResult
+    var showSimilarity: Bool = false
+    var onFindSimilar: ((String) -> Void)? = nil
+
+    @State private var isFavorite: Bool = false
+    @State private var isHovered = false
+    @State private var showCopied = false
+    @State private var thumbnail: NSImage?
+    @State private var aspectRatio: CGFloat = 1.0
+    @Environment(\.colorScheme) var colorScheme
+
+    private let baseWidth: CGFloat = 200
+
+    var body: some View {
+        ZStack {
+            // Full photo background
+            imageContent
+
+            // Bottom gradient with filename
+            VStack {
+                Spacer()
+                filenameOverlay
+            }
+            .allowsHitTesting(false)
+
+            // Hover overlay
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+
+            // Top row - favorite button and similarity badge
+            VStack {
+                HStack {
+                    if isHovered {
+                        favoriteButton
+                    }
+                    Spacer()
+                    if showSimilarity {
+                        similarityBadge
+                    }
+                }
+                Spacer()
+            }
+        }
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
+            x: 0,
+            y: isHovered ? 6 : 3
+        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .onHover { isHovered = $0 }
+        .onTapGesture(count: 2) { handleCopy() }
+        .contextMenu { contextMenuContent }
+        .onAppear {
+            loadThumbnail()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+    }
+
+    private var imageContent: some View {
+        GeometryReader { geo in
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    )
+            }
+        }
+    }
+
+    private var filenameOverlay: some View {
+        Text(URL(fileURLWithPath: result.path).lastPathComponent)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color.clear, Color.black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+    }
+
+    private var favoriteButton: some View {
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
+        }) {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isFavorite ? .red : .white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(isFavorite ? Color.white : Color.black.opacity(0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(6)
+    }
+
+    private var similarityBadge: some View {
+        Text("\(Int(result.similarity * 100))%")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.black.opacity(0.5)))
+            .padding(6)
+    }
+
+    private var hoverOverlay: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 8) {
+                // Quick actions
+                Button(action: { openInFinder() }) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                if onFindSimilar != nil {
+                    Button(action: { onFindSimilar?(result.path) }) {
+                        Image(systemName: "sparkle.magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                Button(action: { handleCopy() }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.bottom, 36)
+        }
+    }
+
+    private var copiedFeedback: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Copied")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.green))
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button(action: { handleCopy() }) {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        Button(action: { openInFinder() }) {
+            Label("Show in Finder", systemImage: "folder")
+        }
+        if let onFindSimilar = onFindSimilar {
+            Button(action: { onFindSimilar(result.path) }) {
+                Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+            }
+        }
+        Divider()
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
+        }) {
+            Label(isFavorite ? "Remove from Favorites" : "Add to Favorites", systemImage: isFavorite ? "heart.slash" : "heart")
+        }
+    }
+
+    private func loadThumbnail() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = loadOptimizedThumbnail(from: result.path, maxSize: 400) {
+                let ratio = image.size.width / max(image.size.height, 1)
+                DispatchQueue.main.async {
+                    self.thumbnail = image
+                    self.aspectRatio = max(0.5, min(2.0, ratio)) // Clamp between 0.5 and 2.0
+                }
+            }
+        }
+    }
+
+    private func loadOptimizedThumbnail(from path: String, maxSize: Int) -> NSImage? {
+        let url = URL(fileURLWithPath: path)
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
+    private func handleCopy() {
+        guard let image = NSImage(contentsOfFile: result.path) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+
+        showCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopied = false
+        }
+    }
+
+    private func openInFinder() {
+        NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+    }
+}
+
 // MARK: - Action Button Component
 struct ActionButton: View {
     let icon: String
@@ -3355,44 +3668,44 @@ struct ImageCard: View {
     @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
 
-    // Craft-style warm tints for card backgrounds
-    private static let warmTints: [Color] = [
-        Color(hex: "FEF7EE"),  // Warm cream/peach (like Craft)
-        Color(hex: "FDF4F0"),  // Soft coral
-        Color(hex: "F5F3FF"),  // Soft lavender
-        Color(hex: "EEF7FF"),  // Soft sky
-        Color(hex: "F0FDF4"),  // Soft mint
-        Color(hex: "FFFBEB"),  // Soft yellow
-    ]
-
-    private var cardTint: Color {
-        let hash = abs(result.path.hashValue)
-        return colorScheme == .dark ?
-            Color(hex: "2C2C2E") :
-            Self.warmTints[hash % Self.warmTints.count]
-    }
-
-    private var imageHeight: CGFloat {
-        cardHeight - 44  // Reserve space for filename section
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            imageSection
-            filenameSection
+        ZStack {
+            // Full photo background
+            imageContent
+
+            // Bottom gradient with filename
+            VStack {
+                Spacer()
+                filenameOverlay
+            }
+
+            // Hover overlay with action buttons (below top buttons)
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+
+            // Top row - favorite button (left) and similarity badge (right) - ON TOP
+            VStack {
+                HStack {
+                    if isHovered {
+                        favoriteButton
+                    }
+                    Spacer()
+                    if showSimilarity {
+                        similarityBadge
+                    }
+                }
+                Spacer()
+            }
         }
         .frame(minHeight: cardHeight, maxHeight: cardHeight)
-        .background(cardTint)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        // Subtle shadow
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
             radius: isHovered ? 12 : 6,
             x: 0,
             y: isHovered ? 6 : 3
         )
-        // Subtle lift on hover
         .scaleEffect(isHovered ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .animation(.easeOut(duration: 0.2), value: showCopied)
@@ -3401,45 +3714,22 @@ struct ImageCard: View {
         .contextMenu { contextMenuContent }
     }
 
-    private var imageSection: some View {
-        ZStack {
-            imageContent
-
-            // Top trailing - similarity badge
-            if showSimilarity {
-                VStack {
-                    HStack {
-                        Spacer()
-                        similarityBadge
-                    }
-                    Spacer()
-                }
-            }
-
-            if isHovered && !showCopied { hoverOverlay }
-            if showCopied { copiedFeedback }
-
-            // Top leading - favorite button (on top of overlay so it's tappable)
-            if isHovered {
-                VStack {
-                    HStack {
-                        favoriteButton
-                        Spacer()
-                    }
-                    Spacer()
-                }
-            }
-        }
-        .frame(height: imageHeight)
-        .clipped()
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 12,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 12
+    private var filenameOverlay: some View {
+        Text(URL(fileURLWithPath: result.path).lastPathComponent)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color.clear, Color.black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             )
-        )
     }
 
     private var favoriteButton: some View {
@@ -3499,7 +3789,6 @@ struct ImageCard: View {
                     )
             }
         }
-        .frame(height: imageHeight)
         .onAppear {
             loadThumbnail()
         }
@@ -3521,16 +3810,22 @@ struct ImageCard: View {
     }
 
     private var hoverOverlay: some View {
-        Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: [Color.black.opacity(0.1), Color.black.opacity(0.5)],
-                    startPoint: .top,
-                    endPoint: .bottom
+        ZStack(alignment: .bottom) {
+            // Gradient background - non-interactive
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.1), Color.black.opacity(0.5)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-            )
-            .overlay(hoverButtons, alignment: .bottom)
-            .transition(.opacity)
+                .allowsHitTesting(false)
+
+            // Buttons - interactive
+            hoverButtons
+        }
+        .transition(.opacity)
     }
 
     private var hoverButtons: some View {
@@ -3586,16 +3881,6 @@ struct ImageCard: View {
             .transition(.opacity)
     }
 
-    private var filenameSection: some View {
-        Text(URL(fileURLWithPath: result.path).lastPathComponent)
-            .font(.system(size: 12, weight: .medium, design: .rounded))
-            .foregroundColor(colorScheme == .dark ? .white.opacity(0.9) : Color(hex: "1D1D1F"))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .frame(height: 44)
-    }
 
     @ViewBuilder
     private var contextMenuContent: some View {
@@ -4778,7 +5063,6 @@ struct ContentView: View {
     @State private var indexingStartTime: Date? = nil
     @State private var indexStats: IndexStats? = nil
     @State private var isShowingSettings = false
-    @State private var showFilterSidebar = false
     @State private var filterTypes: Set<String> = []
     @State private var filterSizeMin: Int? = nil
     @State private var filterSizeMax: Int? = nil
@@ -4802,9 +5086,9 @@ struct ContentView: View {
                 // Friendly header
                 modernHeader
 
-                // Tab Picker with more padding
+                // Tab Picker
                 tabPicker
-                    .padding(.top, DesignSystem.Spacing.lg)
+                    .padding(.top, DesignSystem.Spacing.md)
 
                 // Main content area based on active tab
                 switch activeTab {
@@ -4899,7 +5183,7 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Tab Picker (Minimal)
@@ -5616,58 +5900,56 @@ struct ContentView: View {
 
     // MARK: - Search Tab Content
     private var searchTabContent: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: DesignSystem.Spacing.xl) {
-                if isIndexing {
-                    indexingProgressView
-                } else if let report = indexingReport {
-                    indexingReportView(report)
-                } else if let stats = indexStats {
-                    indexStatsView(stats)
-                        .padding(.top, DesignSystem.Spacing.xxl)
-                }
-
+        VStack(spacing: 20) {
+            // Show indexing progress or search bar
+            if isIndexing {
+                indexingProgressView
+            } else if let report = indexingReport {
+                indexingReportView(report)
+            } else {
                 modernSearchBar
-                errorView
+                    .padding(.top, 12)
+            }
 
-                // Results area
-                Group {
-                    if searchManager.isSearching {
-                        VStack(spacing: DesignSystem.Spacing.md) {
-                            Spacer()
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            Text("Searching...")
-                                .font(DesignSystem.Typography.callout)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
-                            Spacer()
-                        }
-                    } else if !searchManager.results.isEmpty {
-                        ScrollView {
-                            filteredResultsList
-                                .padding(DesignSystem.Spacing.xl)
-                        }
-                    } else if searchText.isEmpty {
-                        recentImagesSection
-                    } else {
-                        emptyStateView
+            // Filter bar (show when there are results or recent images)
+            if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
+                filterBar
+            }
+
+            errorView
+
+            // Results area
+            Group {
+                if searchManager.isSearching {
+                    VStack {
+                        Spacer()
+                        ProgressView()
+                        Text("Searching...")
+                            .font(.system(size: 13))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .padding(.top, 8)
+                        Spacer()
                     }
+                } else if !searchManager.results.isEmpty {
+                    ScrollView {
+                        filteredResultsList
+                            .padding(.horizontal, DesignSystem.Spacing.xl)
+                    }
+                } else if searchText.isEmpty {
+                    recentImagesSection
+                } else {
+                    emptyStateView
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, DesignSystem.Spacing.xl)
-
-            // Filter sidebar
-            if showFilterSidebar {
-                filterSidebar
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(.top, 8)
     }
 
     // MARK: - Filtered Results
-    private var filteredResults: [SearchResult] {
-        searchManager.results.filter { result in
+    private func applyFilters(to results: [SearchResult]) -> [SearchResult] {
+        results.filter { result in
             // Type filter
             if !filterTypes.isEmpty {
                 if !filterTypes.contains(result.fileExtension) {
@@ -5696,6 +5978,18 @@ struct ContentView: View {
 
             return true
         }
+    }
+
+    private var filteredResults: [SearchResult] {
+        applyFilters(to: searchManager.results)
+    }
+
+    private var filteredRecentImages: [SearchResult] {
+        applyFilters(to: recentImages)
+    }
+
+    private var displayedResults: [SearchResult] {
+        searchManager.results.isEmpty ? filteredRecentImages : filteredResults
     }
 
     private var filteredResultsList: some View {
@@ -5745,23 +6039,125 @@ struct ContentView: View {
                 .padding(.bottom, DesignSystem.Spacing.sm)
             }
 
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 20),
-                GridItem(.flexible(), spacing: 20),
-                GridItem(.flexible(), spacing: 20),
-                GridItem(.flexible(), spacing: 20)
-            ], spacing: 24) {
-                ForEach(results) { result in
-                    ImageCard(
-                        result: result,
-                        showSimilarity: true,
-                        onFindSimilar: { path in
-                            searchManager.findSimilar(imagePath: path)
+            MasonryGrid(items: results, columns: 4, spacing: 12) { result in
+                MasonryImageCard(
+                    result: result,
+                    showSimilarity: true,
+                    onFindSimilar: { path in
+                        searchManager.findSimilar(imagePath: path)
+                    }
+                )
+            }
+        }
+    }
+
+    // MARK: - Filter Bar (Minimal Capsules)
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Type filters
+                ForEach(["JPG", "PNG", "GIF", "HEIC"], id: \.self) { type in
+                    FilterCapsule(
+                        label: type,
+                        isActive: filterTypes.contains(type.lowercased()),
+                        action: {
+                            if filterTypes.contains(type.lowercased()) {
+                                filterTypes.remove(type.lowercased())
+                            } else {
+                                filterTypes.insert(type.lowercased())
+                            }
                         }
                     )
                 }
+
+                Divider()
+                    .frame(height: 16)
+                    .opacity(0.3)
+
+                // Size filters
+                FilterCapsule(
+                    label: "Small",
+                    isActive: filterSizeMax == 100 * 1024,
+                    action: {
+                        if filterSizeMax == 100 * 1024 {
+                            filterSizeMin = nil; filterSizeMax = nil
+                        } else {
+                            filterSizeMin = nil; filterSizeMax = 100 * 1024
+                        }
+                    }
+                )
+                FilterCapsule(
+                    label: "Large",
+                    isActive: filterSizeMin == 1024 * 1024,
+                    action: {
+                        if filterSizeMin == 1024 * 1024 {
+                            filterSizeMin = nil; filterSizeMax = nil
+                        } else {
+                            filterSizeMin = 1024 * 1024; filterSizeMax = nil
+                        }
+                    }
+                )
+
+                Divider()
+                    .frame(height: 16)
+                    .opacity(0.3)
+
+                // Date filters
+                FilterCapsule(
+                    label: "Today",
+                    isActive: filterDateFrom == Calendar.current.startOfDay(for: Date()),
+                    action: {
+                        if filterDateFrom == Calendar.current.startOfDay(for: Date()) {
+                            filterDateFrom = nil; filterDateTo = nil
+                        } else {
+                            filterDateFrom = Calendar.current.startOfDay(for: Date()); filterDateTo = nil
+                        }
+                    }
+                )
+                FilterCapsule(
+                    label: "This Week",
+                    isActive: dateFilterLabel == "This Week",
+                    action: {
+                        if dateFilterLabel == "This Week" {
+                            filterDateFrom = nil; filterDateTo = nil
+                        } else {
+                            filterDateFrom = Calendar.current.date(byAdding: .day, value: -7, to: Date()); filterDateTo = nil
+                        }
+                    }
+                )
+
+                // Clear all (only when filters active)
+                if activeFilterCount > 0 {
+                    Button(action: clearFilters) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
             }
+            .padding(.vertical, 2)
         }
+    }
+
+    private var sizeFilterLabel: String {
+        if filterSizeMin == nil && filterSizeMax == nil { return "Size" }
+        if filterSizeMax == 100 * 1024 { return "Small" }
+        if filterSizeMin == 100 * 1024 && filterSizeMax == 1024 * 1024 { return "Medium" }
+        if filterSizeMin == 1024 * 1024 { return "Large" }
+        return "Size"
+    }
+
+    private var dateFilterLabel: String {
+        if filterDateFrom == nil && filterDateTo == nil { return "Date" }
+        if let from = filterDateFrom {
+            let days = Calendar.current.dateComponents([.day], from: from, to: Date()).day ?? 0
+            if days <= 1 { return "Today" }
+            if days <= 7 { return "This Week" }
+            if days <= 31 { return "This Month" }
+            return "This Year"
+        }
+        return "Date"
     }
 
     private var activeFilterCount: Int {
@@ -5770,236 +6166,6 @@ struct ContentView: View {
         if filterSizeMin != nil || filterSizeMax != nil { count += 1 }
         if filterDateFrom != nil || filterDateTo != nil { count += 1 }
         return count
-    }
-
-    // MARK: - Filter Sidebar (Craft/Linear style)
-    private var filterSidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header - clean and minimal
-            HStack {
-                Text("Filters")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                Spacer()
-
-                if activeFilterCount > 0 {
-                    Button(action: { clearFilters() }) {
-                        Text("Clear all")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.accent)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showFilterSidebar = false
-                    }
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        .frame(width: 24, height: 24)
-                        .background(
-                            Circle()
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
-                        )
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-
-            // Subtle separator
-            Rectangle()
-                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
-                    // File Type Section
-                    filterSection(title: "File Type", icon: "doc.richtext") {
-                        let types = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff"]
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: DesignSystem.Spacing.sm) {
-                            ForEach(types, id: \.self) { type in
-                                filterChip(type.uppercased(), isSelected: filterTypes.contains(type)) {
-                                    if filterTypes.contains(type) {
-                                        filterTypes.remove(type)
-                                    } else {
-                                        filterTypes.insert(type)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Size Section
-                    filterSection(title: "File Size", icon: "externaldrive") {
-                        VStack(spacing: DesignSystem.Spacing.sm) {
-                            HStack {
-                                sizePresetButton("< 1 MB", minSize: nil, maxSize: 1_000_000)
-                                sizePresetButton("1-5 MB", minSize: 1_000_000, maxSize: 5_000_000)
-                                sizePresetButton("> 5 MB", minSize: 5_000_000, maxSize: nil)
-                            }
-                            if filterSizeMin != nil || filterSizeMax != nil {
-                                HStack {
-                                    Text(sizeRangeText)
-                                        .font(DesignSystem.Typography.caption)
-                                        .foregroundColor(DesignSystem.Colors.accent)
-                                    Spacer()
-                                    Button("Clear") {
-                                        filterSizeMin = nil
-                                        filterSizeMax = nil
-                                    }
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-                        }
-                    }
-
-                    // Date Section
-                    filterSection(title: "Date Range", icon: "calendar") {
-                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                            HStack {
-                                Text("From:")
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                                    .frame(width: 40)
-                                DatePicker("", selection: Binding(
-                                    get: { filterDateFrom ?? Date.distantPast },
-                                    set: { filterDateFrom = $0 }
-                                ), displayedComponents: .date)
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-
-                                if filterDateFrom != nil {
-                                    Button(action: { filterDateFrom = nil }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-
-                            HStack {
-                                Text("To:")
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                                    .frame(width: 40)
-                                DatePicker("", selection: Binding(
-                                    get: { filterDateTo ?? Date() },
-                                    set: { filterDateTo = $0 }
-                                ), displayedComponents: .date)
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-
-                                if filterDateTo != nil {
-                                    Button(action: { filterDateTo = nil }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.top, 20)
-                .padding(.horizontal, 20)
-            }
-        }
-        .frame(width: 260)
-        .background(
-            // Craft-style warm sidebar background
-            colorScheme == .dark ?
-                Color(hex: "252528") :
-                Color.white.opacity(0.9)
-        )
-        .background(.ultraThinMaterial)
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 20,
-                topTrailingRadius: 20
-            )
-        )
-        .shadow(
-            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
-            radius: 20,
-            x: -5,
-            y: 0
-        )
-    }
-
-    // Craft/Linear style section header
-    private func filterSection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .frame(width: 20)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-            }
-
-            content()
-                .padding(.leading, 28) // Indent content under icon
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func filterChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isSelected ?
-                            DesignSystem.Colors.accent :
-                            (colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                        )
-                )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-
-    private func sizePresetButton(_ label: String, minSize: Int?, maxSize: Int?) -> some View {
-        let isSelected = filterSizeMin == minSize && filterSizeMax == maxSize
-        return Button(action: {
-            if isSelected {
-                filterSizeMin = nil
-                filterSizeMax = nil
-            } else {
-                filterSizeMin = minSize
-                filterSizeMax = maxSize
-            }
-        }) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isSelected ?
-                            DesignSystem.Colors.accent :
-                            (colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                        )
-                )
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 
     private var sizeRangeText: String {
@@ -6640,26 +6806,6 @@ struct ContentView: View {
                     .transition(.opacity)
                 }
 
-                // Filter button (subtle) - only in text search mode
-                Button(action: {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        showFilterSidebar.toggle()
-                    }
-                }) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(activeFilterCount > 0 ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-
-                        if activeFilterCount > 0 {
-                            Circle()
-                                .fill(DesignSystem.Colors.accent)
-                                .frame(width: 6, height: 6)
-                                .offset(x: 2, y: -2)
-                        }
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 14)
@@ -7000,85 +7146,43 @@ struct ContentView: View {
 
     // MARK: - Recent Images Section
     private var recentImagesSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Friendly section header
-            HStack(spacing: 8) {
-                Text("Recent Photos")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                Spacer()
-
-                if isLoadingRecent {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                } else {
-                    Button(action: { loadRecentImages() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Refresh")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-
-            // Grid with more spacing
+        Group {
             if recentImages.isEmpty && !isLoadingRecent {
-                // Friendly empty state
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     Spacer()
-                    ZStack {
-                        Circle()
-                            .fill(DesignSystem.Colors.accent.opacity(0.1))
-                            .frame(width: 80, height: 80)
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 32, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.accent.opacity(0.6))
-                    }
-                    VStack(spacing: 6) {
-                        Text("No photos yet")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
-                        Text("Add a folder to start browsing your images")
-                            .font(.system(size: 13))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                    }
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No photos yet")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
                     Spacer()
                 }
-                .frame(maxWidth: .infinity)
+            } else if filteredRecentImages.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No photos match filters")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Spacer()
+                }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20)
-                    ], spacing: 24) {
-                        ForEach(recentImages) { result in
-                            ImageCard(
-                                result: result,
-                                onFindSimilar: { path in
-                                    searchManager.findSimilar(imagePath: path)
-                                }
-                            )
-                        }
+                    MasonryGrid(items: filteredRecentImages, columns: 4, spacing: 12) { result in
+                        MasonryImageCard(
+                            result: result,
+                            onFindSimilar: { path in
+                                searchManager.findSimilar(imagePath: path)
+                            }
+                        )
                     }
-                    .padding(20)
+                    .padding(.horizontal, DesignSystem.Spacing.xl)
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.top, 8)
     }
 
     // MARK: - Error View
