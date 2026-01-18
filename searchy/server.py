@@ -956,6 +956,186 @@ def rename_face_cluster(
         return {"error": str(e)}
 
 
+def get_pinned_clusters_file(data_dir: str) -> str:
+    """Get path to pinned clusters file."""
+    return os.path.join(data_dir, 'pinned_clusters.json')
+
+
+def load_pinned_clusters(data_dir: str) -> List[str]:
+    """Load list of pinned cluster IDs."""
+    import json
+    filepath = get_pinned_clusters_file(data_dir)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+                return data.get('pinned', [])
+        except:
+            pass
+    return []
+
+
+def save_pinned_clusters(data_dir: str, pinned: List[str]):
+    """Save list of pinned cluster IDs."""
+    import json
+    filepath = get_pinned_clusters_file(data_dir)
+    with open(filepath, 'w') as f:
+        json.dump({'pinned': pinned}, f)
+
+
+@app.post("/face-pin")
+def pin_face_cluster(
+    cluster_id: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Pin a face cluster to show it first."""
+    try:
+        pinned = load_pinned_clusters(data_dir)
+        if cluster_id not in pinned:
+            pinned.append(cluster_id)
+            save_pinned_clusters(data_dir, pinned)
+        return {"status": "success", "pinned": pinned}
+    except Exception as e:
+        logger.error(f"Error pinning cluster: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-unpin")
+def unpin_face_cluster(
+    cluster_id: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Unpin a face cluster."""
+    try:
+        pinned = load_pinned_clusters(data_dir)
+        if cluster_id in pinned:
+            pinned.remove(cluster_id)
+            save_pinned_clusters(data_dir, pinned)
+        return {"status": "success", "pinned": pinned}
+    except Exception as e:
+        logger.error(f"Error unpinning cluster: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/face-pinned")
+def get_pinned_clusters(
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Get list of pinned cluster IDs."""
+    try:
+        pinned = load_pinned_clusters(data_dir)
+        return {"pinned": pinned}
+    except Exception as e:
+        logger.error(f"Error getting pinned clusters: {e}")
+        return {"error": str(e)}
+
+
+# Hidden clusters helpers
+def get_hidden_clusters_file(data_dir: str) -> str:
+    """Get path to hidden clusters file."""
+    return os.path.join(data_dir, 'hidden_clusters.json')
+
+
+def load_hidden_clusters(data_dir: str) -> List[str]:
+    """Load list of hidden cluster IDs."""
+    import json
+    filepath = get_hidden_clusters_file(data_dir)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+                return data.get('hidden', [])
+        except:
+            pass
+    return []
+
+
+def save_hidden_clusters(data_dir: str, hidden: List[str]):
+    """Save list of hidden cluster IDs."""
+    import json
+    filepath = get_hidden_clusters_file(data_dir)
+    with open(filepath, 'w') as f:
+        json.dump({'hidden': hidden}, f)
+
+
+@app.post("/face-hide")
+def hide_face_cluster(
+    cluster_id: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Hide a face cluster from the main view."""
+    try:
+        hidden = load_hidden_clusters(data_dir)
+        if cluster_id not in hidden:
+            hidden.append(cluster_id)
+            save_hidden_clusters(data_dir, hidden)
+        return {"status": "success", "hidden": hidden}
+    except Exception as e:
+        logger.error(f"Error hiding cluster: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-unhide")
+def unhide_face_cluster(
+    cluster_id: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Unhide a face cluster."""
+    try:
+        hidden = load_hidden_clusters(data_dir)
+        if cluster_id in hidden:
+            hidden.remove(cluster_id)
+            save_hidden_clusters(data_dir, hidden)
+        return {"status": "success", "hidden": hidden}
+    except Exception as e:
+        logger.error(f"Error unhiding cluster: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/face-hidden")
+def get_hidden_clusters(
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Get list of hidden cluster IDs."""
+    try:
+        hidden = load_hidden_clusters(data_dir)
+        return {"hidden": hidden, "count": len(hidden)}
+    except Exception as e:
+        logger.error(f"Error getting hidden clusters: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-merge")
+def merge_face_clusters(
+    source_cluster_id: str,
+    target_cluster_id: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Merge source cluster into target cluster."""
+    try:
+        face_service = get_face_service(data_dir)
+        result = face_service.merge_clusters(source_cluster_id, target_cluster_id)
+
+        # If merge was successful, also clean up pinned/hidden references to source
+        if result.get("status") == "success":
+            # Remove source from pinned if present
+            pinned = load_pinned_clusters(data_dir)
+            if source_cluster_id in pinned:
+                pinned.remove(source_cluster_id)
+                save_pinned_clusters(data_dir, pinned)
+
+            # Remove source from hidden if present
+            hidden = load_hidden_clusters(data_dir)
+            if source_cluster_id in hidden:
+                hidden.remove(source_cluster_id)
+                save_hidden_clusters(data_dir, hidden)
+
+        return result
+    except Exception as e:
+        logger.error(f"Error merging clusters: {e}")
+        return {"error": str(e)}
+
+
 @app.get("/face-new-count")
 def get_new_face_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
     """Get count of images not yet scanned for faces."""

@@ -225,6 +225,47 @@ class FaceRecognitionService:
         logger.info(f"Renamed cluster {cluster_id} to '{new_name}'")
         return {"status": "success", "cluster_id": cluster_id, "name": new_name}
 
+    def merge_clusters(self, source_cluster_id: str, target_cluster_id: str) -> Dict:
+        """Merge source cluster into target cluster."""
+        # Ensure clusters are populated first
+        if not self.clusters and self.faces:
+            logger.info("Clusters not loaded, running cluster_faces first...")
+            self.cluster_faces()
+
+        # Find both clusters
+        source = next((c for c in self.clusters if c.cluster_id == source_cluster_id), None)
+        target = next((c for c in self.clusters if c.cluster_id == target_cluster_id), None)
+
+        if not source:
+            return {"error": f"Source cluster {source_cluster_id} not found"}
+        if not target:
+            return {"error": f"Target cluster {target_cluster_id} not found"}
+        if source_cluster_id == target_cluster_id:
+            return {"error": "Cannot merge a cluster into itself"}
+
+        # Move all faces from source to target
+        target.faces.extend(source.faces)
+
+        # Remove source cluster from clusters list
+        self.clusters = [c for c in self.clusters if c.cluster_id != source_cluster_id]
+
+        # Update custom names - remove source, keep target
+        if source_cluster_id in self.custom_names:
+            del self.custom_names[source_cluster_id]
+        self._save_custom_names()
+
+        # Save the updated face index
+        self._save_faces()
+
+        logger.info(f"Merged cluster {source_cluster_id} ({source.name}) into {target_cluster_id} ({target.name})")
+        return {
+            "status": "success",
+            "target_cluster_id": target_cluster_id,
+            "target_name": target.name,
+            "total_faces": target.face_count,
+            "merged_face_count": len(source.faces)
+        }
+
     def _generate_face_id(self, image_path: str, bbox: Dict) -> str:
         """Generate unique face ID from path and bounding box."""
         unique_str = f"{image_path}_{bbox['x']}_{bbox['y']}_{bbox['w']}_{bbox['h']}"

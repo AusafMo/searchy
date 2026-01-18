@@ -4042,8 +4042,14 @@ struct ResultCardView: View {
 // MARK: - Person Card for Face Recognition
 struct PersonCard: View {
     let person: Person
+    var isPinned: Bool = false
+    var isHidden: Bool = false
+    var isSelected: Bool = false
     var onRename: ((String) -> Void)?
     var onSelect: (() -> Void)?
+    var onTogglePin: (() -> Void)?
+    var onToggleHide: (() -> Void)?
+    var onToggleSelection: (() -> Void)?
     @State private var thumbnail: NSImage?
     @State private var isHovered = false
     @State private var isEditing = false
@@ -4064,19 +4070,49 @@ struct PersonCard: View {
                 nameOverlay
             }
 
-            // Top right - photo count badge
+            // Top right - selection checkbox (always visible)
             VStack {
                 HStack {
                     Spacer()
-                    photoBadge
+                    Button(action: { onToggleSelection?() }) {
+                        ZStack {
+                            Circle()
+                                .fill(isSelected ? DesignSystem.Colors.accent : Color.black.opacity(0.4))
+                                .frame(width: 22, height: 22)
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                            } else {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                                    .frame(width: 22, height: 22)
+                            }
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(6)
                 }
                 Spacer()
             }
 
-            // Edit button on hover
+            // Top left - pin button (visible when pinned or hovering)
+            if isPinned || (isHovered && !isEditing) {
+                VStack {
+                    HStack {
+                        pinButton
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+
+            // Edit button on hover (next to pin)
             if isHovered && !isEditing {
                 VStack {
                     HStack {
+                        // Spacer for pin button width
+                        Color.clear.frame(width: 30, height: 1)
                         editButton
                         Spacer()
                     }
@@ -4087,6 +4123,7 @@ struct PersonCard: View {
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(RoundedRectangle(cornerRadius: 12))
+        .opacity(isHidden ? 0.5 : 1.0)
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
             radius: isHovered ? 12 : 6,
@@ -4102,6 +4139,18 @@ struct PersonCard: View {
         .onTapGesture {
             if !isEditing {
                 onSelect?()
+            }
+        }
+        .contextMenu {
+            Button(action: { onTogglePin?() }) {
+                Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            Button(action: { onToggleHide?() }) {
+                Label(isHidden ? "Unhide" : "Hide", systemImage: isHidden ? "eye" : "eye.slash")
+            }
+            Divider()
+            Button(action: { startEditing() }) {
+                Label("Rename", systemImage: "pencil")
             }
         }
         .onAppear { loadThumbnail() }
@@ -4178,6 +4227,19 @@ struct PersonCard: View {
                 .foregroundColor(.white)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(Color.black.opacity(0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.top, 6)
+        .transition(.opacity)
+    }
+
+    private var pinButton: some View {
+        Button(action: { onTogglePin?() }) {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(isPinned ? .yellow : .white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.black.opacity(isPinned ? 0.7 : 0.5)))
         }
         .buttonStyle(PlainButtonStyle())
         .padding(6)
@@ -5418,6 +5480,9 @@ class FaceManager: ObservableObject {
     @Published var totalFacesDetected = 0
     @Published var hasScannedBefore = false
     @Published var newImagesCount = 0
+    @Published var pinnedClusterIds: Set<String> = []
+    @Published var hiddenClusterIds: Set<String> = []
+    @Published var showHidden: Bool = false
 
     private let baseURL = "http://localhost:7860"
     private let dataDir = "/Users/ausaf/Library/Application Support/searchy"
@@ -5426,6 +5491,8 @@ class FaceManager: ObservableObject {
     private init() {
         // Load initial state from Python backend
         Task {
+            await loadPinnedClusters()
+            await loadHiddenClusters()
             await loadClustersFromAPI()
             await checkForNewImages()
         }
@@ -5660,6 +5727,158 @@ class FaceManager: ObservableObject {
         }
         return false
     }
+
+    // MARK: - Pin/Favorite Methods
+
+    /// Load pinned clusters from backend
+    func loadPinnedClusters() async {
+        guard let url = URL(string: "\(baseURL)/face-pinned?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let pinned = json["pinned"] as? [String] {
+                await MainActor.run {
+                    self.pinnedClusterIds = Set(pinned)
+                }
+            }
+        } catch {
+            print("Failed to load pinned clusters: \(error)")
+        }
+    }
+
+    /// Check if a person is pinned
+    func isPinned(_ person: Person) -> Bool {
+        return pinnedClusterIds.contains(person.id)
+    }
+
+    /// Toggle pin status for a person
+    func togglePin(_ person: Person) async {
+        let isPinned = pinnedClusterIds.contains(person.id)
+        let endpoint = isPinned ? "face-unpin" : "face-pin"
+
+        var components = URLComponents(string: "\(baseURL)/\(endpoint)")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success",
+               let pinned = json["pinned"] as? [String] {
+                await MainActor.run {
+                    self.pinnedClusterIds = Set(pinned)
+                }
+            }
+        } catch {
+            print("Failed to toggle pin: \(error)")
+        }
+    }
+
+    // MARK: - Hide/Archive Methods
+
+    /// Load hidden clusters from backend
+    func loadHiddenClusters() async {
+        guard let url = URL(string: "\(baseURL)/face-hidden?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let hidden = json["hidden"] as? [String] {
+                await MainActor.run {
+                    self.hiddenClusterIds = Set(hidden)
+                }
+            }
+        } catch {
+            print("Failed to load hidden clusters: \(error)")
+        }
+    }
+
+    /// Check if a person is hidden
+    func isHidden(_ person: Person) -> Bool {
+        return hiddenClusterIds.contains(person.id)
+    }
+
+    /// Toggle hide status for a person
+    func toggleHide(_ person: Person) async {
+        let isHidden = hiddenClusterIds.contains(person.id)
+        let endpoint = isHidden ? "face-unhide" : "face-hide"
+
+        var components = URLComponents(string: "\(baseURL)/\(endpoint)")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success",
+               let hidden = json["hidden"] as? [String] {
+                await MainActor.run {
+                    self.hiddenClusterIds = Set(hidden)
+                }
+            }
+        } catch {
+            print("Failed to toggle hide: \(error)")
+        }
+    }
+
+    /// Get visible people (filtered by hidden status, sorted with pinned first)
+    var sortedPeople: [Person] {
+        // Filter by hidden status
+        let visible = showHidden ? people : people.filter { !hiddenClusterIds.contains($0.id) }
+        // Sort with pinned first
+        let pinned = visible.filter { pinnedClusterIds.contains($0.id) }
+        let unpinned = visible.filter { !pinnedClusterIds.contains($0.id) }
+        return pinned + unpinned
+    }
+
+    /// Count of hidden people
+    var hiddenCount: Int {
+        return hiddenClusterIds.count
+    }
+
+    // MARK: - Merge Methods
+
+    /// Merge source person into target person
+    func mergePeople(source: Person, into target: Person) async -> Bool {
+        var components = URLComponents(string: "\(baseURL)/face-merge")
+        components?.queryItems = [
+            URLQueryItem(name: "source_cluster_id", value: source.id),
+            URLQueryItem(name: "target_cluster_id", value: target.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success" {
+                // Reload clusters to get updated state
+                await loadClustersFromAPI()
+                await loadPinnedClusters()
+                await loadHiddenClusters()
+                return true
+            }
+        } catch {
+            print("Failed to merge people: \(error)")
+        }
+        return false
+    }
 }
 
 struct ContentView: View {
@@ -5673,6 +5892,8 @@ struct ContentView: View {
     @State private var activeTab: AppTab = .search
     @Namespace private var tabAnimation
     @State private var selectedPerson: Person? = nil
+    @State private var peopleSearchText = ""
+    @State private var selectedPeopleIds: Set<String> = []
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
@@ -5866,6 +6087,17 @@ struct ContentView: View {
     }
 
     // MARK: - Faces Tab Content
+
+    private var filteredPeople: [Person] {
+        let sortedList = faceManager.sortedPeople
+        if peopleSearchText.isEmpty {
+            return sortedList
+        }
+        return sortedList.filter {
+            $0.name.localizedCaseInsensitiveContains(peopleSearchText)
+        }
+    }
+
     private var facesTabContent: some View {
         VStack(spacing: 0) {
             // Header
@@ -5875,19 +6107,46 @@ struct ContentView: View {
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundColor(DesignSystem.Colors.primaryText)
                     if faceManager.totalFacesDetected > 0 {
-                        Text("\(faceManager.people.count) people • \(faceManager.totalFacesDetected) faces")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        if !peopleSearchText.isEmpty {
+                            Text("\(filteredPeople.count) of \(faceManager.people.count) people")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        } else {
+                            Text("\(faceManager.people.count) people • \(faceManager.totalFacesDetected) faces")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
                     }
                 }
 
                 Spacer()
 
-                if faceManager.hasScannedBefore && !faceManager.isScanning {
+                // Selected count indicator (when items selected)
+                if !selectedPeopleIds.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("\(selectedPeopleIds.count) selected")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+
+                        Button(action: {
+                            withAnimation {
+                                selectedPeopleIds.removeAll()
+                            }
+                        }) {
+                            Text("Clear")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.trailing, 8)
+                }
+
+                if faceManager.hasScannedBefore && !faceManager.isScanning && selectedPeopleIds.isEmpty {
                     Button(action: {
                         faceManager.clearAllFaces()
                     }) {
-                        Text("Clear")
+                        Text("Clear All")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(DesignSystem.Colors.secondaryText)
                     }
@@ -5904,6 +6163,33 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.orange))
                         .padding(.trailing, 4)
+                }
+
+                // Show Hidden toggle (only when there are hidden people)
+                if faceManager.hiddenCount > 0 {
+                    Button(action: {
+                        withAnimation {
+                            faceManager.showHidden.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: faceManager.showHidden ? "eye" : "eye.slash")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("\(faceManager.hiddenCount)")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(faceManager.showHidden ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(faceManager.showHidden
+                                      ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1)
+                                      : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.trailing, 4)
                 }
 
                 Button(action: {
@@ -5937,9 +6223,48 @@ struct ContentView: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(faceManager.isScanning)
             }
-            .padding(.bottom, DesignSystem.Spacing.lg)
+            .padding(.bottom, DesignSystem.Spacing.md)
             .onAppear {
                 faceManager.refreshNewImagesCount()
+            }
+
+            // Search bar - only show when there are people
+            if !faceManager.people.isEmpty && selectedPerson == nil {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                    TextField("Search people...", text: $peopleSearchText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    if !peopleSearchText.isEmpty {
+                        Button(action: {
+                            withAnimation {
+                                peopleSearchText = ""
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
+                )
+                .padding(.bottom, DesignSystem.Spacing.md)
             }
 
             // Scanning progress
@@ -6083,37 +6408,397 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // People grid
-                ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 12)
-                    ], spacing: 14) {
-                        ForEach(faceManager.people) { person in
-                            PersonCard(
-                                person: person,
-                                onRename: { newName in
-                                    Task {
-                                        await faceManager.renamePerson(person, to: newName)
-                                    }
-                                },
-                                onSelect: {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        selectedPerson = person
-                                    }
-                                }
-                            )
+                if filteredPeople.isEmpty && !peopleSearchText.isEmpty {
+                    // No search results
+                    VStack(spacing: 16) {
+                        Spacer()
+                        Image(systemName: "person.slash")
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text("No people matching \"\(peopleSearchText)\"")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Button(action: { peopleSearchText = "" }) {
+                            Text("Clear Search")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.accent)
                         }
+                        .buttonStyle(PlainButtonStyle())
+                        Spacer()
                     }
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 12)
+                        ], spacing: 14) {
+                            ForEach(filteredPeople) { person in
+                                PersonCard(
+                                    person: person,
+                                    isPinned: faceManager.isPinned(person),
+                                    isHidden: faceManager.isHidden(person),
+                                    isSelected: selectedPeopleIds.contains(person.id),
+                                    onRename: { newName in
+                                        Task {
+                                            await faceManager.renamePerson(person, to: newName)
+                                        }
+                                    },
+                                    onSelect: {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            selectedPerson = person
+                                        }
+                                    },
+                                    onTogglePin: {
+                                        Task {
+                                            await faceManager.togglePin(person)
+                                        }
+                                    },
+                                    onToggleHide: {
+                                        Task {
+                                            await faceManager.toggleHide(person)
+                                        }
+                                    },
+                                    onToggleSelection: {
+                                        withAnimation {
+                                            if selectedPeopleIds.contains(person.id) {
+                                                selectedPeopleIds.remove(person.id)
+                                            } else {
+                                                selectedPeopleIds.insert(person.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, !selectedPeopleIds.isEmpty ? 80 : 16)
+                    }
+
+                    // Floating selection action bar
+                    if !selectedPeopleIds.isEmpty {
+                        selectionActionBar
+                    }
                 }
             }
         }
+        .padding(.horizontal, DesignSystem.Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var selectionActionBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 16) {
+                // Hide/Unhide button
+                Button(action: {
+                    Task {
+                        for id in selectedPeopleIds {
+                            if let person = faceManager.people.first(where: { $0.id == id }) {
+                                await faceManager.toggleHide(person)
+                            }
+                        }
+                        withAnimation {
+                            selectedPeopleIds.removeAll()
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 18))
+                        Text("Hide")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Pin/Unpin button
+                Button(action: {
+                    Task {
+                        for id in selectedPeopleIds {
+                            if let person = faceManager.people.first(where: { $0.id == id }) {
+                                await faceManager.togglePin(person)
+                            }
+                        }
+                        withAnimation {
+                            selectedPeopleIds.removeAll()
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "pin")
+                            .font(.system(size: 18))
+                        Text("Pin")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Merge button (only when 2+ selected)
+                if selectedPeopleIds.count >= 2 {
+                    Button(action: {
+                        bulkMergeTargetId = nil
+                        showBulkMergeSheet = true
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                                .font(.system(size: 18))
+                            Text("Merge")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: 60)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Select All button
+                Button(action: {
+                    withAnimation {
+                        if selectedPeopleIds.count == filteredPeople.count {
+                            selectedPeopleIds.removeAll()
+                        } else {
+                            selectedPeopleIds = Set(filteredPeople.map { $0.id })
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: selectedPeopleIds.count == filteredPeople.count ? "checkmark.circle" : "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                        Text(selectedPeopleIds.count == filteredPeople.count ? "Deselect" : "All")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.85))
+                    .shadow(color: Color.black.opacity(0.3), radius: 10, y: 4)
+            )
+            .padding(.bottom, 16)
+        }
+        .sheet(isPresented: $showBulkMergeSheet) {
+            bulkMergeSheet
+        }
+    }
+
+    private var bulkMergeSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Merge \(selectedPeopleIds.count) People")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { showBulkMergeSheet = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding()
+
+            // Info text
+            Text("Select which person to keep. All other selected people will be merged into them.")
+                .font(.system(size: 13))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+
+            // List of selected people to pick target
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(bulkMergeSelectedPeople) { person in
+                        bulkMergeTargetRow(person)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, bulkMergeTargetId == nil ? 16 : 80)
+            }
+
+            // Bottom action bar when target is selected
+            if let targetId = bulkMergeTargetId,
+               let target = faceManager.people.first(where: { $0.id == targetId }) {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Keep: \(target.name)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                            Text("Merge \(selectedPeopleIds.count - 1) others into this person")
+                                .font(.system(size: 11))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+
+                        Spacer()
+
+                        if isMerging {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Merging...")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                        } else {
+                            Button(action: performBulkMerge) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.merge")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("Merge")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                }
+                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+            }
+        }
+        .frame(width: 380, height: 450)
+        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+    }
+
+    private var bulkMergeSelectedPeople: [Person] {
+        return faceManager.people.filter { selectedPeopleIds.contains($0.id) }
+    }
+
+    private func bulkMergeTargetRow(_ person: Person) -> some View {
+        let isTarget = bulkMergeTargetId == person.id
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                bulkMergeTargetId = person.id
+            }
+        }) {
+            HStack(spacing: 12) {
+                // Radio button
+                ZStack {
+                    Circle()
+                        .stroke(isTarget ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .frame(width: 22, height: 22)
+                    if isTarget {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 14, height: 14)
+                    }
+                }
+
+                // Thumbnail
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("\(person.faceCount) photos")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                if isTarget {
+                    Text("Keep")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent.opacity(0.15))
+                        )
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isTarget
+                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
+                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isTarget ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isMerging)
+    }
+
+    private func performBulkMerge() {
+        guard let targetId = bulkMergeTargetId,
+              let target = faceManager.people.first(where: { $0.id == targetId }) else { return }
+
+        let sourceIds = selectedPeopleIds.filter { $0 != targetId }
+        guard !sourceIds.isEmpty else { return }
+
+        isMerging = true
+
+        Task {
+            var allSuccess = true
+            for sourceId in sourceIds {
+                if let source = faceManager.people.first(where: { $0.id == sourceId }) {
+                    let success = await faceManager.mergePeople(source: source, into: target)
+                    if !success {
+                        allSuccess = false
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isMerging = false
+                if allSuccess {
+                    showBulkMergeSheet = false
+                    selectedPeopleIds.removeAll()
+                    bulkMergeTargetId = nil
+                }
+            }
+        }
     }
 
     @State private var isEditingPersonName = false
     @State private var editingPersonName = ""
     @FocusState private var personNameFieldFocused: Bool
+    @State private var showMergeSheet = false
+    @State private var mergeSearchText = ""
+    @State private var mergeSelectedIds: Set<String> = []
+    @State private var isMerging = false
+    @State private var showBulkMergeSheet = false
+    @State private var bulkMergeTargetId: String? = nil
 
     private var personDetailView: some View {
         VStack(spacing: 0) {
@@ -6172,6 +6857,48 @@ struct ContentView: View {
 
                     Spacer()
 
+                    // Merge button
+                    Button(action: {
+                        mergeSearchText = ""
+                        mergeSelectedIds.removeAll()
+                        showMergeSheet = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Merge")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Share button
+                    Button(action: {
+                        sharePersonPhotos(person)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Share")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
                     // Photo count badge
                     HStack(spacing: 4) {
                         Image(systemName: "photo.stack")
@@ -6218,6 +6945,235 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $showMergeSheet) {
+            mergePersonSheet
+        }
+    }
+
+    private var mergePersonSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Merge People")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { showMergeSheet = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding()
+
+            // Info text
+            if let target = selectedPerson {
+                Text("Select people to merge into \"\(target.name)\". Their faces will be combined into this person.")
+                    .font(.system(size: 13))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+            }
+
+            // Search bar
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                TextField("Search people...", text: $mergeSearchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 14))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                if !mergeSearchText.isEmpty {
+                    Button(action: { mergeSearchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            )
+            .padding(.horizontal)
+            .padding(.bottom, 12)
+
+            // People list with multi-select
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(mergeTargetPeople) { person in
+                        mergePeopleRow(person)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, mergeSelectedIds.isEmpty ? 16 : 80)
+            }
+
+            // Bottom action bar
+            if !mergeSelectedIds.isEmpty {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack {
+                        Text("\(mergeSelectedIds.count) selected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                        Spacer()
+
+                        if isMerging {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Merging...")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                        } else {
+                            Button(action: performMerge) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.merge")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("Merge into \(selectedPerson?.name ?? "Person")")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                }
+                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+            }
+        }
+        .frame(width: 420, height: 520)
+        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+    }
+
+    private var mergeTargetPeople: [Person] {
+        // Exclude the currently selected person and filter by search
+        let available = faceManager.people.filter { $0.id != selectedPerson?.id }
+        if mergeSearchText.isEmpty {
+            return available
+        }
+        return available.filter {
+            $0.name.localizedCaseInsensitiveContains(mergeSearchText)
+        }
+    }
+
+    private func mergePeopleRow(_ person: Person) -> some View {
+        let isSelected = mergeSelectedIds.contains(person.id)
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if isSelected {
+                    mergeSelectedIds.remove(person.id)
+                } else {
+                    mergeSelectedIds.insert(person.id)
+                }
+            }
+        }) {
+            HStack(spacing: 12) {
+                // Selection checkbox
+                ZStack {
+                    Circle()
+                        .stroke(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .frame(width: 22, height: 22)
+                    if isSelected {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                // Thumbnail
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("\(person.faceCount) photos")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected
+                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
+                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isMerging)
+    }
+
+    private func performMerge() {
+        guard let target = selectedPerson, !mergeSelectedIds.isEmpty else { return }
+        isMerging = true
+
+        Task {
+            var allSuccess = true
+            // Merge each selected person into the target (current person)
+            for sourceId in mergeSelectedIds {
+                if let source = faceManager.people.first(where: { $0.id == sourceId }) {
+                    let success = await faceManager.mergePeople(source: source, into: target)
+                    if !success {
+                        allSuccess = false
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isMerging = false
+                if allSuccess {
+                    showMergeSheet = false
+                    mergeSelectedIds.removeAll()
+                    // Update selectedPerson to refreshed version
+                    if let updated = faceManager.people.first(where: { $0.id == target.id }) {
+                        selectedPerson = updated
+                    }
+                }
+            }
+        }
     }
 
     private func startPersonNameEdit() {
@@ -6250,6 +7206,23 @@ struct ContentView: View {
     private func cancelPersonNameEdit() {
         isEditingPersonName = false
         editingPersonName = selectedPerson?.name ?? ""
+    }
+
+    private func sharePersonPhotos(_ person: Person) {
+        let images = faceManager.getImagesForPerson(person)
+        let urls = images.compactMap { URL(fileURLWithPath: $0.path) }
+
+        guard !urls.isEmpty else { return }
+
+        // Get the key window to show the share picker
+        guard let window = NSApp.keyWindow else { return }
+
+        let picker = NSSharingServicePicker(items: urls)
+        // Show the picker relative to the window's content view
+        if let contentView = window.contentView {
+            let rect = CGRect(x: contentView.bounds.midX, y: contentView.bounds.maxY - 50, width: 1, height: 1)
+            picker.show(relativeTo: rect, of: contentView, preferredEdge: .minY)
+        }
     }
 
     // MARK: - Favorites Tab Content
