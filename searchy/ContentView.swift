@@ -4049,156 +4049,144 @@ struct PersonCard: View {
     @State private var isEditing = false
     @State private var editedName = ""
     @FocusState private var isNameFieldFocused: Bool
+    @Environment(\.colorScheme) var colorScheme
 
-    private let avatarSize: CGFloat = 88
-    private let cardWidth: CGFloat = 140
+    private let cardSize: CGFloat = 120
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Avatar with ring and hover effect
-            ZStack {
-                // Outer ring on hover
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: isHovered ? 3 : 0
-                    )
-                    .frame(width: avatarSize + 8, height: avatarSize + 8)
-                    .animation(.easeInOut(duration: 0.2), value: isHovered)
+        ZStack {
+            // Full bleed face image
+            imageContent
 
-                // Avatar image
-                if let image = thumbnail {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: avatarSize, height: avatarSize)
-                        .clipShape(Circle())
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white.opacity(0.2), lineWidth: 2)
-                        )
-                } else {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.2),
-                                    DesignSystem.Colors.accent.opacity(0.1)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: avatarSize, height: avatarSize)
-                        .overlay(
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 36, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.accent.opacity(0.5))
-                        )
-                }
+            // Bottom gradient with name
+            VStack {
+                Spacer()
+                nameOverlay
+            }
 
-                // Photo count badge
-                VStack {
+            // Top right - photo count badge
+            VStack {
+                HStack {
                     Spacer()
+                    photoBadge
+                }
+                Spacer()
+            }
+
+            // Edit button on hover
+            if isHovered && !isEditing {
+                VStack {
                     HStack {
+                        editButton
                         Spacer()
-                        Text("\(person.faceCount)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(DesignSystem.Colors.accent)
-                                    .shadow(color: Color.black.opacity(0.2), radius: 2, y: 1)
-                            )
                     }
-                }
-                .frame(width: avatarSize + 8, height: avatarSize + 8)
-            }
-            .onAppear { loadThumbnail() }
-            .scaleEffect(isHovered ? 1.05 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
-
-            // Name with inline editing
-            VStack(spacing: 4) {
-                if isEditing {
-                    TextField("Name", text: $editedName)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(DesignSystem.Colors.tertiaryBackground)
-                        )
-                        .focused($isNameFieldFocused)
-                        .onSubmit { commitRename() }
-                        .onExitCommand { cancelRename() }
-                } else {
-                    HStack(spacing: 4) {
-                        Text(person.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) { startEditing() }
-
-                        if isHovered {
-                            Button(action: { startEditing() }) {
-                                Image(systemName: "pencil.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(DesignSystem.Colors.accent)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
+                    Spacer()
                 }
             }
-            .frame(height: 24)
         }
-        .frame(width: cardWidth)
-        .padding(.vertical, 12)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(
-                    color: Color.black.opacity(isHovered ? 0.12 : 0.06),
-                    radius: isHovered ? 12 : 6,
-                    y: isHovered ? 6 : 3
-                )
+        .frame(width: cardSize, height: cardSize)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
+            y: isHovered ? 6 : 3
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    isHovered ? DesignSystem.Colors.accent.opacity(0.3) : Color.clear,
-                    lineWidth: 1
-                )
-        )
-        .contentShape(Rectangle())
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
         .onTapGesture {
             if !isEditing {
                 onSelect?()
             }
         }
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isHovered = hovering
+        .onAppear { loadThumbnail() }
+    }
+
+    private var imageContent: some View {
+        Group {
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: cardSize, height: cardSize)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
+                    )
             }
         }
     }
 
+    private var nameOverlay: some View {
+        Group {
+            if isEditing {
+                TextField("Name", text: $editedName)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.7))
+                    .focused($isNameFieldFocused)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { cancelRename() }
+            } else {
+                Text(person.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.clear, Color.black.opacity(0.6)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .onTapGesture(count: 2) { startEditing() }
+            }
+        }
+    }
+
+    private var photoBadge: some View {
+        Text("\(person.faceCount)")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.black.opacity(0.5)))
+            .padding(6)
+    }
+
+    private var editButton: some View {
+        Button(action: { startEditing() }) {
+            Image(systemName: "pencil")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.black.opacity(0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(6)
+        .transition(.opacity)
+    }
+
     private func loadThumbnail() {
         guard let path = person.thumbnailPath else { return }
-        let size = Int(avatarSize) * 2  // 2x for retina
+        let size = Int(cardSize) * 2
         if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: size) {
             self.thumbnail = cached
             return
@@ -5949,7 +5937,7 @@ struct ContentView: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(faceManager.isScanning)
             }
-            .padding(.bottom, DesignSystem.Spacing.md)
+            .padding(.bottom, DesignSystem.Spacing.lg)
             .onAppear {
                 faceManager.refreshNewImagesCount()
             }
@@ -5961,7 +5949,7 @@ struct ContentView: View {
                         // Animated face icon
                         ZStack {
                             Circle()
-                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
                                 .frame(width: 44, height: 44)
                             Image(systemName: "faceid")
                                 .font(.system(size: 20, weight: .medium))
@@ -5989,7 +5977,7 @@ struct ContentView: View {
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(DesignSystem.Colors.tertiaryBackground)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
                                 .frame(height: 6)
 
                             RoundedRectangle(cornerRadius: 4)
@@ -6009,8 +5997,12 @@ struct ContentView: View {
                 .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(DesignSystem.Colors.secondaryBackground)
-                        .shadow(color: Color.black.opacity(0.05), radius: 8, y: 2)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03))
+                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.05), radius: 8, y: 2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.clear, lineWidth: 1)
                 )
                 .padding(.bottom, DesignSystem.Spacing.lg)
             }
@@ -6029,8 +6021,8 @@ struct ContentView: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        DesignSystem.Colors.accent.opacity(0.15),
-                                        DesignSystem.Colors.accent.opacity(0.05)
+                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.25 : 0.15),
+                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.1 : 0.05)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -6040,7 +6032,7 @@ struct ContentView: View {
 
                         Image(systemName: "person.2.crop.square.stack")
                             .font(.system(size: 48, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                            .foregroundColor(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.8 : 0.7))
                     }
 
                     VStack(spacing: 8) {
@@ -6093,8 +6085,8 @@ struct ContentView: View {
                 // People grid
                 ScrollView {
                     LazyVGrid(columns: [
-                        GridItem(.adaptive(minimum: 140, maximum: 160), spacing: 20)
-                    ], spacing: 20) {
+                        GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 12)
+                    ], spacing: 14) {
                         ForEach(faceManager.people) { person in
                             PersonCard(
                                 person: person,
@@ -6111,7 +6103,8 @@ struct ContentView: View {
                             )
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
             }
         }
@@ -6139,7 +6132,7 @@ struct ContentView: View {
                         .frame(width: 32, height: 32)
                         .background(
                             Circle()
-                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -6155,7 +6148,7 @@ struct ContentView: View {
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(DesignSystem.Colors.tertiaryBackground)
+                                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
                             )
                             .focused($personNameFieldFocused)
                             .onSubmit { commitPersonNameEdit() }
@@ -6191,7 +6184,7 @@ struct ContentView: View {
                     .padding(.vertical, 5)
                     .background(
                         Capsule()
-                            .fill(DesignSystem.Colors.tertiaryBackground)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
                     )
                 }
             }
