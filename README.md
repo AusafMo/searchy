@@ -336,6 +336,45 @@ Options:
 
 ---
 
+## Vision: A Proper Mac Photo Manager
+
+macOS photo management is surprisingly lacking. Apple Photos is bloated and locks you into iCloud. Professional tools like Lightroom are subscription-based editors, not managers. There's no lightweight, native gallery app—the equivalent of a phone's gallery app—for Mac.
+
+**The gap we're filling:**
+
+| App | Problem |
+|-----|---------|
+| Apple Photos | Wants to own/import your files, pushes iCloud |
+| Lightroom | $10/mo subscription, primarily an editor |
+| Photo Mechanic | $139, dated UI, no AI |
+| Finder | It's... Finder |
+
+Searchy aims to become the **native macOS media manager** that doesn't exist—with AI superpowers.
+
+**Design principles:**
+- **Proxy-based** — Your files stay exactly where they are. We're a lens, not a file manager.
+- **Non-destructive** — Albums, tags, ratings are metadata in our database. Original files never touched.
+- **Symlink exports** — Want a physical folder for an album? We create symlinks. Delete the album? Originals are safe.
+- **AI-first** — Semantic search, face grouping, OCR, smart collections. Find photos without manual tagging.
+
+**Planned features:**
+
+| Feature | Description |
+|---------|-------------|
+| Albums & Collections | Virtual organization, multiple albums per image |
+| Tags & Ratings | Color tags, star ratings, flags |
+| Smart Albums | Auto-populated based on rules (faces, dates, content) |
+| Timeline View | Browse by date with EXIF data |
+| Map View | Browse by location (GPS from EXIF) |
+| Metadata Panel | View/edit EXIF, IPTC, XMP |
+| Quick Look Integration | Spacebar preview like Finder |
+| Import Workflow | Watch folders, camera import |
+| Trash & Recovery | Safe deletion with undo |
+
+**The pitch:** A native macOS photo browser with AI built-in. No subscription, no cloud lock-in, no importing. Point at your folders and go.
+
+---
+
 ## Security & Privacy
 
 Searchy runs entirely on your device. No cloud, no telemetry, no external requests after initial model download. This section explains our security decisions transparently—including what we deliberately chose *not* to implement.
