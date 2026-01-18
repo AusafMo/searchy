@@ -4042,64 +4042,163 @@ struct ResultCardView: View {
 // MARK: - Person Card for Face Recognition
 struct PersonCard: View {
     let person: Person
+    var onRename: ((String) -> Void)?
+    var onSelect: (() -> Void)?
     @State private var thumbnail: NSImage?
+    @State private var isHovered = false
+    @State private var isEditing = false
+    @State private var editedName = ""
+    @FocusState private var isNameFieldFocused: Bool
 
-    private let thumbnailSize = 100
+    private let avatarSize: CGFloat = 88
+    private let cardWidth: CGFloat = 140
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Face thumbnail
+        VStack(spacing: 12) {
+            // Avatar with ring and hover effect
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(DesignSystem.Colors.secondaryBackground)
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, y: 2)
+                // Outer ring on hover
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: isHovered ? 3 : 0
+                    )
+                    .frame(width: avatarSize + 8, height: avatarSize + 8)
+                    .animation(.easeInOut(duration: 0.2), value: isHovered)
 
+                // Avatar image
                 if let image = thumbnail {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
+                        .frame(width: avatarSize, height: avatarSize)
                         .clipShape(Circle())
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.2), lineWidth: 2)
+                        )
                 } else {
                     Circle()
-                        .fill(DesignSystem.Colors.accent.opacity(0.1))
-                        .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    DesignSystem.Colors.accent.opacity(0.2),
+                                    DesignSystem.Colors.accent.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: avatarSize, height: avatarSize)
                         .overlay(
                             Image(systemName: "person.fill")
-                                .font(.system(size: 40))
+                                .font(.system(size: 36, weight: .medium))
                                 .foregroundColor(DesignSystem.Colors.accent.opacity(0.5))
                         )
                 }
-            }
-            .frame(width: 120, height: 120)
-            .onAppear {
-                loadThumbnail()
-            }
 
-            // Person name and count
-            VStack(spacing: 2) {
-                Text(person.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-                    .lineLimit(1)
-
-                Text("\(person.faceCount) photos")
-                    .font(.system(size: 11))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                // Photo count badge
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text("\(person.faceCount)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(DesignSystem.Colors.accent)
+                                    .shadow(color: Color.black.opacity(0.2), radius: 2, y: 1)
+                            )
+                    }
+                }
+                .frame(width: avatarSize + 8, height: avatarSize + 8)
             }
+            .onAppear { loadThumbnail() }
+            .scaleEffect(isHovered ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+
+            // Name with inline editing
+            VStack(spacing: 4) {
+                if isEditing {
+                    TextField("Name", text: $editedName)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(DesignSystem.Colors.tertiaryBackground)
+                        )
+                        .focused($isNameFieldFocused)
+                        .onSubmit { commitRename() }
+                        .onExitCommand { cancelRename() }
+                } else {
+                    HStack(spacing: 4) {
+                        Text(person.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .lineLimit(1)
+                            .onTapGesture(count: 2) { startEditing() }
+
+                        if isHovered {
+                            Button(action: { startEditing() }) {
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
+                }
+            }
+            .frame(height: 24)
         }
-        .padding(8)
+        .frame(width: cardWidth)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.05), radius: 8, y: 4)
+                .shadow(
+                    color: Color.black.opacity(isHovered ? 0.12 : 0.06),
+                    radius: isHovered ? 12 : 6,
+                    y: isHovered ? 6 : 3
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    isHovered ? DesignSystem.Colors.accent.opacity(0.3) : Color.clear,
+                    lineWidth: 1
+                )
         )
         .contentShape(Rectangle())
+        .onTapGesture {
+            if !isEditing {
+                onSelect?()
+            }
+        }
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHovered = hovering
+            }
+        }
     }
 
     private func loadThumbnail() {
         guard let path = person.thumbnailPath else { return }
-        let size = thumbnailSize * 2  // 2x for retina
+        let size = Int(avatarSize) * 2  // 2x for retina
         if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: size) {
             self.thumbnail = cached
             return
@@ -4107,6 +4206,27 @@ struct PersonCard: View {
         ThumbnailService.shared.loadThumbnail(for: path, maxSize: size) { thumb in
             self.thumbnail = thumb
         }
+    }
+
+    private func startEditing() {
+        editedName = person.name
+        isEditing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            isNameFieldFocused = true
+        }
+    }
+
+    private func commitRename() {
+        let trimmed = editedName.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty && trimmed != person.name {
+            onRename?(trimmed)
+        }
+        isEditing = false
+    }
+
+    private func cancelRename() {
+        isEditing = false
+        editedName = person.name
     }
 }
 
@@ -5506,6 +5626,52 @@ class FaceManager: ObservableObject {
             await checkForNewImages()
         }
     }
+
+    /// Rename a person with a custom name
+    func renamePerson(_ person: Person, to newName: String) async -> Bool {
+        // Build URL with query parameters
+        var components = URLComponents(string: "\(baseURL)/face-rename")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "name", value: newName),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Rename response: \(json)")
+                if let status = json["status"] as? String, status == "success" {
+                    // Update local state - replace entire element to trigger SwiftUI update
+                    await MainActor.run {
+                        self.objectWillChange.send()
+                        if let index = self.people.firstIndex(where: { $0.id == person.id }) {
+                            var updatedPerson = self.people[index]
+                            updatedPerson.name = newName
+                            self.people[index] = updatedPerson
+                            print("Updated person at index \(index) to name: \(newName)")
+                        } else {
+                            print("Person not found in people array: \(person.id)")
+                        }
+                    }
+                    return true
+                } else if let error = json["error"] as? String, error.contains("not found") {
+                    // Cluster IDs may have changed - reload clusters
+                    print("Cluster not found, reloading clusters from API...")
+                    await loadClustersFromAPI()
+                } else {
+                    print("Rename failed - status not success: \(json)")
+                }
+            }
+        } catch {
+            print("Failed to rename person: \(error)")
+        }
+        return false
+    }
 }
 
 struct ContentView: View {
@@ -5790,15 +5956,62 @@ struct ContentView: View {
 
             // Scanning progress
             if faceManager.isScanning {
-                VStack(spacing: 12) {
-                    ProgressView(value: faceManager.scanPercentage)
-                        .progressViewStyle(LinearProgressViewStyle())
-                        .frame(height: 4)
+                VStack(spacing: 16) {
+                    HStack(spacing: 12) {
+                        // Animated face icon
+                        ZStack {
+                            Circle()
+                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "faceid")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.accent)
+                        }
 
-                    Text(faceManager.scanProgress)
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Scanning for faces...")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                            Text(faceManager.scanProgress)
+                                .font(.system(size: 11))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Text("\(Int(faceManager.scanPercentage * 100))%")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                    }
+
+                    // Modern progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(DesignSystem.Colors.tertiaryBackground)
+                                .frame(height: 6)
+
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geometry.size.width * faceManager.scanPercentage, height: 6)
+                                .animation(.easeInOut(duration: 0.3), value: faceManager.scanPercentage)
+                        }
+                    }
+                    .frame(height: 6)
                 }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(DesignSystem.Colors.secondaryBackground)
+                        .shadow(color: Color.black.opacity(0.05), radius: 8, y: 2)
+                )
                 .padding(.bottom, DesignSystem.Spacing.lg)
             }
 
@@ -5806,40 +6019,67 @@ struct ContentView: View {
             if selectedPerson != nil {
                 personDetailView
             } else if faceManager.people.isEmpty && !faceManager.isScanning {
-                // Empty state
-                VStack(spacing: DesignSystem.Spacing.lg) {
+                // Empty state - modern card design
+                VStack(spacing: 24) {
                     Spacer()
 
-                    Image(systemName: "person.2.circle")
-                        .font(.system(size: 64, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    // Icon with gradient background
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        DesignSystem.Colors.accent.opacity(0.15),
+                                        DesignSystem.Colors.accent.opacity(0.05)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 120)
 
-                    Text("Face Recognition")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        Image(systemName: "person.2.crop.square.stack")
+                            .font(.system(size: 48, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                    }
 
-                    Text(faceManager.hasScannedBefore
-                         ? "No faces found in your photos.\nTry scanning more images."
-                         : "Scan your photos to automatically\ndetect and group people.")
-                        .font(DesignSystem.Typography.body)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                        .multilineTextAlignment(.center)
+                    VStack(spacing: 8) {
+                        Text("Face Recognition")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+
+                        Text(faceManager.hasScannedBefore
+                             ? "No faces found in your photos.\nTry scanning more images."
+                             : "Find and group people in your photos\nusing AI-powered face detection.")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+                    }
 
                     if !faceManager.hasScannedBefore {
                         Button(action: {
                             faceManager.scanForFaces()
                         }) {
                             HStack(spacing: 8) {
-                                Image(systemName: "magnifyingglass")
-                                Text("Scan for Faces")
+                                Image(systemName: "faceid")
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("Start Scanning")
+                                    .font(.system(size: 14, weight: .semibold))
                             }
-                            .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
                             .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(DesignSystem.Colors.accent)
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, y: 4)
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -5853,15 +6093,22 @@ struct ContentView: View {
                 // People grid
                 ScrollView {
                     LazyVGrid(columns: [
-                        GridItem(.adaptive(minimum: 120, maximum: 150), spacing: 16)
-                    ], spacing: 16) {
+                        GridItem(.adaptive(minimum: 140, maximum: 160), spacing: 20)
+                    ], spacing: 20) {
                         ForEach(faceManager.people) { person in
-                            PersonCard(person: person)
-                                .onTapGesture {
+                            PersonCard(
+                                person: person,
+                                onRename: { newName in
+                                    Task {
+                                        await faceManager.renamePerson(person, to: newName)
+                                    }
+                                },
+                                onSelect: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         selectedPerson = person
                                     }
                                 }
+                            )
                         }
                     }
                     .padding(.top, 4)
@@ -5871,58 +6118,145 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @State private var isEditingPersonName = false
+    @State private var editingPersonName = ""
+    @FocusState private var personNameFieldFocused: Bool
+
     private var personDetailView: some View {
         VStack(spacing: 0) {
-            // Back button and person info
-            HStack {
+            // Header with back button, name, and photo count
+            HStack(alignment: .center, spacing: 12) {
+                // Back button
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedPerson = nil
+                        isEditingPersonName = false
                     }
                 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Back")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(DesignSystem.Colors.accent)
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
 
-                Spacer()
-
                 if let person = selectedPerson {
-                    Text("\(person.faceCount) photos")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    // Person name (editable)
+                    if isEditingPersonName {
+                        TextField("Name", text: $editingPersonName)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(DesignSystem.Colors.tertiaryBackground)
+                            )
+                            .focused($personNameFieldFocused)
+                            .onSubmit { commitPersonNameEdit() }
+                            .onExitCommand { cancelPersonNameEdit() }
+                            .frame(maxWidth: 200)
+                    } else {
+                        HStack(spacing: 6) {
+                            Text(person.name)
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                                .lineLimit(1)
+
+                            Button(action: { startPersonNameEdit() }) {
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+
+                    Spacer()
+
+                    // Photo count badge
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 12))
+                        Text("\(person.faceCount) photos")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.tertiaryBackground)
+                    )
                 }
             }
-            .padding(.bottom, DesignSystem.Spacing.md)
+            .padding(.bottom, DesignSystem.Spacing.lg)
 
             // Person's photos grid
             if let person = selectedPerson {
                 let images = faceManager.getImagesForPerson(person)
                 if images.isEmpty {
-                    VStack {
+                    VStack(spacing: 16) {
                         Spacer()
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 48, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
                         Text("No photos available")
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundColor(DesignSystem.Colors.secondaryText)
                         Spacer()
                     }
                 } else {
                     ScrollView {
                         LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 12)
-                        ], spacing: 12) {
+                            GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)
+                        ], spacing: 16) {
                             ForEach(images) { result in
                                 ImageCard(result: result, onFindSimilar: { _ in })
                             }
+                        }
+                        .padding(.bottom, 20)
+                    }
+                }
+            }
+        }
+    }
+
+    private func startPersonNameEdit() {
+        guard let person = selectedPerson else { return }
+        editingPersonName = person.name
+        isEditingPersonName = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            personNameFieldFocused = true
+        }
+    }
+
+    private func commitPersonNameEdit() {
+        let trimmed = editingPersonName.trimmingCharacters(in: .whitespaces)
+        if let person = selectedPerson, !trimmed.isEmpty && trimmed != person.name {
+            Task {
+                let success = await faceManager.renamePerson(person, to: trimmed)
+                if success {
+                    // Update local selectedPerson reference
+                    await MainActor.run {
+                        if let updated = faceManager.people.first(where: { $0.id == person.id }) {
+                            selectedPerson = updated
                         }
                     }
                 }
             }
         }
+        isEditingPersonName = false
+    }
+
+    private func cancelPersonNameEdit() {
+        isEditingPersonName = false
+        editingPersonName = selectedPerson?.name ?? ""
     }
 
     // MARK: - Favorites Tab Content

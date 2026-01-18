@@ -941,6 +941,21 @@ def get_face_clusters(data_dir: str = "/Users/ausaf/Library/Application Support/
         return {"error": str(e)}
 
 
+@app.post("/face-rename")
+def rename_face_cluster(
+    cluster_id: str,
+    name: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Rename a face cluster with a custom name."""
+    try:
+        face_service = get_face_service(data_dir)
+        return face_service.rename_cluster(cluster_id, name)
+    except Exception as e:
+        logger.error(f"Error renaming cluster: {e}")
+        return {"error": str(e)}
+
+
 @app.get("/face-new-count")
 def get_new_face_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
     """Get count of images not yet scanned for faces."""
