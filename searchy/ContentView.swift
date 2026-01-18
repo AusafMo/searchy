@@ -2229,6 +2229,8 @@ struct MasonryImageCard: View {
     let result: SearchResult
     var showSimilarity: Bool = false
     var onFindSimilar: ((String) -> Void)? = nil
+    var onHoverStart: ((SearchResult) -> Void)? = nil
+    var onHoverEnd: (() -> Void)? = nil
 
     @State private var isFavorite: Bool = false
     @State private var isHovered = false
@@ -2280,7 +2282,14 @@ struct MasonryImageCard: View {
         )
         .scaleEffect(isHovered ? 1.02 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                onHoverStart?(result)
+            } else {
+                onHoverEnd?()
+            }
+        }
         .onTapGesture(count: 2) { handleCopy() }
         .contextMenu { contextMenuContent }
         .onAppear {
@@ -2356,6 +2365,16 @@ struct MasonryImageCard: View {
             Spacer()
             HStack(spacing: 8) {
                 // Quick actions
+                Button(action: { openInPreview() }) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Open in Preview")
+
                 Button(action: { openInFinder() }) {
                     Image(systemName: "folder")
                         .font(.system(size: 12))
@@ -2364,6 +2383,7 @@ struct MasonryImageCard: View {
                         .background(Circle().fill(Color.black.opacity(0.5)))
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Show in Finder")
 
                 if onFindSimilar != nil {
                     Button(action: { onFindSimilar?(result.path) }) {
@@ -2374,6 +2394,7 @@ struct MasonryImageCard: View {
                             .background(Circle().fill(Color.black.opacity(0.5)))
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .help("Find Similar")
                 }
 
                 Button(action: { handleCopy() }) {
@@ -2384,6 +2405,7 @@ struct MasonryImageCard: View {
                         .background(Circle().fill(Color.black.opacity(0.5)))
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Copy")
             }
             .padding(.bottom, 36)
         }
@@ -2407,6 +2429,9 @@ struct MasonryImageCard: View {
 
     @ViewBuilder
     private var contextMenuContent: some View {
+        Button(action: { openInPreview() }) {
+            Label("Open in Preview", systemImage: "eye")
+        }
         Button(action: { handleCopy() }) {
             Label("Copy Image", systemImage: "doc.on.doc")
         }
@@ -2468,7 +2493,404 @@ struct MasonryImageCard: View {
     private func openInFinder() {
         NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
     }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
 }
+
+// MARK: - Preview Panel (Maccy-style)
+struct PreviewPanel: View {
+    let result: SearchResult
+    let onClose: () -> Void
+
+    @State private var fullImage: NSImage?
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Image preview
+            ZStack {
+                if let image = fullImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: 300)
+                } else {
+                    Rectangle()
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                        .frame(height: 200)
+                        .overlay(ProgressView())
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.bottom, 12)
+
+            // Metadata
+            VStack(alignment: .leading, spacing: 8) {
+                // Filename
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(2)
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                // Path
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text(URL(fileURLWithPath: result.path).deletingLastPathComponent().path)
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                // Size
+                if let size = result.size {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text(formatFileSize(size))
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                // Date
+                if let dateStr = result.date, let date = ISO8601DateFormatter().date(from: dateStr) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text(date, style: .date)
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                // Similarity
+                if result.similarity < 1.0 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                        Text("\(Int(result.similarity * 100))% match")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                }
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                // Actions hint
+                Text("Double-click to copy • ⌘O to open")
+                    .font(.system(size: 10))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+            }
+
+            Spacer()
+        }
+        .padding(16)
+        .frame(width: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1), lineWidth: 1)
+        )
+        .onAppear {
+            loadFullImage()
+        }
+        .onChange(of: result.path) { _ in
+            loadFullImage()
+        }
+    }
+
+    private func loadFullImage() {
+        fullImage = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = NSImage(contentsOfFile: result.path) {
+                DispatchQueue.main.async {
+                    self.fullImage = image
+                }
+            }
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+}
+
+// MARK: - Resizable Preview Panel (shared between app and widget)
+struct ResizablePreviewPanel: View {
+    let result: SearchResult
+    @Binding var width: CGFloat
+    @Binding var isVisible: Bool
+    var style: PreviewPanelStyle = .app
+    var onFindSimilar: ((String) -> Void)? = nil
+
+    enum PreviewPanelStyle {
+        case app      // For main app - solid background
+        case widget   // For spotlight widget - translucent
+    }
+
+    @State private var fullImage: NSImage?
+    @State private var dragStartWidth: CGFloat = 0
+    @State private var isFavorite: Bool = false
+    @State private var showCopied: Bool = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Resize handle (left edge)
+            resizeHandle
+
+            // Content
+            VStack(alignment: .leading, spacing: 12) {
+                // Header with close button
+                HStack {
+                    Text("Preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(style == .widget ? .white.opacity(0.6) : DesignSystem.Colors.secondaryText)
+                    Spacer()
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            isVisible = false
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(style == .widget ? .white.opacity(0.4) : DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Image preview
+                ZStack {
+                    if let image = fullImage {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: 280)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05)))
+                            .frame(height: 150)
+                            .overlay(ProgressView())
+                    }
+                }
+
+                // Metadata
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(style == .widget ? .white : DesignSystem.Colors.primaryText)
+                        .lineLimit(2)
+
+                    Text(URL(fileURLWithPath: result.path).deletingLastPathComponent().path)
+                        .font(.system(size: 10))
+                        .foregroundColor(style == .widget ? .white.opacity(0.5) : DesignSystem.Colors.tertiaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    HStack(spacing: 12) {
+                        if let size = result.size {
+                            Label(formatFileSize(size), systemImage: "doc")
+                                .font(.system(size: 10))
+                                .foregroundColor(style == .widget ? .white.opacity(0.5) : DesignSystem.Colors.secondaryText)
+                        }
+
+                        if result.similarity < 1.0 {
+                            Label("\(Int(result.similarity * 100))%", systemImage: "sparkle")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(style == .widget ? .cyan : DesignSystem.Colors.accent)
+                        }
+                    }
+                }
+
+                Divider()
+                    .opacity(0.3)
+
+                // Quick actions
+                quickActionsSection
+
+                Spacer()
+            }
+            .padding(12)
+        }
+        .frame(width: width)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(style == .widget ?
+                    AnyShapeStyle(.ultraThinMaterial.opacity(0.6)) :
+                    AnyShapeStyle(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1)), lineWidth: 1)
+        )
+        .onAppear {
+            loadFullImage()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+        .onChange(of: result.path) { _, _ in
+            loadFullImage()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+    }
+
+    private var buttonBackground: Color {
+        style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+    }
+
+    private var primaryTextColor: Color {
+        style == .widget ? .white.opacity(0.8) : DesignSystem.Colors.primaryText
+    }
+
+    @ViewBuilder
+    private var quickActionsSection: some View {
+        VStack(spacing: 8) {
+            if showCopied {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Copied!")
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Capsule().fill(Color.green))
+            }
+
+            actionButton(icon: "doc.on.doc", title: "Copy Image", action: copyImage)
+            actionButton(icon: "eye", title: "Open in Preview", action: openInPreview)
+            actionButton(icon: "folder", title: "Show in Finder", action: openInFinder)
+
+            if onFindSimilar != nil {
+                actionButton(icon: "sparkle.magnifyingglass", title: "Find Similar", color: style == .widget ? .cyan : DesignSystem.Colors.accent) {
+                    onFindSimilar?(result.path)
+                }
+            }
+
+            actionButton(icon: isFavorite ? "heart.fill" : "heart", title: isFavorite ? "Remove Favorite" : "Add to Favorites", color: isFavorite ? .red : primaryTextColor, action: toggleFavorite)
+        }
+    }
+
+    private func actionButton(icon: String, title: String, color: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                Text(title)
+                Spacer()
+            }
+            .font(.system(size: 11))
+            .foregroundColor(color ?? primaryTextColor)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(buttonBackground))
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var resizeHandle: some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.01)) // Nearly invisible but captures events
+            .frame(width: 12)
+            .overlay(
+                Rectangle()
+                    .fill(style == .widget ? Color.white.opacity(0.3) : DesignSystem.Colors.tertiaryText.opacity(0.5))
+                    .frame(width: 3, height: 30)
+                    .clipShape(Capsule())
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        if dragStartWidth == 0 {
+                            dragStartWidth = width
+                        }
+                        let newWidth = dragStartWidth - value.translation.width
+                        width = max(200, min(450, newWidth))
+                    }
+                    .onEnded { _ in
+                        dragStartWidth = 0
+                    }
+            )
+    }
+
+    private func loadFullImage() {
+        fullImage = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = NSImage(contentsOfFile: result.path) {
+                DispatchQueue.main.async {
+                    self.fullImage = image
+                }
+            }
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
+
+    private func openInFinder() {
+        NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+    }
+
+    private func copyImage() {
+        guard let image = NSImage(contentsOfFile: result.path) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+
+        showCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopied = false
+        }
+    }
+
+    private func toggleFavorite() {
+        isFavorite.toggle()
+        FavoritesManager.shared.toggleFavorite(result.path)
+    }
+}
+
+// Legacy alias for compatibility
+typealias SpotlightPreviewPanel = ResizablePreviewPanel
 
 // MARK: - Action Button Component
 struct ActionButton: View {
@@ -2529,6 +2951,10 @@ struct SpotlightSearchView: View {
     @State private var pastedImage: NSImage? = nil
     @State private var isDropTargeted = false
     @State private var keyMonitor: Any? = nil
+    @State private var showPreviewPanel = false
+    @State private var previewTimer: Timer? = nil
+    @State private var previewPanelWidth: CGFloat = 280
+    @State private var isResizingPanel = false
     let previousApp: NSRunningApplication?
     @Environment(\.colorScheme) var colorScheme
     @FocusState private var isSearchFocused: Bool
@@ -2554,6 +2980,15 @@ struct SpotlightSearchView: View {
             } else {
                 self.recentImages = images
                 self.isLoadingRecent = false
+            }
+        }
+    }
+
+    private func startPreviewTimer() {
+        previewTimer?.invalidate()
+        previewTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            withAnimation(.easeOut(duration: 0.15)) {
+                showPreviewPanel = true
             }
         }
     }
@@ -2693,7 +3128,7 @@ struct SpotlightSearchView: View {
                 }
                 .padding(.horizontal, DesignSystem.Spacing.md)
 
-                // Results area
+                // Results area with optional preview panel
                 if isLoadingRecent && recentImages.isEmpty && !hasPerformedSearch {
                     // Show loading indicator while waiting for recent images
                     VStack(spacing: DesignSystem.Spacing.md) {
@@ -2705,40 +3140,60 @@ struct SpotlightSearchView: View {
                     }
                     .padding(DesignSystem.Spacing.xxl)
                 } else if !displayResults.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                ForEach(Array(displayResults.enumerated()), id: \.element.id) { index, result in
-                                    SpotlightResultRow(
-                                        result: result,
-                                        isSelected: index == selectedIndex,
-                                        onSelect: {
-                                            closeWindow()
+                    HStack(alignment: .top, spacing: 8) {
+                        // Results list - takes priority in layout
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical, showsIndicators: true) {
+                                VStack(spacing: DesignSystem.Spacing.sm) {
+                                    ForEach(Array(displayResults.enumerated()), id: \.element.id) { index, result in
+                                        SpotlightResultRow(
+                                            result: result,
+                                            isSelected: index == selectedIndex,
+                                            onSelect: {
+                                                closeWindow()
+                                            }
+                                        )
+                                        .id(index)
+                                        .onTapGesture {
+                                            selectedIndex = index
                                         }
-                                    )
-                                    .id(index)
-                                    .onTapGesture {
-                                        selectedIndex = index
                                     }
                                 }
+                                .padding(DesignSystem.Spacing.sm)
+                                .animation(nil, value: selectedIndex)
                             }
-                            .padding(DesignSystem.Spacing.sm)
+                            .frame(minWidth: 320, maxHeight: 400)
                             .animation(nil, value: selectedIndex)
+                            .background(resultsBackground)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+                                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                            )
+                            .padding(.leading, DesignSystem.Spacing.md)
+                            .padding(.top, DesignSystem.Spacing.sm)
+                            .onChange(of: selectedIndex) { oldValue, newValue in
+                                // Scroll instantly with no animation
+                                proxy.scrollTo(newValue, anchor: .center)
+                                // Start preview timer
+                                startPreviewTimer()
+                            }
                         }
-                        .frame(maxHeight: 400)
-                        .animation(nil, value: selectedIndex)
-                        .background(resultsBackground)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
-                                .stroke(Color.black.opacity(0.1), lineWidth: 1)
-                        )
-                        .padding(.horizontal, DesignSystem.Spacing.md)
-                        .padding(.top, DesignSystem.Spacing.sm)
-                        .onChange(of: selectedIndex) { oldValue, newValue in
-                            // Scroll instantly with no animation
-                            proxy.scrollTo(newValue, anchor: .center)
+                        .layoutPriority(1)
+
+                        // Preview panel (appears after 500ms dwell)
+                        if showPreviewPanel && selectedIndex < displayResults.count {
+                            ResizablePreviewPanel(
+                                result: displayResults[selectedIndex],
+                                width: $previewPanelWidth,
+                                isVisible: $showPreviewPanel,
+                                style: .widget
+                            )
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .padding(.top, DesignSystem.Spacing.sm)
+                            .padding(.trailing, DesignSystem.Spacing.md)
                         }
                     }
+                    .padding(.trailing, showPreviewPanel ? 0 : DesignSystem.Spacing.md)
                 }
 
                 Spacer()
@@ -3830,6 +4285,16 @@ struct ImageCard: View {
 
     private var hoverButtons: some View {
         HStack(spacing: 6) {
+            Button(action: openInPreview) {
+                Image(systemName: "eye")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Open in Preview")
+
             Button(action: handleCopy) {
                 Image(systemName: "doc.on.doc")
                     .font(.system(size: 11, weight: .medium))
@@ -3884,6 +4349,9 @@ struct ImageCard: View {
 
     @ViewBuilder
     private var contextMenuContent: some View {
+        Button(action: openInPreview) {
+            Label("Open in Preview", systemImage: "eye")
+        }
         Button(action: { copyImage(path: result.path) }) {
             Label("Copy Image", systemImage: "doc.on.doc")
         }
@@ -3894,10 +4362,6 @@ struct ImageCard: View {
             Button(action: { onFindSimilar?(result.path) }) {
                 Label("Find Similar", systemImage: "sparkle.magnifyingglass")
             }
-        }
-        Divider()
-        Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: result.path)) }) {
-            Label("Open in Preview", systemImage: "eye")
         }
     }
 
@@ -3914,6 +4378,14 @@ struct ImageCard: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([image])
         }
+    }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
     }
 }
 
@@ -5074,6 +5546,10 @@ struct ContentView: View {
     @State private var pastedImage: NSImage? = nil
     @State private var isDropTargeted = false
     @State private var keyMonitor: Any? = nil
+    @State private var previewResult: SearchResult? = nil
+    @State private var previewTimer: Timer? = nil
+    @State private var showPreviewPanel = false
+    @State private var previewPanelWidth: CGFloat = 300
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -5918,33 +6394,69 @@ struct ContentView: View {
 
             errorView
 
-            // Results area
-            Group {
-                if searchManager.isSearching {
-                    VStack {
-                        Spacer()
-                        ProgressView()
-                        Text("Searching...")
-                            .font(.system(size: 13))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                            .padding(.top, 8)
-                        Spacer()
+            // Results area with optional preview panel
+            HStack(alignment: .top, spacing: 16) {
+                // Results
+                Group {
+                    if searchManager.isSearching {
+                        VStack {
+                            Spacer()
+                            ProgressView()
+                            Text("Searching...")
+                                .font(.system(size: 13))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .padding(.top, 8)
+                            Spacer()
+                        }
+                    } else if !searchManager.results.isEmpty {
+                        ScrollView {
+                            filteredResultsList
+                                .padding(.horizontal, DesignSystem.Spacing.xl)
+                        }
+                    } else if searchText.isEmpty {
+                        recentImagesSection
+                    } else {
+                        emptyStateView
                     }
-                } else if !searchManager.results.isEmpty {
-                    ScrollView {
-                        filteredResultsList
-                            .padding(.horizontal, DesignSystem.Spacing.xl)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Preview panel (appears after 500ms hover)
+                if showPreviewPanel, let result = previewResult {
+                    ResizablePreviewPanel(
+                        result: result,
+                        width: $previewPanelWidth,
+                        isVisible: $showPreviewPanel,
+                        style: .app
+                    )
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .onChange(of: showPreviewPanel) { _, newValue in
+                        if !newValue {
+                            previewResult = nil
+                        }
                     }
-                } else if searchText.isEmpty {
-                    recentImagesSection
-                } else {
-                    emptyStateView
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, DesignSystem.Spacing.xl)
         .padding(.top, 8)
+    }
+
+    // MARK: - Preview Hover Handling
+    private func handlePreviewHoverStart(_ result: SearchResult) {
+        previewTimer?.invalidate()
+        previewTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            withAnimation(.easeOut(duration: 0.2)) {
+                previewResult = result
+                showPreviewPanel = true
+            }
+        }
+    }
+
+    private func handlePreviewHoverEnd() {
+        previewTimer?.invalidate()
+        previewTimer = nil
+        // Keep panel visible when hovering different items - only hide when mouse leaves all results
     }
 
     // MARK: - Filtered Results
@@ -6045,7 +6557,9 @@ struct ContentView: View {
                     showSimilarity: true,
                     onFindSimilar: { path in
                         searchManager.findSimilar(imagePath: path)
-                    }
+                    },
+                    onHoverStart: handlePreviewHoverStart,
+                    onHoverEnd: handlePreviewHoverEnd
                 )
             }
         }
@@ -7176,7 +7690,9 @@ struct ContentView: View {
                             result: result,
                             onFindSimilar: { path in
                                 searchManager.findSimilar(imagePath: path)
-                            }
+                            },
+                            onHoverStart: handlePreviewHoverStart,
+                            onHoverEnd: handlePreviewHoverEnd
                         )
                     }
                     .padding(.horizontal, DesignSystem.Spacing.xl)
