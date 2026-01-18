@@ -6,6 +6,7 @@ Two-phase pipeline:
 """
 
 import os
+import json
 import pickle
 import logging
 import numpy as np
@@ -117,6 +118,7 @@ class FaceRecognitionService:
         self.faces_file = os.path.join(data_dir, "faces_index.bin")
         self.thumbnails_dir = os.path.join(data_dir, "face_thumbnails")
         self.scanned_paths_file = os.path.join(data_dir, "face_scanned_paths.bin")
+        self.cluster_names_file = os.path.join(data_dir, "cluster_names.json")
 
         # Ensure directories exist
         os.makedirs(self.thumbnails_dir, exist_ok=True)
@@ -125,6 +127,7 @@ class FaceRecognitionService:
         self.faces: List[FaceData] = []
         self.scanned_paths: set = set()
         self.clusters: List[FaceCluster] = []
+        self.custom_names: Dict[str, str] = {}  # cluster_id -> custom name
 
         # Scanning state
         self.is_scanning = False
@@ -137,6 +140,7 @@ class FaceRecognitionService:
         # Load existing data
         self._load_faces()
         self._load_scanned_paths()
+        self._load_custom_names()
 
     def _load_faces(self):
         """Load faces from disk."""
@@ -177,6 +181,49 @@ class FaceRecognitionService:
                 pickle.dump(self.scanned_paths, f)
         except Exception as e:
             logger.error(f"Error saving scanned paths: {e}")
+
+    def _load_custom_names(self):
+        """Load custom cluster names from disk."""
+        if os.path.exists(self.cluster_names_file):
+            try:
+                with open(self.cluster_names_file, 'r') as f:
+                    self.custom_names = json.load(f)
+                logger.info(f"Loaded {len(self.custom_names)} custom names")
+            except Exception as e:
+                logger.error(f"Error loading custom names: {e}")
+                self.custom_names = {}
+
+    def _save_custom_names(self):
+        """Save custom cluster names to disk."""
+        try:
+            with open(self.cluster_names_file, 'w') as f:
+                json.dump(self.custom_names, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving custom names: {e}")
+
+    def rename_cluster(self, cluster_id: str, new_name: str) -> Dict:
+        """Rename a face cluster with a custom name."""
+        # Ensure clusters are populated first
+        if not self.clusters and self.faces:
+            logger.info("Clusters not loaded, running cluster_faces first...")
+            self.cluster_faces()
+
+        # Find the cluster
+        cluster = next((c for c in self.clusters if c.cluster_id == cluster_id), None)
+        if not cluster:
+            available = [c.cluster_id for c in self.clusters[:5]]
+            logger.warning(f"Cluster {cluster_id} not found. Available clusters: {available}...")
+            return {"error": f"Cluster {cluster_id} not found"}
+
+        # Update in-memory
+        cluster.name = new_name
+        self.custom_names[cluster_id] = new_name
+
+        # Persist to disk
+        self._save_custom_names()
+
+        logger.info(f"Renamed cluster {cluster_id} to '{new_name}'")
+        return {"status": "success", "cluster_id": cluster_id, "name": new_name}
 
     def _generate_face_id(self, image_path: str, bbox: Dict) -> str:
         """Generate unique face ID from path and bounding box."""
@@ -585,9 +632,16 @@ class FaceRecognitionService:
         # Create FaceCluster objects
         self.clusters = []
         for i, (root, faces) in enumerate(clusters_dict.items()):
+            # Use first face's ID as stable cluster identifier
+            cluster_id = f"cluster_{faces[0].face_id}"
+
+            # Check for custom name, fallback to default
+            default_name = f"Person {i + 1}"
+            name = self.custom_names.get(cluster_id, default_name)
+
             cluster = FaceCluster(
-                cluster_id=f"person_{i + 1}",
-                name=f"Person {i + 1}",
+                cluster_id=cluster_id,
+                name=name,
                 faces=faces
             )
             self.clusters.append(cluster)
