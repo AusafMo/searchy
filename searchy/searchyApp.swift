@@ -96,7 +96,7 @@ class SetupManager: ObservableObject {
             try await createVirtualEnvironment(using: pythonPath)
 
             // Step 4: Install dependencies
-            await updateProgress("Installing AI dependencies (this may take a few minutes)...", step: 4)
+            await updateProgress("Installing dependencies (this may take a few minutes)...", step: 4)
             try await installDependencies()
 
             // Step 5: Verify installation
@@ -389,7 +389,7 @@ struct SetupView: View {
             Text("Welcome to Searchy")
                 .font(.system(size: 28, weight: .bold))
 
-            Text("AI-powered image search for your Mac")
+            Text("Semantic image search for your Mac")
                 .font(.system(size: 16))
                 .foregroundColor(.secondary)
 
@@ -449,7 +449,7 @@ struct SetupView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         SetupStepRow(number: 1, text: "Install Python (if needed)")
                         SetupStepRow(number: 2, text: "Create isolated environment")
-                        SetupStepRow(number: 3, text: "Download AI models (~2GB)")
+                        SetupStepRow(number: 3, text: "Download CLIP models (~2GB)")
                     }
                     .padding()
                     .background(
