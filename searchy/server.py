@@ -1105,6 +1105,126 @@ def get_hidden_clusters(
         return {"error": str(e)}
 
 
+# ============ Face Groups/Tags ============
+
+def get_groups_file(data_dir: str) -> str:
+    return os.path.join(data_dir, "cluster_groups.json")
+
+
+def load_groups_data(data_dir: str) -> dict:
+    """Load groups data including group names and cluster assignments."""
+    import json
+    filepath = get_groups_file(data_dir)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"groups": [], "assignments": {}}
+
+
+def save_groups_data(data_dir: str, data: dict):
+    """Save groups data."""
+    import json
+    filepath = get_groups_file(data_dir)
+    with open(filepath, 'w') as f:
+        json.dump(data, f)
+
+
+@app.get("/face-groups")
+def get_face_groups(
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Get all groups and their assignments."""
+    try:
+        data = load_groups_data(data_dir)
+        return data
+    except Exception as e:
+        logger.error(f"Error getting groups: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-group-create")
+def create_face_group(
+    name: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Create a new group."""
+    try:
+        data = load_groups_data(data_dir)
+        if name not in data["groups"]:
+            data["groups"].append(name)
+            save_groups_data(data_dir, data)
+        return {"status": "success", "groups": data["groups"]}
+    except Exception as e:
+        logger.error(f"Error creating group: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-group-assign")
+def assign_face_group(
+    cluster_id: str,
+    group: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Assign a cluster to a group."""
+    try:
+        data = load_groups_data(data_dir)
+        if cluster_id not in data["assignments"]:
+            data["assignments"][cluster_id] = []
+        if group not in data["assignments"][cluster_id]:
+            data["assignments"][cluster_id].append(group)
+            save_groups_data(data_dir, data)
+        return {"status": "success", "assignments": data["assignments"].get(cluster_id, [])}
+    except Exception as e:
+        logger.error(f"Error assigning group: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-group-remove")
+def remove_face_group(
+    cluster_id: str,
+    group: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Remove a cluster from a group."""
+    try:
+        data = load_groups_data(data_dir)
+        if cluster_id in data["assignments"] and group in data["assignments"][cluster_id]:
+            data["assignments"][cluster_id].remove(group)
+            if not data["assignments"][cluster_id]:
+                del data["assignments"][cluster_id]
+            save_groups_data(data_dir, data)
+        return {"status": "success", "assignments": data["assignments"].get(cluster_id, [])}
+    except Exception as e:
+        logger.error(f"Error removing group: {e}")
+        return {"error": str(e)}
+
+
+@app.delete("/face-group-delete")
+def delete_face_group(
+    name: str,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Delete a group and remove all assignments."""
+    try:
+        data = load_groups_data(data_dir)
+        if name in data["groups"]:
+            data["groups"].remove(name)
+            # Remove all assignments for this group
+            for cluster_id in list(data["assignments"].keys()):
+                if name in data["assignments"][cluster_id]:
+                    data["assignments"][cluster_id].remove(name)
+                    if not data["assignments"][cluster_id]:
+                        del data["assignments"][cluster_id]
+            save_groups_data(data_dir, data)
+        return {"status": "success", "groups": data["groups"]}
+    except Exception as e:
+        logger.error(f"Error deleting group: {e}")
+        return {"error": str(e)}
+
+
 @app.post("/face-merge")
 def merge_face_clusters(
     source_cluster_id: str,
@@ -1133,6 +1253,23 @@ def merge_face_clusters(
         return result
     except Exception as e:
         logger.error(f"Error merging clusters: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/face-verify")
+def verify_face(
+    face_id: str,
+    cluster_id: str,
+    is_correct: bool,
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+):
+    """Mark a face as verified or remove it from the cluster."""
+    try:
+        face_service = get_face_service(data_dir)
+        result = face_service.verify_face(face_id, cluster_id, is_correct)
+        return result
+    except Exception as e:
+        logger.error(f"Error verifying face: {e}")
         return {"error": str(e)}
 
 

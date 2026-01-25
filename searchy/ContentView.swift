@@ -4054,10 +4054,13 @@ struct PersonCard: View {
     @State private var isHovered = false
     @State private var isEditing = false
     @State private var editedName = ""
+    @State private var showPreview = false
+    @State private var previewWorkItem: DispatchWorkItem?
     @FocusState private var isNameFieldFocused: Bool
     @Environment(\.colorScheme) var colorScheme
 
     private let cardSize: CGFloat = 120
+    private let hoverDelay: Double = 0.5
 
     var body: some View {
         ZStack {
@@ -4119,6 +4122,17 @@ struct PersonCard: View {
                     Spacer()
                 }
             }
+
+            // Bottom right - unverified badge (only when unverified > 0)
+            if person.unverifiedCount > 0 {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        unverifiedBadge
+                    }
+                }
+            }
         }
         .frame(width: cardSize, height: cardSize)
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -4135,6 +4149,20 @@ struct PersonCard: View {
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovered = hovering
             }
+            // Handle preview with delay
+            previewWorkItem?.cancel()
+            if hovering && person.faces.count > 1 {
+                let workItem = DispatchWorkItem {
+                    withAnimation { showPreview = true }
+                }
+                previewWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + hoverDelay, execute: workItem)
+            } else {
+                withAnimation { showPreview = false }
+            }
+        }
+        .popover(isPresented: $showPreview, arrowEdge: .bottom) {
+            hoverPreviewContent
         }
         .onTapGesture {
             if !isEditing {
@@ -4220,6 +4248,42 @@ struct PersonCard: View {
             .padding(6)
     }
 
+    private var unverifiedBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 8))
+            Text("\(person.unverifiedCount)")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.orange))
+        .padding(6)
+        .padding(.bottom, 28) // Above the name overlay
+    }
+
+    private var hoverPreviewContent: some View {
+        VStack(spacing: 8) {
+            Text(person.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+
+            // Show up to 4 sample faces
+            HStack(spacing: 6) {
+                ForEach(Array(person.faces.prefix(4).enumerated()), id: \.offset) { index, face in
+                    FaceThumbnail(imagePath: face.imagePath)
+                }
+            }
+
+            Text("\(person.faces.count) photos")
+                .font(.system(size: 11))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+        }
+        .padding(12)
+        .background(DesignSystem.Colors.secondaryBackground)
+    }
+
     private var editButton: some View {
         Button(action: { startEditing() }) {
             Image(systemName: "pencil")
@@ -4277,6 +4341,357 @@ struct PersonCard: View {
     private func cancelRename() {
         isEditing = false
         editedName = person.name
+    }
+}
+
+// MARK: - Face Verification View
+struct FaceVerificationView: View {
+    let person: Person
+    @ObservedObject var faceManager: FaceManager
+    let onDismiss: () -> Void
+
+    @State private var offset: CGFloat = 0
+    @State private var isAnimating = false
+    @State private var verificationResults: [String: Bool] = [:]
+    @Environment(\.colorScheme) var colorScheme
+
+    private var facesToReview: [(id: String, thumbnailPath: String?, imagePath: String)] {
+        person.faces.compactMap { face in
+            if verificationResults[face.id.uuidString] == nil {
+                return (id: face.id.uuidString, thumbnailPath: nil, imagePath: face.imagePath)
+            }
+            return nil
+        }
+    }
+
+    private var progress: Double {
+        let total = person.faces.count
+        let reviewed = verificationResults.count
+        return total > 0 ? Double(reviewed) / Double(total) : 0
+    }
+
+    private var confirmedCount: Int {
+        verificationResults.filter { $0.value }.count
+    }
+
+    private var rejectedCount: Int {
+        verificationResults.filter { !$0.value }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerView
+            Divider()
+            if facesToReview.isEmpty {
+                completionView
+            } else {
+                swipeInterface
+            }
+        }
+        .frame(width: 500, height: 600)
+        .background(DesignSystem.Colors.secondaryBackground)
+    }
+
+    private var headerView: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review Faces")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("Reviewing \(person.name)")
+                    .font(.system(size: 13))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                Text("\(verificationResults.count)/\(person.faces.count)")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                CircularProgressView(progress: progress)
+                    .frame(width: 24, height: 24)
+            }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding()
+    }
+
+    private var completionView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundColor(.green)
+            Text("All faces reviewed!")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+            Text("\(confirmedCount) confirmed, \(rejectedCount) rejected")
+                .font(.system(size: 14))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+            Button(action: onDismiss) {
+                Text("Done")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(DesignSystem.Colors.accent))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.top, 12)
+            Spacer()
+        }
+    }
+
+    private var swipeInterface: some View {
+        VStack {
+            cardStack
+                .padding(32)
+            actionButtons
+                .padding(.bottom, 32)
+            Text("Swipe right to confirm, left to reject")
+                .font(.system(size: 12))
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                .padding(.bottom, 16)
+        }
+    }
+
+    private var cardStack: some View {
+        ZStack {
+            ForEach(Array(facesToReview.prefix(3).enumerated().reversed()), id: \.element.id) { index, face in
+                if index > 0 {
+                    FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
+                        .scaleEffect(1.0 - CGFloat(index) * 0.05)
+                        .offset(y: CGFloat(index) * 8)
+                        .opacity(1.0 - Double(index) * 0.2)
+                }
+            }
+            if let currentFace = facesToReview.first {
+                currentCardView(face: currentFace)
+            }
+        }
+    }
+
+    private func currentCardView(face: (id: String, thumbnailPath: String?, imagePath: String)) -> some View {
+        FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
+            .offset(x: offset)
+            .rotationEffect(.degrees(Double(offset / 20)))
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if !isAnimating { offset = value.translation.width }
+                    }
+                    .onEnded { value in
+                        handleSwipe(value: value, faceId: face.id)
+                    }
+            )
+            .overlay(swipeIndicators)
+    }
+
+    private var swipeIndicators: some View {
+        ZStack {
+            HStack {
+                Spacer()
+                VStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundColor(.green)
+                    Text("Confirm")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.green)
+                }
+                .padding(24)
+                .opacity(offset > 50 ? Double(min(1, (offset - 50) / 50)) : 0)
+            }
+            HStack {
+                VStack {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundColor(.red)
+                    Text("Reject")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.red)
+                }
+                .padding(24)
+                .opacity(offset < -50 ? Double(min(1, (-offset - 50) / 50)) : 0)
+                Spacer()
+            }
+        }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 40) {
+            Button(action: { if let f = facesToReview.first { swipeLeft(faceId: f.id) } }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(Circle().fill(Color.red))
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Button(action: { if let f = facesToReview.first { swipeRight(faceId: f.id) } }) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(Circle().fill(Color.green))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+
+    private func handleSwipe(value: DragGesture.Value, faceId: String) {
+        let threshold: CGFloat = 100
+        if value.translation.width > threshold {
+            swipeRight(faceId: faceId)
+        } else if value.translation.width < -threshold {
+            swipeLeft(faceId: faceId)
+        } else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { offset = 0 }
+        }
+    }
+
+    private func swipeRight(faceId: String) {
+        isAnimating = true
+        withAnimation(.easeOut(duration: 0.3)) { offset = 500 }
+        Task { await verifyFace(faceId: faceId, isCorrect: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            verificationResults[faceId] = true
+            offset = 0
+            isAnimating = false
+        }
+    }
+
+    private func swipeLeft(faceId: String) {
+        isAnimating = true
+        withAnimation(.easeOut(duration: 0.3)) { offset = -500 }
+        Task { await verifyFace(faceId: faceId, isCorrect: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            verificationResults[faceId] = false
+            offset = 0
+            isAnimating = false
+        }
+    }
+
+    private func verifyFace(faceId: String, isCorrect: Bool) async {
+        var components = URLComponents(string: "\(faceManager.baseURL)/face-verify")
+        components?.queryItems = [
+            URLQueryItem(name: "face_id", value: faceId),
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "is_correct", value: isCorrect ? "true" : "false"),
+            URLQueryItem(name: "data_dir", value: faceManager.dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await faceManager.loadClustersFromAPI()
+        } catch {
+            print("Error verifying face: \(error)")
+        }
+    }
+}
+
+// Small face thumbnail for hover preview
+struct FaceThumbnail: View {
+    let imagePath: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 50, height: 50)
+            }
+        }
+        .onAppear { loadImage() }
+    }
+
+    private func loadImage() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let nsImage = NSImage(contentsOfFile: imagePath) {
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            }
+        }
+    }
+}
+
+// Face review card for the swipe interface
+struct FaceReviewCard: View {
+    let imagePath: String
+    let thumbnailPath: String?
+    @State private var image: NSImage?
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 20)
+            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white)
+            .frame(width: 320, height: 400)
+            .shadow(color: Color.black.opacity(0.2), radius: 20, y: 10)
+            .overlay(
+                Group {
+                    if let img = image {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 300, height: 380)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                    } else {
+                        ProgressView()
+                    }
+                }
+            )
+            .onAppear { loadImage() }
+    }
+
+    private func loadImage() {
+        // Try thumbnail first, then full image
+        let pathToLoad = thumbnailPath ?? imagePath
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let nsImage = NSImage(contentsOfFile: pathToLoad) {
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            } else if thumbnailPath != nil, let nsImage = NSImage(contentsOfFile: imagePath) {
+                // Fallback to full image if thumbnail fails
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            }
+        }
+    }
+}
+
+// Circular progress indicator
+struct CircularProgressView: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut, value: progress)
+        }
     }
 }
 
@@ -5364,10 +5779,13 @@ struct FaceData: Codable, Identifiable {
     let bbox: FaceBBox
     let confidence: Double
     let thumbnail_path: String?
+    let verified: Bool?
+    let added_date: String?
 
     var id: String { face_id }
     var imagePath: String { image_path }
     var thumbnailPath: String? { thumbnail_path }
+    var isVerified: Bool { verified ?? false }
 
     struct FaceBBox: Codable {
         let x: Int
@@ -5381,11 +5799,13 @@ struct FaceCluster: Codable, Identifiable {
     let cluster_id: String
     let name: String
     let face_count: Int
+    let unverified_count: Int?
     let thumbnail_path: String?
     let faces: [FaceData]
 
     var id: String { cluster_id }
     var faceCount: Int { face_count }
+    var unverifiedCount: Int { unverified_count ?? face_count }
     var thumbnailPath: String? { thumbnail_path }
 }
 
@@ -5451,6 +5871,7 @@ struct Person: Identifiable {
     var name: String
     var faces: [DetectedFace]
     var thumbnailPath: String?
+    var unverifiedCount: Int
 
     var faceCount: Int { faces.count }
 
@@ -5460,13 +5881,15 @@ struct Person: Identifiable {
         self.name = cluster.name
         self.faces = cluster.faces.map { DetectedFace(from: $0) }
         self.thumbnailPath = cluster.thumbnail_path
+        self.unverifiedCount = cluster.unverifiedCount
     }
 
-    init(id: String, name: String, faces: [DetectedFace], thumbnailPath: String? = nil) {
+    init(id: String, name: String, faces: [DetectedFace], thumbnailPath: String? = nil, unverifiedCount: Int = 0) {
         self.id = id
         self.name = name
         self.faces = faces
         self.thumbnailPath = thumbnailPath
+        self.unverifiedCount = unverifiedCount
     }
 }
 
@@ -5484,8 +5907,8 @@ class FaceManager: ObservableObject {
     @Published var hiddenClusterIds: Set<String> = []
     @Published var showHidden: Bool = false
 
-    private let baseURL = "http://localhost:7860"
-    private let dataDir = "/Users/ausaf/Library/Application Support/searchy"
+    let baseURL = "http://localhost:7860"
+    let dataDir = "/Users/ausaf/Library/Application Support/searchy"
     private var statusPollTimer: Timer?
 
     private init() {
@@ -5493,6 +5916,7 @@ class FaceManager: ObservableObject {
         Task {
             await loadPinnedClusters()
             await loadHiddenClusters()
+            await loadGroups()
             await loadClustersFromAPI()
             await checkForNewImages()
         }
@@ -5849,6 +6273,114 @@ class FaceManager: ObservableObject {
         return hiddenClusterIds.count
     }
 
+    /// Total count of unverified faces across all people
+    var totalUnverifiedCount: Int {
+        return people.reduce(0) { $0 + $1.unverifiedCount }
+    }
+
+    // MARK: - Groups/Tags
+
+    @Published var availableGroups: [String] = []
+    @Published var groupAssignments: [String: [String]] = [:] // cluster_id -> [group names]
+    @Published var selectedGroupFilter: String? = nil
+
+    func loadGroups() async {
+        guard let url = URL(string: "\(baseURL)/face-groups?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            struct GroupsResponse: Codable {
+                let groups: [String]
+                let assignments: [String: [String]]
+            }
+            let response = try JSONDecoder().decode(GroupsResponse.self, from: data)
+            await MainActor.run {
+                self.availableGroups = response.groups
+                self.groupAssignments = response.assignments
+            }
+        } catch {
+            print("Error loading groups: \(error)")
+        }
+    }
+
+    func createGroup(_ name: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-create")
+        components?.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error creating group: \(error)")
+        }
+    }
+
+    func deleteGroup(_ name: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-delete")
+        components?.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error deleting group: \(error)")
+        }
+    }
+
+    func assignGroup(_ clusterId: String, group: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-assign")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: clusterId),
+            URLQueryItem(name: "group", value: group),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error assigning group: \(error)")
+        }
+    }
+
+    func removeGroup(_ clusterId: String, group: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-remove")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: clusterId),
+            URLQueryItem(name: "group", value: group),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error removing group: \(error)")
+        }
+    }
+
+    func getGroupsForCluster(_ clusterId: String) -> [String] {
+        return groupAssignments[clusterId] ?? []
+    }
+
     // MARK: - Merge Methods
 
     /// Merge source person into target person
@@ -6089,13 +6621,23 @@ struct ContentView: View {
     // MARK: - Faces Tab Content
 
     private var filteredPeople: [Person] {
-        let sortedList = faceManager.sortedPeople
-        if peopleSearchText.isEmpty {
-            return sortedList
+        var result = faceManager.sortedPeople
+
+        // Filter by search text
+        if !peopleSearchText.isEmpty {
+            result = result.filter {
+                $0.name.localizedCaseInsensitiveContains(peopleSearchText)
+            }
         }
-        return sortedList.filter {
-            $0.name.localizedCaseInsensitiveContains(peopleSearchText)
+
+        // Filter by group
+        if let groupFilter = faceManager.selectedGroupFilter {
+            result = result.filter {
+                faceManager.getGroupsForCluster($0.id).contains(groupFilter)
+            }
         }
+
+        return result
     }
 
     private var facesTabContent: some View {
@@ -6163,6 +6705,21 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                         .background(Capsule().fill(Color.orange))
                         .padding(.trailing, 4)
+                }
+
+                // Show unverified count badge
+                if faceManager.totalUnverifiedCount > 0 && !faceManager.isScanning {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 9))
+                        Text("\(faceManager.totalUnverifiedCount) to review")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.8)))
+                    .padding(.trailing, 4)
                 }
 
                 // Show Hidden toggle (only when there are hidden people)
@@ -6264,7 +6821,13 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
                 )
-                .padding(.bottom, DesignSystem.Spacing.md)
+                .padding(.bottom, DesignSystem.Spacing.sm)
+            }
+
+            // Group filter bar - only show when there are groups
+            if !faceManager.availableGroups.isEmpty && selectedPerson == nil {
+                groupFilterBar
+                    .padding(.bottom, DesignSystem.Spacing.md)
             }
 
             // Scanning progress
@@ -6484,6 +7047,64 @@ struct ContentView: View {
         .padding(.horizontal, DesignSystem.Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private var groupFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // All filter (no filter)
+                Button(action: {
+                    withAnimation { faceManager.selectedGroupFilter = nil }
+                }) {
+                    Text("All")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(faceManager.selectedGroupFilter == nil ? .white : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(faceManager.selectedGroupFilter == nil ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Group filters
+                ForEach(faceManager.availableGroups, id: \.self) { group in
+                    Button(action: {
+                        withAnimation {
+                            faceManager.selectedGroupFilter = faceManager.selectedGroupFilter == group ? nil : group
+                        }
+                    }) {
+                        Text(group)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(faceManager.selectedGroupFilter == group ? .white : DesignSystem.Colors.secondaryText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(faceManager.selectedGroupFilter == group ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Add group button
+                Button(action: { showAddGroupSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+
+    @State private var showAddGroupSheet = false
+    @State private var newGroupName = ""
 
     private var selectionActionBar: some View {
         VStack {
@@ -6799,6 +7420,7 @@ struct ContentView: View {
     @State private var isMerging = false
     @State private var showBulkMergeSheet = false
     @State private var bulkMergeTargetId: String? = nil
+    @State private var showVerificationView = false
 
     private var personDetailView: some View {
         VStack(spacing: 0) {
@@ -6857,6 +7479,28 @@ struct ContentView: View {
 
                     Spacer()
 
+                    // Review button (only show if there are unverified faces)
+                    if person.unverifiedCount > 0 {
+                        Button(action: {
+                            showVerificationView = true
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text("Review")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(Color.orange.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
                     // Merge button
                     Button(action: {
                         mergeSearchText = ""
@@ -6895,6 +7539,26 @@ struct ContentView: View {
                         .background(
                             Capsule()
                                 .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Create Album button
+                    Button(action: {
+                        createAlbumForPerson(person)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Album")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -6948,6 +7612,71 @@ struct ContentView: View {
         .sheet(isPresented: $showMergeSheet) {
             mergePersonSheet
         }
+        .sheet(isPresented: $showVerificationView) {
+            if let person = selectedPerson {
+                FaceVerificationView(
+                    person: person,
+                    faceManager: faceManager,
+                    onDismiss: {
+                        showVerificationView = false
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showAddGroupSheet) {
+            addGroupSheet
+        }
+    }
+
+    private var addGroupSheet: some View {
+        VStack(spacing: 16) {
+            Text("Create Group")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+
+            TextField("Group name", text: $newGroupName)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.system(size: 14))
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                )
+
+            HStack(spacing: 12) {
+                Button(action: { showAddGroupSheet = false; newGroupName = "" }) {
+                    Text("Cancel")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    if !newGroupName.isEmpty {
+                        Task {
+                            await faceManager.createGroup(newGroupName)
+                            newGroupName = ""
+                            showAddGroupSheet = false
+                        }
+                    }
+                }) {
+                    Text("Create")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(DesignSystem.Colors.accent))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(newGroupName.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 280)
+        .background(DesignSystem.Colors.secondaryBackground)
     }
 
     private var mergePersonSheet: some View {
@@ -7222,6 +7951,50 @@ struct ContentView: View {
         if let contentView = window.contentView {
             let rect = CGRect(x: contentView.bounds.midX, y: contentView.bounds.maxY - 50, width: 1, height: 1)
             picker.show(relativeTo: rect, of: contentView, preferredEdge: .minY)
+        }
+    }
+
+    private func createAlbumForPerson(_ person: Person) {
+        // Show save panel to select location
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = person.name
+        panel.canCreateDirectories = true
+        panel.title = "Create Album"
+        panel.message = "Choose a location to save the album folder"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+
+            // Create directory
+            do {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+
+                // Get images for person
+                let images = faceManager.getImagesForPerson(person)
+
+                // Create symlinks for each image
+                for image in images {
+                    let sourceURL = URL(fileURLWithPath: image.path)
+                    let destURL = url.appendingPathComponent(sourceURL.lastPathComponent)
+
+                    // Handle duplicate filenames
+                    var finalDestURL = destURL
+                    var counter = 1
+                    while FileManager.default.fileExists(atPath: finalDestURL.path) {
+                        let name = sourceURL.deletingPathExtension().lastPathComponent
+                        let ext = sourceURL.pathExtension
+                        finalDestURL = url.appendingPathComponent("\(name)_\(counter).\(ext)")
+                        counter += 1
+                    }
+
+                    try FileManager.default.createSymbolicLink(at: finalDestURL, withDestinationURL: sourceURL)
+                }
+
+                // Open folder in Finder
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
+            } catch {
+                print("Error creating album: \(error)")
+            }
         }
     }
 
