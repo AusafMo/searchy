@@ -19,7 +19,7 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
 1. Download `Searchy.dmg` from [Releases](https://github.com/AusafMo/searchy/releases)
 2. Drag to Applications
 3. Right-click → Open (first time only, macOS security)
-4. Click **Start Setup** — Python & AI models install automatically (3-5 min)
+4. Click **Start Setup** — Python & CLIP models install automatically (3-5 min)
 
 That's it. No manual Python installation required.
 
@@ -35,7 +35,7 @@ Open `searchy.xcodeproj` in Xcode and build (`⌘R`).
 On first launch, Searchy will automatically:
 - Install Python (if not found)
 - Create an isolated virtual environment
-- Download AI dependencies (~2GB)
+- Download dependencies (~2GB)
 - Download the CLIP model
 
 ---
@@ -346,16 +346,16 @@ macOS photo management is surprisingly lacking. Apple Photos is bloated and lock
 |-----|---------|
 | Apple Photos | Wants to own/import your files, pushes iCloud |
 | Lightroom | $10/mo subscription, primarily an editor |
-| Photo Mechanic | $139, dated UI, no AI |
+| Photo Mechanic | $139, dated UI, no semantic search |
 | Finder | It's... Finder |
 
-Searchy aims to become the **native macOS media manager** that doesn't exist—with AI superpowers.
+Searchy aims to become the **native macOS media manager** that doesn't exist—with semantic search superpowers.
 
 **Design principles:**
 - **Proxy-based** — Your files stay exactly where they are. We're a lens, not a file manager.
 - **Non-destructive** — Albums, tags, ratings are metadata in our database. Original files never touched.
 - **Symlink exports** — Want a physical folder for an album? We create symlinks. Delete the album? Originals are safe.
-- **AI-first** — Semantic search, face grouping, OCR, smart collections. Find photos without manual tagging.
+- **Smart search** — Semantic search, face grouping, OCR, smart collections. Find photos without manual tagging.
 
 **Planned features:**
 
@@ -371,7 +371,7 @@ Searchy aims to become the **native macOS media manager** that doesn't exist—w
 | Import Workflow | Watch folders, camera import |
 | Trash & Recovery | Safe deletion with undo |
 
-**The pitch:** A native macOS photo browser with AI built-in. No subscription, no cloud lock-in, no importing. Point at your folders and go.
+**The pitch:** A native macOS photo browser with semantic search built-in. No subscription, no cloud lock-in, no importing. Point at your folders and go.
 
 ---
 
@@ -454,7 +454,7 @@ We may add optional encryption in the future for these scenarios.
 - macOS 13+
 - Apple Silicon
 - Internet connection (first-time setup only)
-- ~2GB disk space for AI models
+- ~2GB disk space for models
 
 **Supported formats:** jpg, jpeg, png, gif, bmp, tiff, webp, heic
 

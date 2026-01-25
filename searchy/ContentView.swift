@@ -744,7 +744,7 @@ class IndexingSettings: ObservableObject {
     }
 }
 
-// MARK: - Model Settings (AI Model Configuration)
+// MARK: - Model Settings (CLIP Model Configuration)
 struct CLIPModelInfo: Identifiable {
     let id: String  // model_name from HuggingFace
     let name: String
@@ -1060,7 +1060,7 @@ struct SettingsGroup<Content: View>: View {
     }
 }
 
-// MARK: - AI Model Settings Section
+// MARK: - Model Settings Section
 struct AIModelSettingsSection: View {
     @ObservedObject private var modelSettings = ModelSettings.shared
     @State private var selectedModelId: String = ""
@@ -1072,7 +1072,7 @@ struct AIModelSettingsSection: View {
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        SettingsSection(title: "AI Model", icon: "cpu") {
+        SettingsSection(title: "CLIP Model", icon: "cpu") {
             VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
                 // Current Model Info
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
@@ -6930,7 +6930,7 @@ struct ContentView: View {
 
                         Text(faceManager.hasScannedBefore
                              ? "No faces found in your photos.\nTry scanning more images."
-                             : "Find and group people in your photos\nusing AI-powered face detection.")
+                             : "Find and group people in your photos\nusing face detection.")
                             .font(.system(size: 14))
                             .foregroundColor(DesignSystem.Colors.secondaryText)
                             .multilineTextAlignment(.center)
@@ -8080,7 +8080,7 @@ struct ContentView: View {
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundColor(DesignSystem.Colors.primaryText)
 
-                        Text("Configure your search index and AI model")
+                        Text("Configure your search index and CLIP model")
                             .font(DesignSystem.Typography.callout)
                             .foregroundColor(DesignSystem.Colors.secondaryText)
                     }
@@ -8115,7 +8115,7 @@ struct ContentView: View {
                 Image(systemName: "cpu")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
-                Text("AI Model")
+                Text("CLIP Model")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
