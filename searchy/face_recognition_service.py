@@ -52,13 +52,16 @@ def unload_models():
 class FaceData:
     """Represents a detected face with its embedding."""
     def __init__(self, face_id: str, image_path: str, embedding: List[float],
-                 bbox: Dict, confidence: float, thumbnail_path: Optional[str] = None):
+                 bbox: Dict, confidence: float, thumbnail_path: Optional[str] = None,
+                 verified: bool = False, added_date: Optional[str] = None):
         self.face_id = face_id
         self.image_path = image_path
         self.embedding = embedding
         self.bbox = bbox  # {"x": int, "y": int, "w": int, "h": int}
         self.confidence = confidence
         self.thumbnail_path = thumbnail_path
+        self.verified = verified
+        self.added_date = added_date or datetime.now().isoformat()
 
     def to_dict(self) -> Dict:
         return {
@@ -67,7 +70,9 @@ class FaceData:
             "embedding": self.embedding,
             "bbox": self.bbox,
             "confidence": self.confidence,
-            "thumbnail_path": self.thumbnail_path
+            "thumbnail_path": self.thumbnail_path,
+            "verified": self.verified,
+            "added_date": self.added_date
         }
 
     @classmethod
@@ -78,7 +83,9 @@ class FaceData:
             embedding=data["embedding"],
             bbox=data["bbox"],
             confidence=data["confidence"],
-            thumbnail_path=data.get("thumbnail_path")
+            thumbnail_path=data.get("thumbnail_path"),
+            verified=data.get("verified", False),
+            added_date=data.get("added_date")
         )
 
 
@@ -94,6 +101,10 @@ class FaceCluster:
         return len(self.faces)
 
     @property
+    def unverified_count(self) -> int:
+        return sum(1 for f in self.faces if not f.verified)
+
+    @property
     def thumbnail_path(self) -> Optional[str]:
         # Return first face's thumbnail
         if self.faces and self.faces[0].thumbnail_path:
@@ -105,6 +116,7 @@ class FaceCluster:
             "cluster_id": self.cluster_id,
             "name": self.name,
             "face_count": self.face_count,
+            "unverified_count": self.unverified_count,
             "thumbnail_path": self.thumbnail_path,
             "faces": [f.to_dict() for f in self.faces]
         }
@@ -265,6 +277,64 @@ class FaceRecognitionService:
             "total_faces": target.face_count,
             "merged_face_count": len(source.faces)
         }
+
+    def verify_face(self, face_id: str, cluster_id: str, is_correct: bool) -> Dict:
+        """Mark a face as verified or remove it from the cluster."""
+        # Ensure clusters are populated
+        if not self.clusters and self.faces:
+            self.cluster_faces()
+
+        # Find the cluster
+        cluster = next((c for c in self.clusters if c.cluster_id == cluster_id), None)
+        if not cluster:
+            return {"error": f"Cluster {cluster_id} not found"}
+
+        # Find the face in the cluster
+        face = next((f for f in cluster.faces if f.face_id == face_id), None)
+        if not face:
+            return {"error": f"Face {face_id} not found in cluster {cluster_id}"}
+
+        if is_correct:
+            # Mark face as verified
+            face.verified = True
+            self._save_faces()
+            logger.info(f"Face {face_id} verified in cluster {cluster_id}")
+            return {
+                "status": "verified",
+                "face_id": face_id,
+                "cluster_id": cluster_id,
+                "remaining_unverified": cluster.unverified_count
+            }
+        else:
+            # Remove face from cluster
+            cluster.faces = [f for f in cluster.faces if f.face_id != face_id]
+
+            # Also remove from main faces list
+            self.faces = [f for f in self.faces if f.face_id != face_id]
+
+            # Delete thumbnail if it exists
+            if face.thumbnail_path and os.path.exists(face.thumbnail_path):
+                try:
+                    os.remove(face.thumbnail_path)
+                except Exception as e:
+                    logger.warning(f"Failed to delete thumbnail: {e}")
+
+            # If cluster is now empty, remove it
+            if len(cluster.faces) == 0:
+                self.clusters = [c for c in self.clusters if c.cluster_id != cluster_id]
+                if cluster_id in self.custom_names:
+                    del self.custom_names[cluster_id]
+                    self._save_custom_names()
+                logger.info(f"Cluster {cluster_id} removed (empty after rejection)")
+
+            self._save_faces()
+            logger.info(f"Face {face_id} rejected and removed from cluster {cluster_id}")
+            return {
+                "status": "rejected",
+                "face_id": face_id,
+                "cluster_id": cluster_id,
+                "cluster_empty": len(cluster.faces) == 0 if cluster else True
+            }
 
     def _generate_face_id(self, image_path: str, bbox: Dict) -> str:
         """Generate unique face ID from path and bounding box."""
