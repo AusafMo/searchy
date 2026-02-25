@@ -131,6 +131,8 @@ class FaceRecognitionService:
         self.thumbnails_dir = os.path.join(data_dir, "face_thumbnails")
         self.scanned_paths_file = os.path.join(data_dir, "face_scanned_paths.bin")
         self.cluster_names_file = os.path.join(data_dir, "cluster_names.json")
+        self.constraints_file = os.path.join(data_dir, "face_constraints.json")
+        self.orphaned_faces_file = os.path.join(data_dir, "orphaned_faces.bin")
 
         # Ensure directories exist
         os.makedirs(self.thumbnails_dir, exist_ok=True)
@@ -140,6 +142,8 @@ class FaceRecognitionService:
         self.scanned_paths: set = set()
         self.clusters: List[FaceCluster] = []
         self.custom_names: Dict[str, str] = {}  # cluster_id -> custom name
+        self.negative_constraints: Dict[str, List[str]] = {}  # face_id -> [cluster_ids it should NOT be in]
+        self.orphaned_faces: List[FaceData] = []  # Faces rejected but not deleted
 
         # Scanning state
         self.is_scanning = False
@@ -153,6 +157,8 @@ class FaceRecognitionService:
         self._load_faces()
         self._load_scanned_paths()
         self._load_custom_names()
+        self._load_constraints()
+        self._load_orphaned_faces()
 
     def _load_faces(self):
         """Load faces from disk."""
@@ -212,6 +218,45 @@ class FaceRecognitionService:
                 json.dump(self.custom_names, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving custom names: {e}")
+
+    def _load_constraints(self):
+        """Load negative constraints from disk."""
+        if os.path.exists(self.constraints_file):
+            try:
+                with open(self.constraints_file, 'r') as f:
+                    self.negative_constraints = json.load(f)
+                logger.info(f"Loaded {len(self.negative_constraints)} negative constraints")
+            except Exception as e:
+                logger.error(f"Error loading constraints: {e}")
+                self.negative_constraints = {}
+
+    def _save_constraints(self):
+        """Save negative constraints to disk."""
+        try:
+            with open(self.constraints_file, 'w') as f:
+                json.dump(self.negative_constraints, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving constraints: {e}")
+
+    def _load_orphaned_faces(self):
+        """Load orphaned faces from disk."""
+        if os.path.exists(self.orphaned_faces_file):
+            try:
+                with open(self.orphaned_faces_file, 'rb') as f:
+                    data = pickle.load(f)
+                self.orphaned_faces = [FaceData.from_dict(d) for d in data]
+                logger.info(f"Loaded {len(self.orphaned_faces)} orphaned faces")
+            except Exception as e:
+                logger.error(f"Error loading orphaned faces: {e}")
+                self.orphaned_faces = []
+
+    def _save_orphaned_faces(self):
+        """Save orphaned faces to disk."""
+        try:
+            with open(self.orphaned_faces_file, 'wb') as f:
+                pickle.dump([f.to_dict() for f in self.orphaned_faces], f)
+        except Exception as e:
+            logger.error(f"Error saving orphaned faces: {e}")
 
     def rename_cluster(self, cluster_id: str, new_name: str) -> Dict:
         """Rename a face cluster with a custom name."""
@@ -279,7 +324,7 @@ class FaceRecognitionService:
         }
 
     def verify_face(self, face_id: str, cluster_id: str, is_correct: bool) -> Dict:
-        """Mark a face as verified or remove it from the cluster."""
+        """Mark a face as verified or re-home it to a better cluster."""
         # Ensure clusters are populated
         if not self.clusters and self.faces:
             self.cluster_faces()
@@ -306,20 +351,43 @@ class FaceRecognitionService:
                 "remaining_unverified": cluster.unverified_count
             }
         else:
-            # Remove face from cluster
+            # Store negative constraint: this face should NOT be in this cluster
+            if face_id not in self.negative_constraints:
+                self.negative_constraints[face_id] = []
+            if cluster_id not in self.negative_constraints[face_id]:
+                self.negative_constraints[face_id].append(cluster_id)
+            self._save_constraints()
+
+            # Remove face from current cluster
             cluster.faces = [f for f in cluster.faces if f.face_id != face_id]
 
-            # Also remove from main faces list
-            self.faces = [f for f in self.faces if f.face_id != face_id]
+            # Try to find a better home for this face
+            new_cluster_id = self._find_best_cluster_for_face(face, exclude_cluster_ids=[cluster_id])
 
-            # Delete thumbnail if it exists
-            if face.thumbnail_path and os.path.exists(face.thumbnail_path):
-                try:
-                    os.remove(face.thumbnail_path)
-                except Exception as e:
-                    logger.warning(f"Failed to delete thumbnail: {e}")
+            result = {
+                "status": "rejected",
+                "face_id": face_id,
+                "original_cluster_id": cluster_id,
+                "cluster_empty": len(cluster.faces) == 0
+            }
 
-            # If cluster is now empty, remove it
+            if new_cluster_id:
+                # Found a new home - move face there
+                new_cluster = next((c for c in self.clusters if c.cluster_id == new_cluster_id), None)
+                if new_cluster:
+                    face.verified = False  # Reset verification in new cluster
+                    new_cluster.faces.append(face)
+                    result["new_cluster_id"] = new_cluster_id
+                    result["new_cluster_name"] = new_cluster.name
+                    logger.info(f"Face {face_id} re-homed from {cluster_id} to {new_cluster_id}")
+            else:
+                # No suitable cluster found - add to orphaned faces
+                self.orphaned_faces.append(face)
+                self._save_orphaned_faces()
+                result["orphaned"] = True
+                logger.info(f"Face {face_id} orphaned (no suitable cluster found)")
+
+            # If original cluster is now empty, remove it
             if len(cluster.faces) == 0:
                 self.clusters = [c for c in self.clusters if c.cluster_id != cluster_id]
                 if cluster_id in self.custom_names:
@@ -328,13 +396,74 @@ class FaceRecognitionService:
                 logger.info(f"Cluster {cluster_id} removed (empty after rejection)")
 
             self._save_faces()
-            logger.info(f"Face {face_id} rejected and removed from cluster {cluster_id}")
-            return {
-                "status": "rejected",
-                "face_id": face_id,
-                "cluster_id": cluster_id,
-                "cluster_empty": len(cluster.faces) == 0 if cluster else True
-            }
+            return result
+
+    def _find_best_cluster_for_face(self, face: FaceData, exclude_cluster_ids: List[str] = None,
+                                     similarity_threshold: float = 0.60) -> Optional[str]:
+        """
+        Find the best matching cluster for a face, respecting negative constraints.
+        Returns cluster_id or None if no suitable cluster found.
+        """
+        if not self.clusters:
+            return None
+
+        exclude_cluster_ids = exclude_cluster_ids or []
+
+        # Get clusters this face is constrained from
+        constrained_clusters = self.negative_constraints.get(face.face_id, [])
+
+        face_embedding = np.array(face.embedding)
+        face_embedding = face_embedding / np.linalg.norm(face_embedding)
+
+        best_cluster_id = None
+        best_similarity = similarity_threshold  # Minimum threshold
+
+        for cluster in self.clusters:
+            # Skip excluded and constrained clusters
+            if cluster.cluster_id in exclude_cluster_ids:
+                continue
+            if cluster.cluster_id in constrained_clusters:
+                continue
+
+            # Compute centroid from verified faces if available, else all faces
+            centroid = self._compute_cluster_centroid(cluster, prefer_verified=True)
+            if centroid is None:
+                continue
+
+            # Compute cosine similarity
+            similarity = float(np.dot(face_embedding, centroid))
+
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_cluster_id = cluster.cluster_id
+
+        return best_cluster_id
+
+    def _compute_cluster_centroid(self, cluster: FaceCluster, prefer_verified: bool = True) -> Optional[np.ndarray]:
+        """
+        Compute the centroid of a cluster.
+        If prefer_verified=True, uses only verified faces if available.
+        """
+        if not cluster.faces:
+            return None
+
+        # Get faces to use for centroid
+        if prefer_verified:
+            verified_faces = [f for f in cluster.faces if f.verified]
+            faces_to_use = verified_faces if verified_faces else cluster.faces
+        else:
+            faces_to_use = cluster.faces
+
+        # Compute mean embedding
+        embeddings = np.array([f.embedding for f in faces_to_use])
+        centroid = np.mean(embeddings, axis=0)
+
+        # Normalize
+        norm = np.linalg.norm(centroid)
+        if norm > 0:
+            centroid = centroid / norm
+
+        return centroid
 
     def _generate_face_id(self, image_path: str, bbox: Dict) -> str:
         """Generate unique face ID from path and bounding box."""
@@ -762,6 +891,144 @@ class FaceRecognitionService:
 
         logger.info(f"Clustered {n} faces into {len(self.clusters)} people")
         return self.clusters
+
+    def recluster_with_constraints(self, similarity_threshold: float = 0.60) -> Dict:
+        """
+        Smart re-clustering that:
+        1. Keeps verified faces as fixed anchors in their clusters
+        2. Re-assigns unverified faces based on verified centroids
+        3. Respects negative constraints (face should NOT be in cluster X)
+        4. Tries to find homes for orphaned faces
+
+        Returns statistics about what changed.
+        """
+        if not self.clusters:
+            if self.faces:
+                self.cluster_faces()
+            return {"error": "No clusters to recluster"}
+
+        stats = {
+            "faces_moved": 0,
+            "orphans_placed": 0,
+            "orphans_remaining": 0,
+            "clusters_before": len(self.clusters),
+            "clusters_after": 0
+        }
+
+        # Step 1: Separate verified and unverified faces
+        verified_faces_by_cluster: Dict[str, List[FaceData]] = {}
+        unverified_faces: List[Tuple[FaceData, str]] = []  # (face, original_cluster_id)
+
+        for cluster in self.clusters:
+            verified_faces_by_cluster[cluster.cluster_id] = []
+            for face in cluster.faces:
+                if face.verified:
+                    verified_faces_by_cluster[cluster.cluster_id].append(face)
+                else:
+                    unverified_faces.append((face, cluster.cluster_id))
+
+        # Step 2: Compute verified centroids for clusters with verified faces
+        verified_centroids: Dict[str, np.ndarray] = {}
+        for cluster_id, verified_faces in verified_faces_by_cluster.items():
+            if verified_faces:
+                embeddings = np.array([f.embedding for f in verified_faces])
+                centroid = np.mean(embeddings, axis=0)
+                norm = np.linalg.norm(centroid)
+                if norm > 0:
+                    centroid = centroid / norm
+                verified_centroids[cluster_id] = centroid
+
+        # If no verified faces anywhere, can't do smart re-clustering
+        if not verified_centroids:
+            logger.info("No verified faces found, cannot perform constrained re-clustering")
+            return {"error": "No verified faces to use as anchors. Verify some faces first."}
+
+        # Step 3: Rebuild clusters starting with verified faces
+        new_clusters: Dict[str, FaceCluster] = {}
+        for cluster in self.clusters:
+            if cluster.cluster_id in verified_centroids:
+                # Keep cluster with only verified faces for now
+                new_clusters[cluster.cluster_id] = FaceCluster(
+                    cluster_id=cluster.cluster_id,
+                    name=cluster.name,
+                    faces=verified_faces_by_cluster[cluster.cluster_id].copy()
+                )
+
+        # Step 4: Re-assign unverified faces to best matching cluster
+        for face, original_cluster_id in unverified_faces:
+            face_embedding = np.array(face.embedding)
+            face_embedding = face_embedding / np.linalg.norm(face_embedding)
+
+            # Get constraints for this face
+            constrained_clusters = self.negative_constraints.get(face.face_id, [])
+
+            best_cluster_id = None
+            best_similarity = similarity_threshold
+
+            for cluster_id, centroid in verified_centroids.items():
+                # Skip constrained clusters
+                if cluster_id in constrained_clusters:
+                    continue
+
+                similarity = float(np.dot(face_embedding, centroid))
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_cluster_id = cluster_id
+
+            if best_cluster_id:
+                new_clusters[best_cluster_id].faces.append(face)
+                if best_cluster_id != original_cluster_id:
+                    stats["faces_moved"] += 1
+            else:
+                # No suitable cluster - becomes orphaned
+                if face not in self.orphaned_faces:
+                    self.orphaned_faces.append(face)
+
+        # Step 5: Try to place orphaned faces
+        placed_orphans = []
+        for face in self.orphaned_faces:
+            face_embedding = np.array(face.embedding)
+            face_embedding = face_embedding / np.linalg.norm(face_embedding)
+
+            constrained_clusters = self.negative_constraints.get(face.face_id, [])
+
+            best_cluster_id = None
+            best_similarity = similarity_threshold
+
+            for cluster_id, centroid in verified_centroids.items():
+                if cluster_id in constrained_clusters:
+                    continue
+
+                similarity = float(np.dot(face_embedding, centroid))
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_cluster_id = cluster_id
+
+            if best_cluster_id:
+                new_clusters[best_cluster_id].faces.append(face)
+                placed_orphans.append(face)
+                stats["orphans_placed"] += 1
+
+        # Remove placed orphans from orphaned list
+        self.orphaned_faces = [f for f in self.orphaned_faces if f not in placed_orphans]
+        stats["orphans_remaining"] = len(self.orphaned_faces)
+
+        # Step 6: Update clusters list (remove empty clusters)
+        self.clusters = [c for c in new_clusters.values() if c.faces]
+        self.clusters.sort(key=lambda c: c.face_count, reverse=True)
+
+        stats["clusters_after"] = len(self.clusters)
+
+        # Save changes
+        self._save_faces()
+        self._save_orphaned_faces()
+
+        logger.info(f"Re-clustering complete: {stats}")
+        return stats
+
+    def get_orphaned_faces(self) -> List[Dict]:
+        """Get list of orphaned faces that couldn't be assigned to any cluster."""
+        return [f.to_dict() for f in self.orphaned_faces]
 
     def get_clusters(self) -> List[Dict]:
         """Get all face clusters."""

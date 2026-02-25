@@ -454,51 +454,63 @@ def unload_model():
 @app.get("/recent")
 def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
     """
-    Get recent indexed images sorted by modification date (newest first).
+    Get recent images sorted by modification date (newest first).
+    Includes both indexed images and pending images (detected but not yet indexed).
     """
+    global pending_images
+
     try:
+        # Collect all images with their times and pending status
+        all_images = []  # (path, time, is_pending)
+
+        # Get indexed image paths (if index exists)
+        indexed_paths = set()
         filename = os.path.join(data_dir, 'image_index.bin')
-        if not os.path.exists(filename):
+        if os.path.exists(filename):
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+
+            if isinstance(data, dict) and 'image_paths' in data:
+                for path in data['image_paths']:
+                    if is_user_image(path):
+                        try:
+                            stat_info = os.stat(path)
+                            creation_time = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
+                            all_images.append((path, creation_time, False))  # Not pending
+                            indexed_paths.add(path)
+                        except:
+                            continue
+
+        # Add pending images (not yet indexed)
+        for path, detection_time in list(pending_images.items()):
+            # Skip if already indexed (shouldn't happen, but just in case)
+            if path in indexed_paths:
+                continue
+            # Verify file still exists
+            if os.path.exists(path) and is_user_image(path):
+                all_images.append((path, detection_time, True))  # Is pending
+
+        if not all_images:
             return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0, "images_per_second": "0"}}
 
-        with open(filename, 'rb') as f:
-            data = pickle.load(f)
-
-        if not isinstance(data, dict) or 'image_paths' not in data:
-            return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0, "images_per_second": "0"}}
-
-        image_paths = data['image_paths']
-
-        if len(image_paths) == 0:
-            return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0, "images_per_second": "0"}}
-
-        # Get creation/added times for all indexed images (filter system files)
-        images_with_time = []
-        for path in image_paths:
-            if is_user_image(path):
-                try:
-                    # Use birthtime (actual creation time on macOS) or fallback to ctime
-                    stat_info = os.stat(path)
-                    # On macOS, st_birthtime is the actual creation time
-                    creation_time = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
-                    images_with_time.append((path, creation_time))
-                except:
-                    continue
-
-        # Sort by creation time (newest first)
-        images_with_time.sort(key=lambda x: x[1], reverse=True)
+        # Sort by time (newest first)
+        all_images.sort(key=lambda x: x[1], reverse=True)
 
         # Take top_k newest
-        recent_images = images_with_time[:top_k]
+        recent_images = all_images[:top_k]
 
-        # Create results with dummy similarity scores
-        results = [{"path": path, "similarity": 1.0} for path, _ in recent_images]
+        # Create results with pending flag
+        results = [
+            {"path": path, "similarity": 1.0, "is_pending": is_pending}
+            for path, _, is_pending in recent_images
+        ]
 
         return {
             "results": results,
             "stats": {
                 "total_time": "0.00s",
-                "images_searched": len(image_paths),
+                "images_searched": len(indexed_paths),
+                "pending_count": len(pending_images),
                 "images_per_second": "0"
             }
         }
@@ -609,6 +621,49 @@ indexing_status = {
     "error": None
 }
 
+# Track pending images (detected but not yet indexed)
+# Key: file path, Value: detection timestamp
+pending_images = {}
+
+
+class NotifyNewImageRequest(BaseModel):
+    file_path: str
+    detection_time: Optional[float] = None  # Unix timestamp, defaults to now
+
+
+@app.post("/notify-new-image")
+def notify_new_image(request: NotifyNewImageRequest):
+    """
+    Notify that a new image was detected (before indexing).
+    This allows the image to appear in recent images immediately.
+    """
+    global pending_images
+
+    file_path = request.file_path
+
+    # Verify file exists
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "File does not exist"}
+
+    # Check if it's a valid image
+    if not is_user_image(file_path):
+        return {"status": "skipped", "message": "Not a user image"}
+
+    # Add to pending with detection time
+    detection_time = request.detection_time or time.time()
+    pending_images[file_path] = detection_time
+
+    logger.info(f"New image detected (pending): {os.path.basename(file_path)}")
+
+    return {"status": "ok", "pending_count": len(pending_images)}
+
+
+def remove_from_pending(file_paths: List[str]):
+    """Remove files from pending list (called after indexing completes)."""
+    global pending_images
+    for path in file_paths:
+        pending_images.pop(path, None)
+
 
 @app.post("/index")
 def index_files(request: IndexFilesRequest):
@@ -647,9 +702,13 @@ def index_files(request: IndexFilesRequest):
             )
             indexing_status["processed"] = len(valid_files)
             logger.info(f"Indexing complete: {len(valid_files)} files")
+            # Remove from pending now that they're indexed
+            remove_from_pending(valid_files)
         except Exception as e:
             indexing_status["error"] = str(e)
             logger.error(f"Indexing error: {e}")
+            # Still remove from pending on error (they failed, shouldn't stay pending forever)
+            remove_from_pending(valid_files)
         finally:
             indexing_status["is_indexing"] = False
 
@@ -1273,6 +1332,39 @@ def verify_face(
         return {"error": str(e)}
 
 
+@app.post("/face-recluster")
+def recluster_faces(
+    data_dir: str = "/Users/ausaf/Library/Application Support/searchy",
+    similarity_threshold: float = 0.60
+):
+    """
+    Smart re-clustering that uses verified faces as anchors.
+    - Verified faces stay in their clusters
+    - Unverified faces are re-assigned based on verified centroids
+    - Respects negative constraints from rejections
+    - Tries to place orphaned faces
+    """
+    try:
+        face_service = get_face_service(data_dir)
+        result = face_service.recluster_with_constraints(similarity_threshold)
+        return result
+    except Exception as e:
+        logger.error(f"Error re-clustering faces: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/face-orphans")
+def get_orphaned_faces(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+    """Get list of orphaned faces that couldn't be assigned to any cluster."""
+    try:
+        face_service = get_face_service(data_dir)
+        orphans = face_service.get_orphaned_faces()
+        return {"orphans": orphans, "count": len(orphans)}
+    except Exception as e:
+        logger.error(f"Error getting orphaned faces: {e}")
+        return {"error": str(e)}
+
+
 @app.get("/face-new-count")
 def get_new_face_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
     """Get count of images not yet scanned for faces."""
@@ -1340,16 +1432,205 @@ def recluster_faces(data_dir: str = "/Users/ausaf/Library/Application Support/se
         return {"error": str(e)}
 
 
+# ============== Volume Management Endpoints ==============
+
+class VolumeIndexRequest(BaseModel):
+    """Request to index a specific volume."""
+    volume_path: str  # Path to the volume (e.g., /Volumes/MyDrive)
+    index_path: str   # Where to store the index (on volume or centralized)
+    fast_indexing: bool = True
+    max_dimension: int = 384
+    batch_size: int = 64
+    filter_type: str = "all"
+    filter_value: str = ""
+
+
+class MultiVolumeSearchRequest(BaseModel):
+    """Search across multiple volume indexes."""
+    query: str
+    top_k: int = 20
+    index_paths: List[str]  # List of index file paths to search
+    ocr_weight: float = 0.3
+
+
+@app.post("/volume/index")
+def index_volume(request: VolumeIndexRequest):
+    """
+    Index images on a specific volume and store the index at the specified path.
+    """
+    global indexing_status
+
+    if indexing_status["is_indexing"]:
+        return {"error": "Indexing already in progress", "status": "busy"}
+
+    try:
+        # Ensure volume exists
+        if not os.path.exists(request.volume_path):
+            return {"error": f"Volume path not found: {request.volume_path}", "status": "error"}
+
+        # Ensure index directory exists
+        index_dir = os.path.dirname(request.index_path)
+        if index_dir:
+            os.makedirs(index_dir, exist_ok=True)
+
+        # Find all images on the volume
+        images = []
+        for root, dirs, files in os.walk(request.volume_path):
+            # Skip hidden and system directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in SKIP_DIRS]
+
+            for f in files:
+                if not f.startswith('.') and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
+                    if matches_filter(f, request.filter_type, request.filter_value):
+                        images.append(os.path.join(root, f))
+
+        if not images:
+            return {"status": "complete", "images_indexed": 0, "message": "No images found"}
+
+        indexing_status = {
+            "is_indexing": True,
+            "total_files": len(images),
+            "processed": 0,
+            "error": None
+        }
+
+        # Start indexing in background
+        def do_index():
+            global indexing_status
+            try:
+                from generate_embeddings import index_images_with_clip
+
+                # Index the images
+                index_images_with_clip(
+                    images,
+                    request.index_path,
+                    batch_size=request.batch_size,
+                    fast_mode=request.fast_indexing,
+                    max_dim=request.max_dimension
+                )
+
+                indexing_status["is_indexing"] = False
+                indexing_status["processed"] = len(images)
+            except Exception as e:
+                indexing_status["is_indexing"] = False
+                indexing_status["error"] = str(e)
+                logger.error(f"Volume indexing error: {e}")
+
+        thread = Thread(target=do_index)
+        thread.start()
+
+        return {
+            "status": "started",
+            "total_images": len(images),
+            "volume_path": request.volume_path,
+            "index_path": request.index_path
+        }
+    except Exception as e:
+        logger.error(f"Error starting volume index: {e}")
+        return {"error": str(e), "status": "error"}
+
+
+@app.post("/volume/search")
+def search_volumes(request: MultiVolumeSearchRequest):
+    """
+    Search across multiple volume indexes.
+    Combines results from all specified index files.
+    """
+    try:
+        all_results = []
+        searcher = get_searcher()
+
+        for index_path in request.index_paths:
+            if not os.path.exists(index_path):
+                logger.warning(f"Index not found: {index_path}")
+                continue
+
+            # Get the directory containing the index
+            index_dir = os.path.dirname(index_path)
+
+            # Search this index
+            results = searcher.search(
+                request.query,
+                index_dir,
+                request.top_k,
+                request.ocr_weight
+            )
+
+            if results and "results" in results:
+                for result in results["results"]:
+                    if is_user_image(result["path"]):
+                        # Add volume info
+                        result["index_path"] = index_path
+                        metadata = get_file_metadata(result["path"])
+                        result.update(metadata)
+                        all_results.append(result)
+
+        # Sort by similarity and take top_k
+        all_results.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+        all_results = all_results[:request.top_k]
+
+        return {"results": all_results}
+    except Exception as e:
+        logger.error(f"Error searching volumes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/volume/stats")
+def get_volume_stats(index_path: str):
+    """
+    Get statistics for a specific volume index.
+    """
+    try:
+        if not os.path.exists(index_path):
+            return {"exists": False, "count": 0, "size_bytes": 0}
+
+        with open(index_path, 'rb') as f:
+            data = pickle.load(f)
+
+        count = len(data.get('image_paths', []))
+        size_bytes = os.path.getsize(index_path)
+
+        return {
+            "exists": True,
+            "count": count,
+            "size_bytes": size_bytes,
+            "has_ocr": 'ocr_texts' in data
+        }
+    except Exception as e:
+        logger.error(f"Error getting volume stats: {e}")
+        return {"exists": False, "count": 0, "size_bytes": 0, "error": str(e)}
+
+
+@app.delete("/volume/index")
+def delete_volume_index(index_path: str):
+    """
+    Delete a volume's index file.
+    """
+    try:
+        if os.path.exists(index_path):
+            os.remove(index_path)
+            # Also try to remove thumbnails directory
+            thumbnails_path = os.path.join(os.path.dirname(index_path), 'thumbnails')
+            if os.path.exists(thumbnails_path):
+                import shutil
+                shutil.rmtree(thumbnails_path, ignore_errors=True)
+            return {"status": "deleted", "index_path": index_path}
+        return {"status": "not_found", "index_path": index_path}
+    except Exception as e:
+        logger.error(f"Error deleting volume index: {e}")
+        return {"error": str(e), "status": "error"}
+
+
 if __name__ == "__main__":
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7860, help="Port to run the server on")
     args = parser.parse_args()
 
-    
+
     port = args.port
     logger.info(f"Starting server on port {port}")
 
-    
+
     # Bind to localhost only - prevents network exposure (security)
     uvicorn.run(app, host="127.0.0.1", port=port)
