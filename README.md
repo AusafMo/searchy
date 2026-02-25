@@ -6,15 +6,11 @@
 
 <p align="center"><b>Main App</b></p>
 
-<p align="center">
-  <video src="https://storage.googleapis.com/ausaf-public/searchy-app.mp4" width="800" autoplay loop muted playsinline></video>
-</p>
+https://github.com/user-attachments/assets/214c1421-0893-4fac-9b18-dd4074eeb68f
 
 <p align="center"><b>Spotlight Widget</b></p>
 
-<p align="center">
-  <video src="https://storage.googleapis.com/ausaf-public/searchy-widget.mp4" width="800" autoplay loop muted playsinline></video>
-</p>
+https://github.com/user-attachments/assets/d9753770-6b62-40f5-be5a-e625a81e5a1d
 
 ---
 
