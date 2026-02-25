@@ -1,14 +1,20 @@
 <h1 align="center">Searchy</h1>
 
-<p align="center">A semantic image search tool for macOS that uses CLIP to find images through natural language queries.</p>
+<p align="center">A hybrid image search tool for macOS that uses CLIP + OCR to find images through natural language queries and text content.</p>
 
-<p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b></p>
+<p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b> · <b>Face recognition</b></p>
 
-https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
+<p align="center"><b>Main App</b></p>
+
+https://storage.googleapis.com/ausaf-public/searchy-app.mp4
+
+<p align="center"><b>Spotlight Widget</b></p>
+
+https://storage.googleapis.com/ausaf-public/searchy-widget.mp4
 
 ---
 
-<p align="center">Photo management on macOS sucks. Searchy indexes your images locally and lets you search them using descriptive phrases like <i>"sunset over mountains"</i>, <i>"person wearing red"</i>, or <i>"cat sleeping on couch"</i>. Access it instantly from the menu bar with a global hotkey.</p>
+<p align="center">Photo management on macOS sucks. Searchy indexes your images locally and lets you search them using descriptive phrases like <i>"sunset over mountains"</i>, <i>"person wearing red"</i>, or text visible in images like <i>"invoice 2024"</i>. Find photos by face, detect duplicates, and access it instantly from the menu bar with a global hotkey.</p>
 
 ---
 
@@ -70,11 +76,14 @@ Access via the gear icon in the header.
 
 <h2 align="center">Features</h2>
 
-**Semantic Search**
+**Hybrid Search (Semantic + OCR)**
 - Query images using natural language descriptions
+- Automatically extracts and indexes text from images (signs, documents, screenshots)
+- Hybrid mode combines visual understanding with text matching
+- Adjustable OCR weight to tune semantic vs text relevance
+- Pure text search mode for exact text matching
 - Real-time results with 400ms debounce
 - Similarity scores displayed as color-coded percentages
-- Adjustable threshold to filter weak matches
 - Filter results by file type, date range, and size
 
 **Duplicate Detection**
@@ -83,6 +92,21 @@ Access via the gear icon in the header.
 - Auto-select smaller duplicates for cleanup
 - Preview images before deleting
 - Move or trash duplicates in bulk
+
+**Face Recognition**
+- Automatic face detection using DeepFace (SSD detector)
+- Face clustering to group photos by person
+- Name people and search by name
+- Pin important faces, hide unwanted ones
+- Merge duplicate person clusters
+- Face verification to confirm matches
+- Create custom face groups/albums
+- Bulk operations for efficient management
+
+**Similar Image Search**
+- Find visually similar images to any selected photo
+- Uses CLIP embeddings for semantic similarity
+- Adjustable result count
 
 **Spotlight-Style Interface**
 - Global hotkey `⌘⇧Space` summons a floating search window
@@ -107,6 +131,18 @@ Access via the gear icon in the header.
 - Isolated virtual environment in Application Support
 - All dependencies installed on first launch
 
+**External Volumes**
+- Index images on external drives and USB devices
+- Separate index per volume stored on the device
+- Search across volumes independently
+- Volume statistics and management
+
+**Model Selection**
+- Choose between multiple CLIP models
+- Switch models without re-indexing
+- Unload models to free memory
+- Automatic model download on first use
+
 **Privacy**
 - All processing runs locally on your machine
 - No network requests after initial setup
@@ -119,15 +155,16 @@ Access via the gear icon in the header.
 
 ```
 searchy/
-├── ContentView.swift       # SwiftUI interface
-├── searchyApp.swift        # App lifecycle, setup manager, server management
-├── server.py               # FastAPI backend
-├── generate_embeddings.py  # CLIP model and embedding generation
-├── image_watcher.py        # File system monitor for auto-indexing
+├── ContentView.swift            # SwiftUI interface
+├── searchyApp.swift             # App lifecycle, setup manager, server management
+├── server.py                    # FastAPI backend
+├── generate_embeddings.py       # CLIP model and embedding generation
+├── face_recognition_service.py  # Face detection & clustering (DeepFace)
+├── image_watcher.py             # File system monitor for auto-indexing
 └── requirements.txt
 ```
 
-**Stack:** SwiftUI + AppKit → FastAPI + Uvicorn → CLIP ViT-B/32 → NumPy embeddings
+**Stack:** SwiftUI + AppKit → FastAPI + Uvicorn → CLIP ViT-B/32 + DeepFace (ArcFace) → NumPy embeddings
 
 ---
 
@@ -239,10 +276,18 @@ The app expects a FastAPI/HTTP server. Implement these endpoints:
 | Endpoint | Method | Request | Response |
 |----------|--------|---------|----------|
 | `/health` | GET | — | `{"status": "ok"}` |
-| `/search` | POST | `{"query": str, "n_results": int, "threshold": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/search` | POST | `{"query": str, "n_results": int, "threshold": float, "ocr_weight": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/text-search` | POST | `{"query": str, "top_k": int}` | `{"results": [...]}` |
 | `/recent` | GET | `?n=int` | `{"results": [{"path": str, "similarity": float}, ...]}` |
 | `/index-count` | GET | — | `{"count": int}` |
 | `/duplicates` | POST | `{"threshold": float, "data_dir": str}` | `{"groups": [...], "total_duplicates": int}` |
+| `/similar` | POST | `{"image_path": str, "top_k": int}` | `{"results": [...]}` |
+| `/face-scan` | POST | `{"data_dir": str}` | `{"status": "started"}` |
+| `/face-clusters` | GET | — | `{"clusters": [...]}` |
+| `/face-rename` | POST | `{"cluster_id": str, "name": str}` | `{"success": bool}` |
+| `/face-merge` | POST | `{"source_id": str, "target_id": str}` | `{"success": bool}` |
+| `/volume/index` | POST | `{"volume_path": str, "index_path": str}` | `{"status": str}` |
+| `/volume/search` | POST | `{"query": str, "index_path": str}` | `{"results": [...]}` |
 
 #### 3. Script Interface
 
@@ -332,6 +377,13 @@ Options:
 - [x] Bundled .app distribution with auto-setup
 - [x] Duplicate image detection
 - [x] Date, size, and file type filters
+- [x] Face recognition & clustering
+- [x] Face naming, pinning, hiding, merging
+- [x] Face groups/albums
+- [x] Similar image search
+- [x] External volume indexing
+- [x] Model selection & management
+- [x] OCR text extraction & hybrid search
 - [ ] Alternative/smaller models
 
 ---
@@ -421,16 +473,19 @@ We may add optional encryption in the future for these scenarios.
 ```
 ~/Library/Application Support/searchy/
 ├── image_index.bin      # Image embeddings + file paths (pickle)
-├── face_index.pkl       # Face embeddings if face recognition enabled
+├── face_index.pkl       # Face embeddings + clusters + person names
 ├── model_config.json    # Selected CLIP model
+├── face_groups.json     # Custom face groups/albums
+├── pinned_faces.json    # Pinned face IDs
+├── hidden_faces.json    # Hidden face IDs
 └── venv/                # Isolated Python environment
 ```
 
 **Data collected:**
 - File paths of indexed images
 - CLIP embeddings (512-1024 dimensional vectors)
-- OCR-extracted text from images (if text is detected)
-- Face embeddings (only if face recognition feature is used)
+- OCR-extracted text from images (automatically during indexing)
+- Face embeddings and cluster data (when face recognition is used)
 
 **Not collected:**
 - Search queries (in-memory only, not persisted)
