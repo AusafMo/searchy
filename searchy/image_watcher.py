@@ -47,6 +47,34 @@ def matches_filter(filename, filter_type, filter_value):
     return True
 
 
+def call_server_notify(server_url, file_path):
+    """Notify the server that a new image was detected (for immediate display)."""
+    url = f"{server_url}/notify-new-image"
+
+    request_data = {
+        "file_path": file_path,
+        "detection_time": time.time()
+    }
+
+    try:
+        data = json.dumps(request_data).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result
+
+    except Exception as e:
+        # Don't fail hard on notify errors - indexing will still happen
+        print(f"Notify error (non-fatal): {e}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}
+
+
 def call_server_index(server_url, data_dir, files, fast_indexing=True,
                       max_dimension=384, batch_size=64):
     """Call the server's /index endpoint to index files."""
@@ -94,7 +122,7 @@ class ImageEventHandler(FileSystemEventHandler):
         self.batch_size = batch_size
         self.pending_files = set()
         self.last_index_time = time.time()
-        self.debounce_delay = 2.0  # Wait 2 seconds before indexing
+        self.debounce_delay = 0.5  # Wait 0.5 seconds before indexing (reduced for faster response)
 
     def on_created(self, event):
         """Called when a file or directory is created"""
@@ -104,6 +132,9 @@ class ImageEventHandler(FileSystemEventHandler):
         file_path = event.src_path
         if self._is_valid_image(file_path):
             print(f"New image detected: {os.path.basename(file_path)}", file=sys.stderr)
+            # Immediately notify server so image appears in UI
+            call_server_notify(self.server_url, file_path)
+            # Queue for indexing
             self.pending_files.add(file_path)
             self.last_index_time = time.time()
 
@@ -115,6 +146,9 @@ class ImageEventHandler(FileSystemEventHandler):
         dest_path = event.dest_path
         if self._is_valid_image(dest_path):
             print(f"Image moved/added: {os.path.basename(dest_path)}", file=sys.stderr)
+            # Immediately notify server so image appears in UI
+            call_server_notify(self.server_url, dest_path)
+            # Queue for indexing
             self.pending_files.add(dest_path)
             self.last_index_time = time.time()
 

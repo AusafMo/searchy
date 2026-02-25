@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 import Vision
+import ImageCaptureCore
 
 // MARK: - Color Extension for Hex Support
 extension Color {
@@ -903,6 +904,479 @@ struct WatchedDirectory: Identifiable, Codable, Equatable {
     var filterDescription: String? {
         guard !filter.isEmpty && filterType != .all else { return nil }
         return "\(filterType.rawValue): \(filter)"
+    }
+}
+
+// MARK: - External Volume Management
+
+enum VolumeType: String, Codable {
+    case external = "external"      // USB drives, external SSDs
+    case network = "network"        // NAS, SMB/AFP shares
+    case raid = "raid"              // RAID arrays
+    case manual = "manual"          // Manually added paths
+}
+
+enum IndexStorageLocation: String, Codable {
+    case onVolume = "onVolume"      // Store index on the volume itself (portable)
+    case centralized = "centralized" // Store in app's data directory
+}
+
+struct ExternalVolume: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var path: String
+    var type: VolumeType
+    var isEnabled: Bool
+    var lastIndexed: Date?
+    var imageCount: Int
+    var volumeUUID: String?  // macOS volume UUID for reliable identification
+    var indexStorage: IndexStorageLocation
+
+    var isOnline: Bool {
+        FileManager.default.fileExists(atPath: path)
+    }
+
+    /// Get the path where the index should be stored
+    var indexPath: String {
+        switch indexStorage {
+        case .onVolume:
+            // Store in a hidden .searchy folder on the volume
+            return "\(path)/.searchy"
+        case .centralized:
+            // Store in app's Application Support with volume ID
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            return appSupport.appendingPathComponent("searchy/volumes/\(id.uuidString)").path
+        }
+    }
+
+    /// Get the index file path
+    var indexFilePath: String {
+        return "\(indexPath)/image_index.bin"
+    }
+
+    /// Get the thumbnails directory path
+    var thumbnailsPath: String {
+        return "\(indexPath)/thumbnails"
+    }
+
+    init(id: UUID = UUID(), name: String, path: String, type: VolumeType, isEnabled: Bool = true, lastIndexed: Date? = nil, imageCount: Int = 0, volumeUUID: String? = nil, indexStorage: IndexStorageLocation = .centralized) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.type = type
+        self.isEnabled = isEnabled
+        self.lastIndexed = lastIndexed
+        self.imageCount = imageCount
+        self.volumeUUID = volumeUUID
+        // Default: network volumes use centralized, external use on-volume
+        self.indexStorage = type == .network ? .centralized : indexStorage
+    }
+}
+
+class VolumeManager: ObservableObject {
+    static let shared = VolumeManager()
+
+    @Published var volumes: [ExternalVolume] = []
+    @Published var isScanning = false
+
+    private let userDefaultsKey = "externalVolumes"
+    private var volumeMonitor: DispatchSourceFileSystemObject?
+    private let volumesPath = "/Volumes"
+
+    // System volumes to ignore
+    private let ignoredVolumes: Set<String> = [
+        "Macintosh HD",
+        "Macintosh HD - Data",
+        "Recovery",
+        "Preboot",
+        "VM",
+        "Update",
+        "com.apple.TimeMachine.localsnapshots"
+    ]
+
+    // Patterns that indicate DMG/app mounts (not real external drives)
+    private let dmgPatterns: [String] = [
+        "Install ",           // macOS installers
+        "Installer",
+        ".app",               // App bundles
+        "-Fork",              // Development forks
+        "-main",              // Git branches mounted
+        "-master",
+        "Xcode",              // Xcode disk images
+    ]
+
+    private init() {
+        loadVolumes()
+        startMonitoringVolumes()
+        refreshVolumes()
+    }
+
+    /// Check if a volume looks like a DMG mount or app bundle
+    private func isDiskImageMount(name: String, url: URL) -> Bool {
+        // Check name patterns
+        for pattern in dmgPatterns {
+            if name.contains(pattern) {
+                return true
+            }
+        }
+
+        // Check volume properties
+        if let resourceValues = try? url.resourceValues(forKeys: [
+            .volumeIsReadOnlyKey,
+            .volumeIsEjectableKey,
+            .volumeIsRootFileSystemKey,
+            .volumeTotalCapacityKey
+        ]) {
+            let isReadOnly = resourceValues.volumeIsReadOnly ?? false
+            let isEjectable = resourceValues.volumeIsEjectable ?? false
+            let totalCapacity = resourceValues.volumeTotalCapacity ?? 0
+
+            // DMGs are typically: read-only + ejectable + small capacity (< 10GB usually for app DMGs)
+            // Real external drives are usually larger and writable
+            if isReadOnly && isEjectable && totalCapacity < 10_000_000_000 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    deinit {
+        volumeMonitor?.cancel()
+    }
+
+    // MARK: - Persistence
+
+    private func loadVolumes() {
+        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+           let saved = try? JSONDecoder().decode([ExternalVolume].self, from: data) {
+            self.volumes = saved
+        }
+    }
+
+    private func saveVolumes() {
+        if let data = try? JSONEncoder().encode(volumes) {
+            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        }
+    }
+
+    // MARK: - Volume Detection
+
+    func refreshVolumes() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            let fileManager = FileManager.default
+            guard let contents = try? fileManager.contentsOfDirectory(atPath: self.volumesPath) else { return }
+
+            var detectedVolumes: [ExternalVolume] = []
+
+            for volumeName in contents {
+                // Skip ignored system volumes
+                if self.ignoredVolumes.contains(volumeName) { continue }
+
+                let volumePath = "\(self.volumesPath)/\(volumeName)"
+
+                // Check if it's a directory and accessible
+                var isDir: ObjCBool = false
+                guard fileManager.fileExists(atPath: volumePath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+                let volumeURL = URL(fileURLWithPath: volumePath)
+
+                // Skip DMG mounts, app bundles, and disk images
+                if self.isDiskImageMount(name: volumeName, url: volumeURL) { continue }
+
+                // Try to get volume UUID
+                let volumeUUID = try? volumeURL.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+
+                // Determine volume type
+                let volumeType = self.detectVolumeType(at: volumeURL)
+
+                // Check if we already track this volume
+                if let existingIndex = self.volumes.firstIndex(where: { $0.path == volumePath || ($0.volumeUUID != nil && $0.volumeUUID == volumeUUID) }) {
+                    // Update existing volume info
+                    var updated = self.volumes[existingIndex]
+                    updated.path = volumePath
+                    updated.name = volumeName
+                    detectedVolumes.append(updated)
+                } else {
+                    // New volume detected
+                    let newVolume = ExternalVolume(
+                        name: volumeName,
+                        path: volumePath,
+                        type: volumeType,
+                        volumeUUID: volumeUUID
+                    )
+                    detectedVolumes.append(newVolume)
+                }
+            }
+
+            // Keep manually added volumes that are offline
+            let manualVolumes = self.volumes.filter { $0.type == .manual && !detectedVolumes.contains(where: { $0.path == $0.path }) }
+
+            DispatchQueue.main.async {
+                self.volumes = detectedVolumes + manualVolumes
+                self.saveVolumes()
+            }
+        }
+    }
+
+    private func detectVolumeType(at url: URL) -> VolumeType {
+        guard let resourceValues = try? url.resourceValues(forKeys: [.volumeIsRemovableKey, .volumeIsLocalKey]) else {
+            return .external
+        }
+
+        // If not local, it's a network volume
+        if resourceValues.volumeIsLocal == false {
+            return .network
+        } else if resourceValues.volumeIsRemovable == true {
+            return .external
+        } else {
+            return .external
+        }
+    }
+
+    // MARK: - Volume Monitoring
+
+    private func startMonitoringVolumes() {
+        let fileDescriptor = open(volumesPath, O_EVTONLY)
+        guard fileDescriptor >= 0 else { return }
+
+        volumeMonitor = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fileDescriptor,
+            eventMask: [.write, .delete, .rename],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+
+        volumeMonitor?.setEventHandler { [weak self] in
+            // Debounce rapid events
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self?.refreshVolumes()
+            }
+        }
+
+        volumeMonitor?.setCancelHandler {
+            close(fileDescriptor)
+        }
+
+        volumeMonitor?.resume()
+    }
+
+    // MARK: - Volume Management
+
+    func addManualVolume(name: String, path: String) {
+        let volume = ExternalVolume(
+            name: name,
+            path: path,
+            type: .manual
+        )
+        volumes.append(volume)
+        saveVolumes()
+    }
+
+    func removeVolume(_ volume: ExternalVolume) {
+        volumes.removeAll { $0.id == volume.id }
+        saveVolumes()
+    }
+
+    func toggleVolume(_ volume: ExternalVolume) {
+        if let index = volumes.firstIndex(where: { $0.id == volume.id }) {
+            volumes[index].isEnabled.toggle()
+            saveVolumes()
+        }
+    }
+
+    func updateVolumeStats(_ volumeId: UUID, imageCount: Int) {
+        if let index = volumes.firstIndex(where: { $0.id == volumeId }) {
+            volumes[index].imageCount = imageCount
+            volumes[index].lastIndexed = Date()
+            saveVolumes()
+        }
+    }
+
+    /// Get all enabled and online volume paths for indexing
+    func getIndexablePaths() -> [String] {
+        return volumes
+            .filter { $0.isEnabled && $0.isOnline }
+            .map { $0.path }
+    }
+
+    /// Check if a given image path belongs to an offline volume
+    func isPathOffline(_ imagePath: String) -> Bool {
+        for volume in volumes {
+            if imagePath.hasPrefix(volume.path) {
+                return !volume.isOnline
+            }
+        }
+        return false
+    }
+
+    /// Get the volume for a given path
+    func volumeForPath(_ path: String) -> ExternalVolume? {
+        return volumes.first { path.hasPrefix($0.path) }
+    }
+
+    // MARK: - Index Storage Management
+
+    /// Change where a volume's index is stored
+    func setIndexStorage(_ volume: ExternalVolume, location: IndexStorageLocation) {
+        guard let index = volumes.firstIndex(where: { $0.id == volume.id }) else { return }
+
+        let oldPath = volumes[index].indexPath
+        volumes[index].indexStorage = location
+        let newPath = volumes[index].indexPath
+
+        // Move existing index if it exists
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: oldPath) {
+            do {
+                try fileManager.createDirectory(atPath: (newPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+                try fileManager.moveItem(atPath: oldPath, toPath: newPath)
+            } catch {
+                print("Failed to move index: \(error)")
+            }
+        }
+
+        saveVolumes()
+    }
+
+    /// Ensure the index directory exists for a volume
+    func ensureIndexDirectory(for volume: ExternalVolume) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(atPath: volume.indexPath, withIntermediateDirectories: true)
+        try fileManager.createDirectory(atPath: volume.thumbnailsPath, withIntermediateDirectories: true)
+    }
+
+    /// Check if a volume has an existing index
+    func hasIndex(_ volume: ExternalVolume) -> Bool {
+        return FileManager.default.fileExists(atPath: volume.indexFilePath)
+    }
+
+    /// Get the total size of a volume's index (index file + thumbnails)
+    func indexSize(for volume: ExternalVolume) -> Int64 {
+        let fileManager = FileManager.default
+        var totalSize: Int64 = 0
+
+        // Index file size
+        if let attrs = try? fileManager.attributesOfItem(atPath: volume.indexFilePath),
+           let size = attrs[.size] as? Int64 {
+            totalSize += size
+        }
+
+        // Thumbnails directory size
+        if let enumerator = fileManager.enumerator(atPath: volume.thumbnailsPath) {
+            while let file = enumerator.nextObject() as? String {
+                let filePath = "\(volume.thumbnailsPath)/\(file)"
+                if let attrs = try? fileManager.attributesOfItem(atPath: filePath),
+                   let size = attrs[.size] as? Int64 {
+                    totalSize += size
+                }
+            }
+        }
+
+        return totalSize
+    }
+
+    /// Delete a volume's index and thumbnails
+    func deleteIndex(for volume: ExternalVolume) {
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(atPath: volume.indexPath)
+
+        // Reset stats
+        if let index = volumes.firstIndex(where: { $0.id == volume.id }) {
+            volumes[index].imageCount = 0
+            volumes[index].lastIndexed = nil
+            saveVolumes()
+        }
+    }
+
+    /// Format bytes as human-readable string
+    func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
+// MARK: - Mobile Device Manager (ImageCaptureCore)
+
+/// Represents a connected mobile device (iPhone, camera, etc.)
+struct MobileDevice: Identifiable {
+    let id: String
+    let name: String
+    let icon: String
+}
+
+/// Manages connected mobile devices using ImageCaptureCore
+class MobileDeviceManager: NSObject, ObservableObject, ICDeviceBrowserDelegate {
+    static let shared = MobileDeviceManager()
+
+    @Published var devices: [MobileDevice] = []
+    @Published var isScanning = false
+
+    private var deviceBrowser: ICDeviceBrowser?
+
+    private override init() {
+        super.init()
+        setupDeviceBrowser()
+    }
+
+    private func setupDeviceBrowser() {
+        deviceBrowser = ICDeviceBrowser()
+        deviceBrowser?.delegate = self
+        deviceBrowser?.browsedDeviceTypeMask = ICDeviceTypeMask.camera
+    }
+
+    func startScanning() {
+        isScanning = true
+        deviceBrowser?.start()
+    }
+
+    func stopScanning() {
+        isScanning = false
+        deviceBrowser?.stop()
+    }
+
+    // MARK: - ICDeviceBrowserDelegate
+
+    func deviceBrowser(_ browser: ICDeviceBrowser, didAdd device: ICDevice, moreComing: Bool) {
+        DispatchQueue.main.async {
+            let icon: String
+            let name = device.name ?? "Unknown Device"
+
+            if name.lowercased().contains("iphone") {
+                icon = "iphone"
+            } else if name.lowercased().contains("ipad") {
+                icon = "ipad"
+            } else if name.lowercased().contains("android") || name.lowercased().contains("samsung") || name.lowercased().contains("pixel") {
+                icon = "candybarphone"
+            } else {
+                icon = "camera.fill"
+            }
+
+            let mobileDevice = MobileDevice(
+                id: device.uuidString ?? UUID().uuidString,
+                name: name,
+                icon: icon
+            )
+
+            // Avoid duplicates
+            if !self.devices.contains(where: { $0.id == mobileDevice.id }) {
+                self.devices.append(mobileDevice)
+            }
+        }
+    }
+
+    func deviceBrowser(_ browser: ICDeviceBrowser, didRemove device: ICDevice, moreGoing: Bool) {
+        DispatchQueue.main.async {
+            let deviceId = device.uuidString ?? ""
+            self.devices.removeAll { $0.id == deviceId }
+        }
+    }
+
+    /// Open the system Image Capture app
+    func openImageCapture() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Image Capture.app"))
     }
 }
 
@@ -2238,8 +2712,14 @@ struct MasonryImageCard: View {
     @State private var thumbnail: NSImage?
     @State private var aspectRatio: CGFloat = 1.0
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var volumeManager = VolumeManager.shared
 
     private let baseWidth: CGFloat = 200
+
+    /// Check if this image is on an offline volume
+    private var isOffline: Bool {
+        volumeManager.isPathOffline(result.path)
+    }
 
     var body: some View {
         ZStack {
@@ -2257,11 +2737,14 @@ struct MasonryImageCard: View {
             if isHovered && !showCopied { hoverOverlay }
             if showCopied { copiedFeedback }
 
-            // Top row - favorite button and similarity badge
+            // Top row - favorite button, offline badge, and similarity badge
             VStack {
                 HStack {
                     if isHovered {
                         favoriteButton
+                    }
+                    if isOffline {
+                        offlineBadge
                     }
                     Spacer()
                     if showSimilarity {
@@ -2269,6 +2752,11 @@ struct MasonryImageCard: View {
                     }
                 }
                 Spacer()
+            }
+
+            // Offline overlay when volume unavailable
+            if isOffline {
+                offlineOverlay
             }
         }
         .aspectRatio(aspectRatio, contentMode: .fit)
@@ -2358,6 +2846,37 @@ struct MasonryImageCard: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(Color.black.opacity(0.5)))
             .padding(6)
+    }
+
+    private var offlineBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "externaldrive.badge.xmark")
+                .font(.system(size: 9, weight: .bold))
+            Text("Offline")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.orange))
+        .padding(6)
+    }
+
+    private var offlineOverlay: some View {
+        ZStack {
+            // Dim the image
+            Color.black.opacity(0.4)
+
+            // Offline indicator
+            VStack(spacing: 8) {
+                Image(systemName: "externaldrive.badge.xmark")
+                    .font(.system(size: 28))
+                    .foregroundColor(.white.opacity(0.9))
+                Text("Volume Offline")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+        }
     }
 
     private var hoverOverlay: some View {
@@ -4695,6 +5214,207 @@ struct CircularProgressView: View {
     }
 }
 
+// MARK: - Person Face Card (with verify/reject buttons and selection)
+struct PersonFaceCard: View {
+    let face: DetectedFace
+    let personId: String
+    let result: SearchResult
+    @ObservedObject var faceManager: FaceManager
+    var cardHeight: CGFloat = 200
+    var isSelected: Bool = false
+    var isSelectionMode: Bool = false
+    var onSelect: (() -> Void)? = nil
+
+    @State private var isHovered = false
+    @State private var thumbnail: NSImage?
+    @State private var isVerifying = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        ZStack {
+            // Image content
+            if let img = thumbnail {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(height: cardHeight)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+                    .frame(height: cardHeight)
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    )
+            }
+
+            // Selection overlay
+            if isSelected {
+                Color.blue.opacity(0.3)
+            }
+
+            // Top indicators row
+            VStack {
+                HStack {
+                    // Verified badge (left)
+                    if face.verified {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.green)
+                            .padding(6)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+
+                    Spacer()
+
+                    // Selection checkbox (right) - show in selection mode or on hover
+                    if isSelectionMode || isHovered {
+                        Button(action: { onSelect?() }) {
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(isSelected ? .blue : .white)
+                                .padding(6)
+                                .background(Circle().fill(Color.black.opacity(0.5)))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                Spacer()
+            }
+            .padding(8)
+
+            // Hover overlay with verify/reject buttons (only when not in selection mode)
+            if isHovered && !face.verified && !isSelectionMode {
+                ZStack {
+                    // Semi-transparent overlay
+                    Color.black.opacity(0.4)
+
+                    // Verify/Reject buttons
+                    HStack(spacing: 24) {
+                        // Reject button
+                        Button(action: {
+                            verifyFace(isCorrect: false)
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Circle().fill(Color.red))
+                                .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(isVerifying)
+                        .help("Not this person")
+
+                        // Verify button
+                        Button(action: {
+                            verifyFace(isCorrect: true)
+                        }) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Circle().fill(Color.green))
+                                .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(isVerifying)
+                        .help("Confirm this is correct")
+                    }
+
+                    if isVerifying {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                    }
+                }
+            }
+
+            // Bottom gradient with filename
+            VStack {
+                Spacer()
+                HStack {
+                    Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    LinearGradient(
+                        gradient: Gradient(colors: [.clear, .black.opacity(0.6)]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
+        }
+        .frame(height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+        )
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.1), radius: 8, y: 4)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .onTapGesture {
+            if isSelectionMode {
+                onSelect?()
+            }
+        }
+        .onAppear { loadThumbnail() }
+        .contextMenu {
+            Button(action: { onSelect?() }) {
+                Label(isSelected ? "Deselect" : "Select", systemImage: isSelected ? "checkmark.circle.fill" : "circle")
+            }
+
+            Divider()
+
+            Button(action: { verifyFace(isCorrect: true) }) {
+                Label("Confirm Face", systemImage: "checkmark.circle")
+            }
+            .disabled(face.verified)
+
+            Button(action: { verifyFace(isCorrect: false) }) {
+                Label("Not This Person", systemImage: "xmark.circle")
+            }
+
+            Divider()
+
+            Button(action: {
+                NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+            }) {
+                Label("Show in Finder", systemImage: "folder")
+            }
+        }
+    }
+
+    private func loadThumbnail() {
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: 400) { image in
+            self.thumbnail = image
+        }
+    }
+
+    private func verifyFace(isCorrect: Bool) {
+        guard let faceId = face.faceId else { return }
+        isVerifying = true
+
+        Task {
+            await faceManager.verifyFace(faceId: faceId, clusterId: personId, isCorrect: isCorrect)
+            await MainActor.run {
+                isVerifying = false
+            }
+        }
+    }
+}
+
 // MARK: - Recent Image Card (Craft-style warm, floating card)
 struct ImageCard: View {
     let result: SearchResult
@@ -4707,6 +5427,12 @@ struct ImageCard: View {
     @State private var showCopied = false
     @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var volumeManager = VolumeManager.shared
+
+    /// Check if this image is on an offline volume
+    private var isOffline: Bool {
+        volumeManager.isPathOffline(result.path)
+    }
 
     var body: some View {
         ZStack {
@@ -4723,11 +5449,17 @@ struct ImageCard: View {
             if isHovered && !showCopied { hoverOverlay }
             if showCopied { copiedFeedback }
 
-            // Top row - favorite button (left) and similarity badge (right) - ON TOP
+            // Top row - favorite button (left), offline badge, pending badge, and similarity badge (right) - ON TOP
             VStack {
                 HStack {
                     if isHovered {
                         favoriteButton
+                    }
+                    if isOffline {
+                        offlineBadge
+                    }
+                    if result.isPending {
+                        pendingBadge
                     }
                     Spacer()
                     if showSimilarity {
@@ -4735,6 +5467,11 @@ struct ImageCard: View {
                     }
                 }
                 Spacer()
+            }
+
+            // Offline overlay when volume unavailable
+            if isOffline {
+                offlineOverlay
             }
         }
         .frame(minHeight: cardHeight, maxHeight: cardHeight)
@@ -4810,6 +5547,52 @@ struct ImageCard: View {
         )
         .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 4, y: 2)
         .padding(8)
+    }
+
+    private var offlineBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "externaldrive.badge.xmark")
+                .font(.system(size: 9, weight: .bold))
+            Text("Offline")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.orange))
+        .padding(6)
+    }
+
+    private var pendingBadge: some View {
+        HStack(spacing: 3) {
+            ProgressView()
+                .scaleEffect(0.5)
+                .frame(width: 10, height: 10)
+            Text("Indexing")
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.blue.opacity(0.8)))
+        .padding(6)
+    }
+
+    private var offlineOverlay: some View {
+        ZStack {
+            // Dim the image
+            Color.black.opacity(0.4)
+
+            // Offline indicator
+            VStack(spacing: 8) {
+                Image(systemName: "externaldrive.badge.xmark")
+                    .font(.system(size: 28))
+                    .foregroundColor(.white.opacity(0.9))
+                Text("Volume Offline")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
+            }
+        }
     }
 
     private var imageContent: some View {
@@ -5068,6 +5851,7 @@ struct SearchResult: Codable, Identifiable {
     let size: Int?
     let date: String?
     let type: String?
+    let isPending: Bool  // True if detected but not yet indexed (not searchable yet)
 
     enum CodingKeys: String, CodingKey {
         case path
@@ -5075,6 +5859,27 @@ struct SearchResult: Codable, Identifiable {
         case size
         case date
         case type
+        case isPending = "is_pending"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try container.decode(String.self, forKey: .path)
+        similarity = try container.decode(Float.self, forKey: .similarity)
+        size = try container.decodeIfPresent(Int.self, forKey: .size)
+        date = try container.decodeIfPresent(String.self, forKey: .date)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
+    }
+
+    // Memberwise initializer for direct construction
+    init(path: String, similarity: Float, size: Int? = nil, date: String? = nil, type: String? = nil, isPending: Bool = false) {
+        self.path = path
+        self.similarity = similarity
+        self.size = size
+        self.date = date
+        self.type = type
+        self.isPending = isPending
     }
 
     var formattedSize: String {
@@ -5486,6 +6291,7 @@ struct SetupStatRow: View {
 enum AppTab: String, CaseIterable {
     case faces = "Faces"
     case search = "Searchy"
+    case volumes = "Volumes"
     case duplicates = "Duplicates"
     case favorites = "Favorites"
     case setup = "Setup"
@@ -5494,6 +6300,7 @@ enum AppTab: String, CaseIterable {
         switch self {
         case .faces: return "person.2"
         case .search: return "magnifyingglass"
+        case .volumes: return "externaldrive"
         case .duplicates: return "doc.on.doc"
         case .favorites: return "heart.fill"
         case .setup: return "slider.horizontal.3"
@@ -5838,17 +6645,21 @@ struct DetectedFace: Codable, Identifiable {
     let boundingBox: CGRect
     var embedding: [Float]?
     var personId: String?
+    var faceId: String?  // The face_id from Python API (used for verification)
+    var verified: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case id, imagePath, boundingBox, embedding, personId
+        case id, imagePath, boundingBox, embedding, personId, faceId, verified
     }
 
-    init(id: UUID = UUID(), imagePath: String, boundingBox: CGRect, embedding: [Float]? = nil, personId: String? = nil) {
+    init(id: UUID = UUID(), imagePath: String, boundingBox: CGRect, embedding: [Float]? = nil, personId: String? = nil, faceId: String? = nil, verified: Bool = false) {
         self.id = id
         self.imagePath = imagePath
         self.boundingBox = boundingBox
         self.embedding = embedding
         self.personId = personId
+        self.faceId = faceId
+        self.verified = verified
     }
 
     // Create from FaceData (Python API response)
@@ -5863,10 +6674,12 @@ struct DetectedFace: Codable, Identifiable {
         )
         self.embedding = nil
         self.personId = nil
+        self.faceId = faceData.face_id
+        self.verified = faceData.isVerified
     }
 }
 
-struct Person: Identifiable {
+struct Person: Identifiable, Equatable {
     let id: String
     var name: String
     var faces: [DetectedFace]
@@ -5891,6 +6704,10 @@ struct Person: Identifiable {
         self.thumbnailPath = thumbnailPath
         self.unverifiedCount = unverifiedCount
     }
+
+    static func == (lhs: Person, rhs: Person) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 class FaceManager: ObservableObject {
@@ -5906,6 +6723,16 @@ class FaceManager: ObservableObject {
     @Published var pinnedClusterIds: Set<String> = []
     @Published var hiddenClusterIds: Set<String> = []
     @Published var showHidden: Bool = false
+    @Published var isReclustering = false
+    @Published var orphanedFacesCount = 0
+
+    /// Returns true if any person has at least one verified face
+    var hasVerifiedFaces: Bool {
+        // If unverifiedCount < faceCount, then some faces are verified
+        people.contains { person in
+            person.unverifiedCount < person.faceCount
+        }
+    }
 
     let baseURL = "http://localhost:7860"
     let dataDir = "/Users/ausaf/Library/Application Support/searchy"
@@ -6077,6 +6904,123 @@ class FaceManager: ObservableObject {
                 print("Failed to clear faces: \(error)")
             }
         }
+    }
+
+    /// Re-cluster faces using verified faces as anchors
+    /// This respects negative constraints from rejections and tries to place orphaned faces
+    func reclusterWithConstraints() {
+        guard !isReclustering && !isScanning else { return }
+
+        Task {
+            await MainActor.run {
+                self.isReclustering = true
+                self.scanProgress = "Re-clustering faces..."
+            }
+
+            var components = URLComponents(string: "\(baseURL)/face-recluster")
+            components?.queryItems = [
+                URLQueryItem(name: "data_dir", value: dataDir),
+                URLQueryItem(name: "similarity_threshold", value: "0.60")
+            ]
+
+            guard let url = components?.url else {
+                await MainActor.run {
+                    self.isReclustering = false
+                    self.scanProgress = "Error: Invalid URL"
+                }
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let error = json["error"] as? String {
+                        await MainActor.run {
+                            self.isReclustering = false
+                            self.scanProgress = error
+                        }
+                    } else {
+                        let facesMoved = json["faces_moved"] as? Int ?? 0
+                        let orphansPlaced = json["orphans_placed"] as? Int ?? 0
+                        let orphansRemaining = json["orphans_remaining"] as? Int ?? 0
+
+                        await MainActor.run {
+                            self.isReclustering = false
+                            self.orphanedFacesCount = orphansRemaining
+                            self.scanProgress = "Re-clustered: \(facesMoved) moved, \(orphansPlaced) orphans placed"
+                        }
+
+                        // Reload clusters to reflect changes
+                        await loadClustersFromAPI()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isReclustering = false
+                    self.scanProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Verify or reject a face in a cluster
+    func verifyFace(faceId: String, clusterId: String, isCorrect: Bool) async {
+        var components = URLComponents(string: "\(baseURL)/face-verify")
+        components?.queryItems = [
+            URLQueryItem(name: "face_id", value: faceId),
+            URLQueryItem(name: "cluster_id", value: clusterId),
+            URLQueryItem(name: "is_correct", value: isCorrect ? "true" : "false"),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+
+        guard let url = components?.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let status = json["status"] as? String ?? ""
+                print("Face verification result: \(status)")
+
+                // Reload clusters to reflect the change
+                await loadClustersFromAPI()
+            }
+        } catch {
+            print("Failed to verify face: \(error)")
+        }
+    }
+
+    /// Batch verify or reject multiple faces
+    func verifyFaces(faceIds: [String], clusterId: String, isCorrect: Bool) async {
+        // Process faces sequentially to avoid overwhelming the server
+        for faceId in faceIds {
+            var components = URLComponents(string: "\(baseURL)/face-verify")
+            components?.queryItems = [
+                URLQueryItem(name: "face_id", value: faceId),
+                URLQueryItem(name: "cluster_id", value: clusterId),
+                URLQueryItem(name: "is_correct", value: isCorrect ? "true" : "false"),
+                URLQueryItem(name: "data_dir", value: dataDir)
+            ]
+
+            guard let url = components?.url else { continue }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+
+            do {
+                let _ = try await URLSession.shared.data(for: request)
+            } catch {
+                print("Failed to verify face \(faceId): \(error)")
+            }
+        }
+
+        // Reload clusters once after all verifications
+        await loadClustersFromAPI()
     }
 
     /// Get images for a specific person
@@ -6479,6 +7423,8 @@ struct ContentView: View {
                     facesTabContent
                 case .search:
                     searchTabContent
+                case .volumes:
+                    volumesTabContent
                 case .duplicates:
                     duplicatesTabContent
                 case .favorites:
@@ -6779,6 +7725,36 @@ struct ContentView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(faceManager.isScanning)
+
+                // Re-cluster button - only show when there are verified faces
+                if faceManager.hasVerifiedFaces && !faceManager.isScanning {
+                    Button(action: {
+                        faceManager.reclusterWithConstraints()
+                    }) {
+                        HStack(spacing: 6) {
+                            if faceManager.isReclustering {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            Text(faceManager.isReclustering ? "Re-clustering..." : "Re-cluster")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(DesignSystem.Colors.accent, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(faceManager.isReclustering)
+                    .help("Re-assign faces using verified faces as anchors")
+                }
             }
             .padding(.bottom, DesignSystem.Spacing.md)
             .onAppear {
@@ -6971,25 +7947,78 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // People grid
-                if filteredPeople.isEmpty && !peopleSearchText.isEmpty {
-                    // No search results
-                    VStack(spacing: 16) {
-                        Spacer()
-                        Image(systemName: "person.slash")
-                            .font(.system(size: 40, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        Text("No people matching \"\(peopleSearchText)\"")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Button(action: { peopleSearchText = "" }) {
-                            Text("Clear Search")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.accent)
+                if filteredPeople.isEmpty {
+                    if !peopleSearchText.isEmpty {
+                        // No search results
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "person.slash")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            Text("No people matching \"\(peopleSearchText)\"")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            Button(action: { peopleSearchText = "" }) {
+                                Text("Clear Search")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            Spacer()
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        Spacer()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if faceManager.selectedGroupFilter != nil {
+                        // Group filter filters out everyone
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "person.2.slash")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            Text("No people in this group")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            Button(action: { faceManager.selectedGroupFilter = nil }) {
+                                Text("Show All")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if !faceManager.showHidden && faceManager.hiddenCount > 0 && faceManager.people.count == faceManager.hiddenCount {
+                        // All people are hidden
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "eye.slash")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            Text("All people are hidden")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            Button(action: { faceManager.showHidden = true }) {
+                                Text("Show Hidden")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        // Fallback empty state - shouldn't normally happen
+                        VStack(spacing: 16) {
+                            Spacer()
+                            Image(systemName: "person.crop.circle.badge.questionmark")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            Text("No people to display")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                         LazyVGrid(columns: [
@@ -7044,6 +8073,7 @@ struct ContentView: View {
                 }
             }
         }
+        .padding(.top, DesignSystem.Spacing.lg)
         .padding(.horizontal, DesignSystem.Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -7421,6 +8451,9 @@ struct ContentView: View {
     @State private var showBulkMergeSheet = false
     @State private var bulkMergeTargetId: String? = nil
     @State private var showVerificationView = false
+    @State private var selectedFaceIds: Set<UUID> = []
+    @State private var isSelectionMode = false
+    @State private var isBatchProcessing = false
 
     private var personDetailView: some View {
         VStack(spacing: 0) {
@@ -7583,8 +8616,7 @@ struct ContentView: View {
 
             // Person's photos grid
             if let person = selectedPerson {
-                let images = faceManager.getImagesForPerson(person)
-                if images.isEmpty {
+                if person.faces.isEmpty {
                     VStack(spacing: 16) {
                         Spacer()
                         Image(systemName: "photo.on.rectangle.angled")
@@ -7596,18 +8628,163 @@ struct ContentView: View {
                         Spacer()
                     }
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)
-                        ], spacing: 16) {
-                            ForEach(images) { result in
-                                ImageCard(result: result, onFindSimilar: { _ in })
+                    VStack(spacing: 0) {
+                        // Selection toolbar
+                        HStack(spacing: 12) {
+                            // Selection mode toggle
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isSelectionMode.toggle()
+                                    if !isSelectionMode {
+                                        selectedFaceIds.removeAll()
+                                    }
+                                }
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: isSelectionMode ? "checkmark.circle.fill" : "checkmark.circle")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(isSelectionMode ? "Done" : "Select")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(isSelectionMode ? .white : DesignSystem.Colors.secondaryText)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(isSelectionMode ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            if isSelectionMode {
+                                // Select all / Deselect all
+                                Button(action: {
+                                    if selectedFaceIds.count == person.faces.count {
+                                        selectedFaceIds.removeAll()
+                                    } else {
+                                        selectedFaceIds = Set(person.faces.map { $0.id })
+                                    }
+                                }) {
+                                    Text(selectedFaceIds.count == person.faces.count ? "Deselect All" : "Select All")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(DesignSystem.Colors.accent)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
+                                if !selectedFaceIds.isEmpty {
+                                    Text("\(selectedFaceIds.count) selected")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                                }
+                            }
+
+                            Spacer()
+
+                            // Batch action buttons (only when items selected)
+                            if isSelectionMode && !selectedFaceIds.isEmpty {
+                                // Batch Verify
+                                Button(action: {
+                                    batchVerifySelectedFaces(person: person, isCorrect: true)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        if isBatchProcessing {
+                                            ProgressView()
+                                                .scaleEffect(0.6)
+                                                .frame(width: 12, height: 12)
+                                        } else {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 11, weight: .bold))
+                                        }
+                                        Text("Verify All")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.green))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(isBatchProcessing)
+
+                                // Batch Reject
+                                Button(action: {
+                                    batchVerifySelectedFaces(person: person, isCorrect: false)
+                                }) {
+                                    HStack(spacing: 4) {
+                                        if isBatchProcessing {
+                                            ProgressView()
+                                                .scaleEffect(0.6)
+                                                .frame(width: 12, height: 12)
+                                        } else {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 11, weight: .bold))
+                                        }
+                                        Text("Reject All")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.red))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(isBatchProcessing)
+                            }
+
+                            // Hint (when not in selection mode)
+                            if !isSelectionMode && person.unverifiedCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "lightbulb.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.orange)
+                                    Text("Hover to verify")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                }
                             }
                         }
-                        .padding(.bottom, 20)
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, 12)
+
+                        ScrollView {
+                            LazyVGrid(columns: [
+                                GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)
+                            ], spacing: 16) {
+                                ForEach(person.faces, id: \.id) { face in
+                                    let result = SearchResult(
+                                        path: face.imagePath,
+                                        similarity: 1.0,
+                                        size: (try? FileManager.default.attributesOfItem(atPath: face.imagePath)[.size] as? Int) ?? 0,
+                                        date: nil,
+                                        type: URL(fileURLWithPath: face.imagePath).pathExtension.lowercased()
+                                    )
+                                    PersonFaceCard(
+                                        face: face,
+                                        personId: person.id,
+                                        result: result,
+                                        faceManager: faceManager,
+                                        isSelected: selectedFaceIds.contains(face.id),
+                                        isSelectionMode: isSelectionMode,
+                                        onSelect: {
+                                            if selectedFaceIds.contains(face.id) {
+                                                selectedFaceIds.remove(face.id)
+                                            } else {
+                                                selectedFaceIds.insert(face.id)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.bottom, 20)
+                        }
                     }
                 }
             }
+        }
+        .onChange(of: selectedPerson) { _ in
+            // Clear selection when changing person
+            selectedFaceIds.removeAll()
+            isSelectionMode = false
         }
         .sheet(isPresented: $showMergeSheet) {
             mergePersonSheet
@@ -7998,6 +9175,27 @@ struct ContentView: View {
         }
     }
 
+    private func batchVerifySelectedFaces(person: Person, isCorrect: Bool) {
+        guard !selectedFaceIds.isEmpty else { return }
+
+        isBatchProcessing = true
+
+        // Get the face IDs (faceId from API, not local UUID)
+        let faceIdsToVerify = person.faces
+            .filter { selectedFaceIds.contains($0.id) }
+            .compactMap { $0.faceId }
+
+        Task {
+            await faceManager.verifyFaces(faceIds: faceIdsToVerify, clusterId: person.id, isCorrect: isCorrect)
+
+            await MainActor.run {
+                isBatchProcessing = false
+                selectedFaceIds.removeAll()
+                isSelectionMode = false
+            }
+        }
+    }
+
     // MARK: - Favorites Tab Content
     private var favoritesTabContent: some View {
         VStack(spacing: 0) {
@@ -8067,6 +9265,234 @@ struct ContentView: View {
         .onAppear {
             favoritesManager.refreshFavoriteImages()
         }
+    }
+
+    // MARK: - Volumes Tab Content
+    private var volumesTabContent: some View {
+        ScrollView {
+            VStack(spacing: DesignSystem.Spacing.xxl) {
+                // Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Volumes")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                        Text("Manage external drives, RAID arrays, and network storage")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    Spacer()
+
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Button(action: {
+                            VolumeManager.shared.refreshVolumes()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Refresh")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(DesignSystem.Colors.accent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(DesignSystem.Colors.accentSubtle)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button(action: {
+                            isShowingAddVolume = true
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("Add Path")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(DesignSystem.Colors.accent)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+                .padding(.top, DesignSystem.Spacing.md)
+
+                // Volume Stats Summary
+                volumeStatsSummary
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
+
+                // Connected Mobile Devices
+                if !mobileDeviceManager.devices.isEmpty {
+                    devicesSection
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                }
+
+                // Online Volumes
+                let onlineVolumes = VolumeManager.shared.volumes.filter { $0.isOnline }
+                if !onlineVolumes.isEmpty {
+                    volumeSection(title: "Online Volumes", icon: "checkmark.circle.fill", iconColor: DesignSystem.Colors.success, volumes: onlineVolumes)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                }
+
+                // Offline Volumes
+                let offlineVolumes = VolumeManager.shared.volumes.filter { !$0.isOnline }
+                if !offlineVolumes.isEmpty {
+                    volumeSection(title: "Offline Volumes", icon: "xmark.circle.fill", iconColor: DesignSystem.Colors.secondaryText, volumes: offlineVolumes)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                }
+
+                // Empty State
+                if VolumeManager.shared.volumes.isEmpty {
+                    volumesEmptyState
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                }
+
+                Spacer()
+            }
+            .padding(.bottom, DesignSystem.Spacing.xxl)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $isShowingAddVolume) {
+            AddVolumeSheet(isPresented: $isShowingAddVolume)
+        }
+        .onAppear {
+            mobileDeviceManager.startScanning()
+        }
+        .onDisappear {
+            mobileDeviceManager.stopScanning()
+        }
+    }
+
+    @State private var isShowingAddVolume = false
+    @ObservedObject private var mobileDeviceManager = MobileDeviceManager.shared
+
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            HStack(spacing: 6) {
+                Image(systemName: "iphone")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Connected Devices")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("(\(mobileDeviceManager.devices.count))")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+
+            if mobileDeviceManager.devices.isEmpty {
+                // Empty state
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "iphone.slash")
+                            .font(.system(size: 24))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text("No devices connected")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Text("Connect an iPhone, iPad, or camera via USB")
+                            .font(DesignSystem.Typography.caption2)
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, DesignSystem.Spacing.lg)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
+                    ForEach(mobileDeviceManager.devices) { device in
+                        DeviceCard(device: device)
+                    }
+                }
+            }
+        }
+    }
+
+    private var volumeStatsSummary: some View {
+        let volumes = VolumeManager.shared.volumes
+        let onlineCount = volumes.filter { $0.isOnline }.count
+        let totalImages = volumes.reduce(0) { $0 + $1.imageCount }
+        let enabledCount = volumes.filter { $0.isEnabled }.count
+
+        return HStack(spacing: DesignSystem.Spacing.md) {
+            VolumeStatCard(title: "Total Volumes", value: "\(volumes.count)", icon: "externaldrive", color: DesignSystem.Colors.accent)
+            VolumeStatCard(title: "Online", value: "\(onlineCount)", icon: "checkmark.circle", color: DesignSystem.Colors.success)
+            VolumeStatCard(title: "Indexed Images", value: formatNumber(totalImages), icon: "photo.stack", color: .purple)
+            VolumeStatCard(title: "Enabled", value: "\(enabledCount)", icon: "power", color: DesignSystem.Colors.warning)
+        }
+    }
+
+    private func volumeSection(title: String, icon: String, iconColor: Color, volumes: [ExternalVolume]) -> some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(iconColor)
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("(\(volumes.count))")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
+                ForEach(volumes) { volume in
+                    VolumeCard(volume: volume)
+                }
+            }
+        }
+    }
+
+    private var volumesEmptyState: some View {
+        VStack(spacing: DesignSystem.Spacing.lg) {
+            Image(systemName: "externaldrive.badge.questionmark")
+                .font(.system(size: 48))
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
+            Text("No External Volumes Detected")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+            Text("Connect an external drive, RAID array, or add a network path manually")
+                .font(DesignSystem.Typography.callout)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .multilineTextAlignment(.center)
+            Button(action: { isShowingAddVolume = true }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Add Manual Path")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(DesignSystem.Colors.accent)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 60)
+    }
+
+    private func formatNumber(_ num: Int) -> String {
+        if num >= 1000000 {
+            return String(format: "%.1fM", Double(num) / 1000000)
+        } else if num >= 1000 {
+            return String(format: "%.1fK", Double(num) / 1000)
+        }
+        return "\(num)"
     }
 
     // MARK: - Setup Tab Content
@@ -10376,6 +11802,605 @@ struct ContentView: View {
         }
     }
 }
+
+// MARK: - Volume Views
+
+struct VolumeStatCard: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(color)
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+            Text(title)
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+    }
+}
+
+struct VolumeCard: View {
+    let volume: ExternalVolume
+    @ObservedObject private var volumeManager = VolumeManager.shared
+    @State private var showingOptions = false
+    @State private var isIndexing = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Header
+            HStack {
+                // Volume icon based on type
+                Image(systemName: volumeIcon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(volume.isOnline ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(DesignSystem.Colors.accentSubtle)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(volume.name)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .lineLimit(1)
+                        if !volume.isOnline {
+                            Text("Offline")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.warning)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.warning.opacity(0.15))
+                                )
+                        }
+                    }
+                    Text(volume.path)
+                        .font(DesignSystem.Typography.caption2)
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // Enable/Disable toggle
+                Toggle("", isOn: Binding(
+                    get: { volume.isEnabled },
+                    set: { _ in volumeManager.toggleVolume(volume) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .scaleEffect(0.8)
+            }
+
+            Divider()
+                .background(DesignSystem.Colors.border)
+
+            // Stats row
+            HStack(spacing: DesignSystem.Spacing.xl) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(volume.imageCount)")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("Images")
+                        .font(DesignSystem.Typography.caption2)
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if let lastIndexed = volume.lastIndexed {
+                        Text(lastIndexed, style: .relative)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                    } else {
+                        Text("Never")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    Text("Last Indexed")
+                        .font(DesignSystem.Typography.caption2)
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+
+                Spacer()
+
+                // Storage location badge
+                Text(volume.indexStorage == .onVolume ? "On Volume" : "Centralized")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(volume.indexStorage == .onVolume ? DesignSystem.Colors.success : DesignSystem.Colors.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(volume.indexStorage == .onVolume ? DesignSystem.Colors.success.opacity(0.12) : DesignSystem.Colors.accentSubtle)
+                    )
+            }
+
+            // Action buttons
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                Button(action: { indexVolume() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isIndexing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(isIndexing ? "Indexing..." : "Index")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(volume.isOnline && !isIndexing ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(volume.isOnline && !isIndexing ? DesignSystem.Colors.accentSubtle : DesignSystem.Colors.border.opacity(0.3))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(!volume.isOnline || isIndexing)
+
+                Button(action: { showingOptions = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("Options")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .popover(isPresented: $showingOptions) {
+                    VolumeOptionsPopover(volume: volume, isPresented: $showingOptions)
+                }
+
+                Spacer()
+
+                if volume.type == .manual {
+                    Button(action: { volumeManager.removeVolume(volume) }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.error)
+                            .padding(6)
+                            .background(
+                                Circle()
+                                    .fill(DesignSystem.Colors.error.opacity(0.1))
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .opacity(volume.isOnline ? 1.0 : 0.7)
+    }
+
+    private var volumeIcon: String {
+        switch volume.type {
+        case .external: return "externaldrive.fill"
+        case .network: return "server.rack"
+        case .raid: return "externaldrive.fill.badge.plus"
+        case .manual: return "folder.fill"
+        }
+    }
+
+    private func indexVolume() {
+        guard volume.isOnline else { return }
+        isIndexing = true
+
+        // Create request body for volume indexing
+        let requestBody: [String: Any] = [
+            "volume_path": volume.path,
+            "index_path": volume.indexFilePath,
+            "fast_indexing": true,
+            "max_dimension": 384,
+            "batch_size": 64
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: requestBody),
+              let url = URL(string: "http://127.0.0.1:7860/volume/index") else {
+            isIndexing = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = jsonData
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let data = data,
+                   let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let totalImages = result["total_images"] as? Int {
+                        // Update volume stats when complete
+                        volumeManager.updateVolumeStats(volume.id, imageCount: totalImages)
+                    }
+                }
+                isIndexing = false
+            }
+        }.resume()
+    }
+}
+
+struct VolumeOptionsPopover: View {
+    let volume: ExternalVolume
+    @Binding var isPresented: Bool
+    @ObservedObject private var volumeManager = VolumeManager.shared
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Header
+            HStack {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Volume Options")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+            }
+
+            Divider()
+
+            // Index storage location
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Index Storage")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Picker("", selection: Binding(
+                    get: { volume.indexStorage },
+                    set: { volumeManager.setIndexStorage(volume, location: $0) }
+                )) {
+                    Text("On Volume (Portable)").tag(IndexStorageLocation.onVolume)
+                    Text("Centralized (App Data)").tag(IndexStorageLocation.centralized)
+                }
+                .pickerStyle(.radioGroup)
+                .font(.system(size: 12))
+            }
+
+            Divider()
+
+            // Index info
+            if volumeManager.hasIndex(volume) {
+                let size = volumeManager.indexSize(for: volume)
+                HStack {
+                    Text("Index Size:")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Spacer()
+                    Text(volumeManager.formatBytes(size))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Button(action: {
+                    volumeManager.deleteIndex(for: volume)
+                    isPresented = false
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                        Text("Delete Index")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(DesignSystem.Colors.error)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(DesignSystem.Colors.error.opacity(0.1))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                Text("No index exists for this volume")
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+            }
+
+            Divider()
+
+            // Reveal in Finder
+            Button(action: {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: volume.path)
+                isPresented = false
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                    Text("Reveal in Finder")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(volume.isOnline ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(volume.isOnline ? DesignSystem.Colors.accentSubtle : DesignSystem.Colors.border.opacity(0.3))
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(!volume.isOnline)
+        }
+        .padding(DesignSystem.Spacing.md)
+        .frame(width: 260)
+    }
+}
+
+struct AddVolumeSheet: View {
+    @Binding var isPresented: Bool
+    @State private var volumeName = ""
+    @State private var volumePath = ""
+    @State private var indexStorage: IndexStorageLocation = .centralized
+    @ObservedObject private var volumeManager = VolumeManager.shared
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(spacing: DesignSystem.Spacing.lg) {
+            // Header
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "externaldrive.badge.plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                    Text("Add Manual Path")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                }
+                Spacer()
+                Button(action: { isPresented = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            // Name field
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                TextField("My Network Drive", text: $volumeName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                    )
+            }
+
+            // Path field
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Path")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                HStack(spacing: 8) {
+                    TextField("/Volumes/MyDrive or smb://server/share", text: $volumePath)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                        )
+
+                    Button(action: { browseForFolder() }) {
+                        Text("Browse")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(DesignSystem.Colors.accentSubtle)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+
+            // Index storage option
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Index Storage")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                Picker("", selection: $indexStorage) {
+                    VStack(alignment: .leading) {
+                        Text("On Volume")
+                            .font(.system(size: 13))
+                        Text("Portable - index travels with the drive")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }.tag(IndexStorageLocation.onVolume)
+
+                    VStack(alignment: .leading) {
+                        Text("Centralized")
+                            .font(.system(size: 13))
+                        Text("Stored in app data folder")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }.tag(IndexStorageLocation.centralized)
+                }
+                .pickerStyle(.radioGroup)
+            }
+
+            Spacer()
+
+            // Action buttons
+            HStack {
+                Button(action: { isPresented = false }) {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Spacer()
+
+                Button(action: { addVolume() }) {
+                    Text("Add Volume")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(volumeName.isEmpty || volumePath.isEmpty ? DesignSystem.Colors.tertiaryText : DesignSystem.Colors.accent)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(volumeName.isEmpty || volumePath.isEmpty)
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .frame(width: 420, height: 380)
+    }
+
+    private func browseForFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder to add as a volume"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            volumePath = url.path
+            if volumeName.isEmpty {
+                volumeName = url.lastPathComponent
+            }
+        }
+    }
+
+    private func addVolume() {
+        let newVolume = ExternalVolume(
+            name: volumeName,
+            path: volumePath,
+            type: .manual,
+            indexStorage: indexStorage
+        )
+        volumeManager.volumes.append(newVolume)
+        isPresented = false
+    }
+}
+
+// MARK: - Device Card
+
+struct DeviceCard: View {
+    let device: MobileDevice
+    @Environment(\.colorScheme) var colorScheme
+    @ObservedObject private var deviceManager = MobileDeviceManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Header
+            HStack {
+                Image(systemName: device.icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(DesignSystem.Colors.accentSubtle)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .lineLimit(1)
+
+                    Text("Connected")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.success)
+                }
+
+                Spacer()
+
+                // Connected indicator
+                Circle()
+                    .fill(DesignSystem.Colors.success)
+                    .frame(width: 8, height: 8)
+            }
+
+            // Info text
+            Text("Use Image Capture to import photos, then add the folder to Searchy for indexing.")
+                .font(DesignSystem.Typography.caption)
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Open Image Capture button
+            Button(action: { deviceManager.openImageCapture() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Open Image Capture")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.Colors.accent)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(DesignSystem.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+    }
+}
+
 
 #Preview {
     ContentView()
