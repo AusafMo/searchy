@@ -4,16 +4,10 @@
 
 <p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b> · <b>Face recognition</b></p>
 
-<p align="center"><b>Main App</b></p>
-
 <p align="center">
-  <video src="https://storage.googleapis.com/ausaf-public/searchy-app.mp4" width="800" autoplay loop muted playsinline></video>
-</p>
-
-<p align="center"><b>Spotlight Widget</b></p>
-
-<p align="center">
-  <video src="https://storage.googleapis.com/ausaf-public/searchy-widget.mp4" width="800" autoplay loop muted playsinline></video>
+  <a href="https://storage.googleapis.com/ausaf-public/searchy-app.mp4"><b>▶️ Main App Demo</b></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://storage.googleapis.com/ausaf-public/searchy-widget.mp4"><b>▶️ Spotlight Widget Demo</b></a>
 </p>
 
 ---
