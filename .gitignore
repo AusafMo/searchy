@@ -16,3 +16,5 @@ xcuserdata/
 
 # Project specific
 *.bin
+*_PLAN.md
+*_PLAN*.md

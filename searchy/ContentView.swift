@@ -2,82 +2,621 @@ import SwiftUI
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import Vision
+
+// MARK: - Color Extension for Hex Support
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255,
+            opacity: Double(a) / 255
+        )
+    }
+}
+
+// MARK: - Theme System
+enum AppTheme: String, CaseIterable {
+    case electric = "Electric"
+    case warm = "Warm"
+    case mono = "Mono"
+    case midnight = "Midnight"
+
+    var icon: String {
+        switch self {
+        case .electric: return "bolt.fill"
+        case .warm: return "sun.max.fill"
+        case .mono: return "circle.lefthalf.filled"
+        case .midnight: return "moon.stars.fill"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .electric: return "Vibrant gradients, neon accents"
+        case .warm: return "Amber tones, cozy feel"
+        case .mono: return "Grayscale + one pop color"
+        case .midnight: return "Dark-first, subtle glows"
+        }
+    }
+}
+
+// MARK: - Appearance Mode
+enum AppearanceMode: String, CaseIterable {
+    case system = "System"
+    case light = "Light"
+    case dark = "Dark"
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
+// MARK: - Theme Manager
+class ThemeManager: ObservableObject {
+    static let shared = ThemeManager()
+
+    @Published var currentTheme: AppTheme {
+        didSet {
+            UserDefaults.standard.set(currentTheme.rawValue, forKey: "appTheme")
+        }
+    }
+
+    @Published var appearanceMode: AppearanceMode {
+        didSet {
+            UserDefaults.standard.set(appearanceMode.rawValue, forKey: "appearanceMode")
+            applyAppearance()
+        }
+    }
+
+    private init() {
+        if let saved = UserDefaults.standard.string(forKey: "appTheme"),
+           let theme = AppTheme(rawValue: saved) {
+            self.currentTheme = theme
+        } else {
+            self.currentTheme = .mono  // Sharp, clean default
+        }
+
+        if let savedAppearance = UserDefaults.standard.string(forKey: "appearanceMode"),
+           let mode = AppearanceMode(rawValue: savedAppearance) {
+            self.appearanceMode = mode
+        } else {
+            self.appearanceMode = .system
+        }
+    }
+
+    func applyAppearance() {
+        DispatchQueue.main.async {
+            switch self.appearanceMode {
+            case .system:
+                NSApp.appearance = nil
+            case .light:
+                NSApp.appearance = NSAppearance(named: .aqua)
+            case .dark:
+                NSApp.appearance = NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+}
+
+// MARK: - Theme Color Definitions
+struct ThemeColors {
+    let lightPrimary: Color      // Page background
+    let lightSecondary: Color    // Cards
+    let lightTertiary: Color     // Inputs
+
+    let darkPrimary: Color       // Page background dark
+    let darkSecondary: Color     // Cards dark
+    let darkTertiary: Color      // Inputs dark
+
+    let accent: Color            // Primary accent
+    let accentHover: Color       // Hover state
+    let accentGradientStart: Color
+    let accentGradientEnd: Color
+
+    let success: Color
+    let error: Color
+    let warning: Color
+
+    // MARK: - Theme Definitions
+    static let electric = ThemeColors(
+        lightPrimary: Color(hex: "F8F7FF"),
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "F0EEFF"),
+        darkPrimary: Color(hex: "0A0A0F"),
+        darkSecondary: Color(hex: "12121A"),
+        darkTertiary: Color(hex: "1A1A25"),
+        accent: Color(hex: "7C3AED"),           // Vivid purple
+        accentHover: Color(hex: "8B5CF6"),
+        accentGradientStart: Color(hex: "7C3AED"),
+        accentGradientEnd: Color(hex: "EC4899"),  // Pink
+        success: Color(hex: "10B981"),
+        error: Color(hex: "EF4444"),
+        warning: Color(hex: "F59E0B")
+    )
+
+    static let warm = ThemeColors(
+        lightPrimary: Color(hex: "FFFBF5"),
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "FEF3E2"),
+        darkPrimary: Color(hex: "1A1612"),
+        darkSecondary: Color(hex: "231F1A"),
+        darkTertiary: Color(hex: "2D2820"),
+        accent: Color(hex: "EA580C"),           // Warm orange
+        accentHover: Color(hex: "F97316"),
+        accentGradientStart: Color(hex: "EA580C"),
+        accentGradientEnd: Color(hex: "FBBF24"),  // Amber
+        success: Color(hex: "22C55E"),
+        error: Color(hex: "DC2626"),
+        warning: Color(hex: "EAB308")
+    )
+
+    static let mono = ThemeColors(
+        lightPrimary: Color(hex: "FFFFFF"),     // Pure white
+        lightSecondary: Color(hex: "FFFFFF"),   // Pure white
+        lightTertiary: Color(hex: "F5F5F5"),    // Very light gray for inputs
+        darkPrimary: Color(hex: "000000"),      // True black
+        darkSecondary: Color(hex: "111111"),    // Near black for cards
+        darkTertiary: Color(hex: "1A1A1A"),     // Slight lift for inputs
+        accent: Color(hex: "888888"),           // Neutral gray - visible on both black and white
+        accentHover: Color(hex: "999999"),
+        accentGradientStart: Color(hex: "888888"),
+        accentGradientEnd: Color(hex: "888888"),  // No gradient
+        success: Color(hex: "22C55E"),
+        error: Color(hex: "EF4444"),
+        warning: Color(hex: "EAB308")
+    )
+
+    static let midnight = ThemeColors(
+        lightPrimary: Color(hex: "F1F5F9"),     // Slate tint for light
+        lightSecondary: Color(hex: "FFFFFF"),
+        lightTertiary: Color(hex: "E2E8F0"),
+        darkPrimary: Color(hex: "020617"),      // Near black
+        darkSecondary: Color(hex: "0F172A"),    // Slate 900
+        darkTertiary: Color(hex: "1E293B"),     // Slate 800
+        accent: Color(hex: "38BDF8"),           // Sky blue glow
+        accentHover: Color(hex: "7DD3FC"),
+        accentGradientStart: Color(hex: "38BDF8"),
+        accentGradientEnd: Color(hex: "818CF8"),  // Indigo
+        success: Color(hex: "4ADE80"),
+        error: Color(hex: "FB7185"),
+        warning: Color(hex: "FBBF24")
+    )
+
+    static func current() -> ThemeColors {
+        switch ThemeManager.shared.currentTheme {
+        case .electric: return .electric
+        case .warm: return .warm
+        case .mono: return .mono
+        case .midnight: return .midnight
+        }
+    }
+}
 
 // MARK: - Design System
 struct DesignSystem {
-    // Colors
+
+    // MARK: - Colors (Theme-Aware)
     struct Colors {
-        // Primary palette - Claude-inspired
-        static let primaryBackground = Color(nsColor: NSColor(red: 0.98, green: 0.98, blue: 0.99, alpha: 1.0))
-        static let secondaryBackground = Color.white
-        static let tertiaryBackground = Color(nsColor: NSColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0))
+        // Surface colors - pull from active theme
+        static var primaryBackground: Color { ThemeColors.current().lightPrimary }
+        static var secondaryBackground: Color { ThemeColors.current().lightSecondary }
+        static var tertiaryBackground: Color { ThemeColors.current().lightTertiary }
 
-        // Dark mode palette
-        static let darkPrimaryBackground = Color(nsColor: NSColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0))
-        static let darkSecondaryBackground = Color(nsColor: NSColor(red: 0.15, green: 0.15, blue: 0.16, alpha: 1.0))
-        static let darkTertiaryBackground = Color(nsColor: NSColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 1.0))
+        static var darkPrimaryBackground: Color { ThemeColors.current().darkPrimary }
+        static var darkSecondaryBackground: Color { ThemeColors.current().darkSecondary }
+        static var darkTertiaryBackground: Color { ThemeColors.current().darkTertiary }
 
-        // Accent colors
-        static let accent = Color(nsColor: NSColor(red: 0.33, green: 0.44, blue: 1.0, alpha: 1.0))
-        static let accentHover = Color(nsColor: NSColor(red: 0.28, green: 0.39, blue: 0.95, alpha: 1.0))
+        // Accent colors - mono theme uses adaptive label color
+        static var accent: Color {
+            if ThemeManager.shared.currentTheme == .mono {
+                return Color(nsColor: NSColor.labelColor)  // Black in light, white in dark
+            }
+            return ThemeColors.current().accent
+        }
+        static var accentHover: Color {
+            if ThemeManager.shared.currentTheme == .mono {
+                return Color(nsColor: NSColor.secondaryLabelColor)
+            }
+            return ThemeColors.current().accentHover
+        }
+        static var accentSubtle: Color { accent.opacity(0.12) }
+        static var accentGradientEnd: Color { ThemeColors.current().accentGradientEnd }
 
-        // Text colors
+        // Accent gradient
+        static var accentGradient: LinearGradient {
+            LinearGradient(
+                colors: [ThemeColors.current().accentGradientStart, ThemeColors.current().accentGradientEnd],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+
+        // Text colors (system adaptive)
         static let primaryText = Color(nsColor: NSColor.labelColor)
         static let secondaryText = Color(nsColor: NSColor.secondaryLabelColor)
         static let tertiaryText = Color(nsColor: NSColor.tertiaryLabelColor)
 
         // Semantic colors
-        static let success = Color(nsColor: NSColor(red: 0.2, green: 0.78, blue: 0.35, alpha: 1.0))
-        static let error = Color(nsColor: NSColor(red: 0.96, green: 0.26, blue: 0.21, alpha: 1.0))
-        static let warning = Color(nsColor: NSColor(red: 1.0, green: 0.73, blue: 0.0, alpha: 1.0))
+        static var success: Color { ThemeColors.current().success }
+        static var error: Color { ThemeColors.current().error }
+        static var warning: Color { ThemeColors.current().warning }
 
         // Borders
-        static let border = Color(nsColor: NSColor.separatorColor).opacity(0.2)
-        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.4)
+        static let border = Color(nsColor: NSColor.separatorColor)
+        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.8)
+
+        // Helper functions
+        static func surface(_ level: Int, for scheme: ColorScheme) -> Color {
+            switch (level, scheme) {
+            case (0, .light): return primaryBackground
+            case (1, .light): return secondaryBackground
+            case (2, .light): return tertiaryBackground
+            case (0, .dark): return darkPrimaryBackground
+            case (1, .dark): return darkSecondaryBackground
+            case (2, .dark): return darkTertiaryBackground
+            default: return scheme == .dark ? darkPrimaryBackground : primaryBackground
+            }
+        }
     }
 
-    // Typography
+    // MARK: - Typography (Friendly, using SF Rounded for headers)
     struct Typography {
+        // Friendly rounded headers - warm and inviting
+        static let displayLarge = Font.system(size: 32, weight: .bold, design: .rounded)
+        static let displayMedium = Font.system(size: 24, weight: .semibold, design: .rounded)
         static let largeTitle = Font.system(size: 28, weight: .bold, design: .rounded)
         static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
         static let title2 = Font.system(size: 17, weight: .semibold, design: .rounded)
-        static let headline = Font.system(size: 15, weight: .semibold, design: .default)
+        static let title3 = Font.system(size: 15, weight: .medium, design: .rounded)
+        static let headline = Font.system(size: 15, weight: .semibold, design: .rounded)
+
+        // Body text - default design for readability
         static let body = Font.system(size: 14, weight: .regular, design: .default)
+        static let bodyMedium = Font.system(size: 14, weight: .medium, design: .default)
         static let callout = Font.system(size: 13, weight: .regular, design: .default)
-        static let caption = Font.system(size: 11, weight: .regular, design: .default)
-        static let caption2 = Font.system(size: 10, weight: .regular, design: .default)
+        static let caption = Font.system(size: 12, weight: .regular, design: .default)
+        static let captionMedium = Font.system(size: 12, weight: .medium, design: .default)
+        static let caption2 = Font.system(size: 11, weight: .regular, design: .default)
+        static let micro = Font.system(size: 10, weight: .medium, design: .default)
+
+        // Monospace for stats/numbers
+        static let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+        static let monoSmall = Font.system(size: 10, weight: .medium, design: .monospaced)
+
+        // Friendly labels - rounded for buttons and badges
+        static let friendlyLabel = Font.system(size: 13, weight: .semibold, design: .rounded)
+        static let friendlySmall = Font.system(size: 11, weight: .medium, design: .rounded)
     }
 
-    // Spacing
+    // MARK: - Spacing
     struct Spacing {
+        static let xxs: CGFloat = 2
         static let xs: CGFloat = 4
         static let sm: CGFloat = 8
         static let md: CGFloat = 12
         static let lg: CGFloat = 16
         static let xl: CGFloat = 24
         static let xxl: CGFloat = 32
+        static let xxxl: CGFloat = 48
     }
 
-    // Corner Radius
+    // MARK: - Corner Radius (Softer, more friendly)
     struct CornerRadius {
-        static let sm: CGFloat = 6
-        static let md: CGFloat = 10
-        static let lg: CGFloat = 14
-        static let xl: CGFloat = 20
+        static let xs: CGFloat = 6
+        static let sm: CGFloat = 10
+        static let md: CGFloat = 14
+        static let lg: CGFloat = 18
+        static let xl: CGFloat = 22
+        static let xxl: CGFloat = 28
+        static let card: CGFloat = 16  // Craft-style card corners
+        static let full: CGFloat = 9999
     }
 
-    // Shadows
+    // MARK: - Shadows (Soft, diffuse - like objects on a surface)
     struct Shadows {
-        static func small(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08)
+        // Craft-style soft shadows - more diffuse, less harsh
+        static func soft(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.25) : Color.black.opacity(0.06)
         }
 
         static func medium(_ colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08)
+        }
+
+        static func lifted(_ colorScheme: ColorScheme) -> Color {
             colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12)
         }
 
-        static func large(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.5) : Color.black.opacity(0.15)
+        // Legacy compatibility
+        static func small(_ colorScheme: ColorScheme) -> Color { soft(colorScheme) }
+        static func large(_ colorScheme: ColorScheme) -> Color { lifted(colorScheme) }
+
+        static func glow(_ colorScheme: ColorScheme) -> Color {
+            DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.3 : 0.2)
+        }
+
+        struct ShadowParams {
+            let color: Color
+            let radius: CGFloat
+            let x: CGFloat
+            let y: CGFloat
+        }
+
+        // Craft-style card shadow - soft, diffuse, feels like paper
+        static func cardShadow(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(
+                color: scheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08),
+                radius: 16,
+                x: 0,
+                y: 6
+            )
+        }
+
+        // Lifted card shadow - when hovering, feels like picking up
+        static func cardLifted(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(
+                color: scheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12),
+                radius: 24,
+                x: 0,
+                y: 12
+            )
+        }
+
+        static func floatingShadow(_ scheme: ColorScheme) -> ShadowParams {
+            ShadowParams(color: lifted(scheme), radius: scheme == .dark ? 32 : 28, x: 0, y: scheme == .dark ? 16 : 12)
+        }
+    }
+
+    // MARK: - Animation
+    struct Animation {
+        static let springQuick = SwiftUI.Animation.spring(response: 0.25, dampingFraction: 0.8)
+        static let springMedium = SwiftUI.Animation.spring(response: 0.35, dampingFraction: 0.75)
+        static let springBouncy = SwiftUI.Animation.spring(response: 0.4, dampingFraction: 0.65)
+        static let easeOut = SwiftUI.Animation.easeOut(duration: 0.2)
+    }
+}
+
+// MARK: - Theme Switcher View
+struct ThemeSwitcher: View {
+    @ObservedObject var themeManager = ThemeManager.shared
+    @State private var isExpanded = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.xs) {
+            if isExpanded {
+                ForEach(AppTheme.allCases, id: \.self) { theme in
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            themeManager.currentTheme = theme
+                            isExpanded = false
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: theme.icon)
+                                .font(.system(size: 12, weight: .medium))
+                            if theme == themeManager.currentTheme {
+                                Text(theme.rawValue)
+                                    .font(DesignSystem.Typography.caption)
+                            }
+                        }
+                        .foregroundColor(theme == themeManager.currentTheme ? .white : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, theme == themeManager.currentTheme ? 10 : 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(theme == themeManager.currentTheme ? DesignSystem.Colors.accent : Color.clear)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            } else {
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        isExpanded = true
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: themeManager.currentTheme.icon)
+                            .font(.system(size: 12, weight: .medium))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accentSubtle)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(DesignSystem.Spacing.xs)
+        .background(
+            Capsule()
+                .fill(colorScheme == .dark ? DesignSystem.Colors.darkTertiaryBackground : DesignSystem.Colors.tertiaryBackground)
+        )
+        .onTapGesture {} // Capture taps
+        .onHover { _ in } // Keep expanded on hover
+    }
+}
+
+// MARK: - Minimal Icon Button
+struct MinimalIconButton: View {
+    let icon: String
+    let tooltip: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(\.isEnabled) var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isEnabled ? (isHovered ? DesignSystem.Colors.primaryText : DesignSystem.Colors.secondaryText) : DesignSystem.Colors.tertiaryText)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isHovered ? (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)) : Color.clear)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .help(tooltip)
+    }
+}
+
+// MARK: - Theme Switcher Compact
+struct ThemeSwitcherCompact: View {
+    @ObservedObject var themeManager = ThemeManager.shared
+    @State private var isHovered = false
+    @State private var showPicker = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: {
+            showPicker.toggle()
+        }) {
+            Image(systemName: themeManager.currentTheme.icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isHovered ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isHovered ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .popover(isPresented: $showPicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Appearance Mode Section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("APPEARANCE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+
+                    HStack(spacing: 4) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                            Button(action: {
+                                withAnimation {
+                                    themeManager.appearanceMode = mode
+                                }
+                            }) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: mode.icon)
+                                        .font(.system(size: 14))
+                                    Text(mode.rawValue)
+                                        .font(.system(size: 10))
+                                }
+                                .foregroundColor(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                Divider()
+                    .padding(.vertical, 8)
+
+                // Theme Section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("THEME")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .padding(.horizontal, 12)
+
+                    ForEach(AppTheme.allCases, id: \.self) { theme in
+                        Button(action: {
+                            withAnimation {
+                                themeManager.currentTheme = theme
+                            }
+                        }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: theme.icon)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(theme == themeManager.currentTheme ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                                    .frame(width: 20)
+
+                                Text(theme.rawValue)
+                                    .font(.system(size: 13, weight: theme == themeManager.currentTheme ? .medium : .regular))
+                                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                                Spacer()
+
+                                if theme == themeManager.currentTheme {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(DesignSystem.Colors.accent)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(theme == themeManager.currentTheme ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+            .frame(width: 200)
+        }
+        .help("Change theme")
+        .onAppear {
+            themeManager.applyAppearance()
         }
     }
 }
@@ -205,6 +744,136 @@ class IndexingSettings: ObservableObject {
     }
 }
 
+// MARK: - Model Settings (CLIP Model Configuration)
+struct CLIPModelInfo: Identifiable {
+    let id: String  // model_name from HuggingFace
+    let name: String
+    let description: String
+    let embeddingDim: Int
+    let sizeMB: Int
+}
+
+class ModelSettings: ObservableObject {
+    static let shared = ModelSettings()
+
+    @Published var currentModelName: String = ""
+    @Published var currentModelDisplayName: String = ""
+    @Published var currentDevice: String = ""
+    @Published var currentEmbeddingDim: Int = 512
+    @Published var availableModels: [CLIPModelInfo] = []
+    @Published var isLoading: Bool = false
+    @Published var isChangingModel: Bool = false
+    @Published var errorMessage: String? = nil
+    @Published var requiresReindex: Bool = false
+
+    private let serverURL = "http://127.0.0.1:7860"
+
+    private init() {
+        // Pre-populate with known models (will be updated from server)
+        availableModels = [
+            CLIPModelInfo(id: "openai/clip-vit-base-patch32", name: "CLIP ViT-B/32", description: "Fast, good balance of speed and accuracy", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "openai/clip-vit-base-patch16", name: "CLIP ViT-B/16", description: "More accurate than B/32, slower", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "openai/clip-vit-large-patch14", name: "CLIP ViT-L/14", description: "High accuracy, requires more memory", embeddingDim: 768, sizeMB: 1710),
+            CLIPModelInfo(id: "openai/clip-vit-large-patch14-336", name: "CLIP ViT-L/14@336px", description: "Highest accuracy, processes 336px images", embeddingDim: 768, sizeMB: 1710),
+            CLIPModelInfo(id: "laion/CLIP-ViT-B-32-laion2B-s34B-b79K", name: "LAION CLIP ViT-B/32", description: "Trained on LAION-2B dataset", embeddingDim: 512, sizeMB: 605),
+            CLIPModelInfo(id: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K", name: "LAION CLIP ViT-H/14", description: "Large model, very accurate", embeddingDim: 1024, sizeMB: 3940)
+        ]
+    }
+
+    func fetchCurrentModel() {
+        isLoading = true
+        errorMessage = nil
+
+        guard let url = URL(string: "\(serverURL)/model") else { return }
+
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+
+                if let error = error {
+                    self?.errorMessage = "Failed to connect: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self?.errorMessage = "Invalid response"
+                    return
+                }
+
+                if let status = json["status"] as? String, status == "not_loaded" {
+                    self?.currentModelName = ""
+                    self?.currentModelDisplayName = "No model loaded"
+                    return
+                }
+
+                self?.currentModelName = json["model_name"] as? String ?? ""
+                self?.currentDevice = json["device"] as? String ?? "unknown"
+                self?.currentEmbeddingDim = json["embedding_dim"] as? Int ?? 512
+                self?.currentModelDisplayName = json["name"] as? String ?? self?.currentModelName ?? ""
+            }
+        }.resume()
+    }
+
+    func changeModel(to modelId: String, completion: @escaping (Bool, String?) -> Void) {
+        isChangingModel = true
+        errorMessage = nil
+        requiresReindex = false
+
+        guard let url = URL(string: "\(serverURL)/model") else {
+            completion(false, "Invalid URL")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = ["model_name": modelId]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isChangingModel = false
+
+                if let error = error {
+                    self?.errorMessage = error.localizedDescription
+                    completion(false, error.localizedDescription)
+                    return
+                }
+
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self?.errorMessage = "Invalid response"
+                    completion(false, "Invalid response")
+                    return
+                }
+
+                let status = json["status"] as? String ?? "error"
+
+                if status == "success" {
+                    self?.currentModelName = json["new_model"] as? String ?? modelId
+                    self?.currentEmbeddingDim = json["new_embedding_dim"] as? Int ?? 512
+                    self?.requiresReindex = json["reindex_required"] as? Bool ?? false
+
+                    // Update display name from our known models
+                    if let model = self?.availableModels.first(where: { $0.id == modelId }) {
+                        self?.currentModelDisplayName = model.name
+                    } else {
+                        self?.currentModelDisplayName = modelId
+                    }
+
+                    completion(true, self?.requiresReindex == true ? "Re-indexing required due to different embedding dimensions" : nil)
+                } else {
+                    let message = json["message"] as? String ?? "Failed to change model"
+                    self?.errorMessage = message
+                    completion(false, message)
+                }
+            }
+        }.resume()
+    }
+}
+
 // MARK: - Watched Directory Model
 struct WatchedDirectory: Identifiable, Codable, Equatable {
     var id: UUID
@@ -299,13 +968,7 @@ struct SettingsSection<Content: View>: View {
             HStack(spacing: DesignSystem.Spacing.sm) {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .foregroundColor(DesignSystem.Colors.accent)
                 Text(title)
                     .font(DesignSystem.Typography.title2)
                     .foregroundColor(DesignSystem.Colors.primaryText)
@@ -394,6 +1057,301 @@ struct SettingsGroup<Content: View>: View {
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
                 .stroke(DesignSystem.Colors.border, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Model Settings Section
+struct AIModelSettingsSection: View {
+    @ObservedObject private var modelSettings = ModelSettings.shared
+    @State private var selectedModelId: String = ""
+    @State private var showingConfirmation = false
+    @State private var showingReindexAlert = false
+    @State private var pendingModelId: String = ""
+    @State private var customModelName: String = ""
+    @State private var showingCustomModelInput = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        SettingsSection(title: "CLIP Model", icon: "cpu") {
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+                // Current Model Info
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                    HStack {
+                        Text("Current Model")
+                            .font(DesignSystem.Typography.callout.weight(.medium))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                        Spacer()
+                        if modelSettings.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                    }
+
+                    if !modelSettings.currentModelDisplayName.isEmpty {
+                        HStack(spacing: DesignSystem.Spacing.md) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(modelSettings.currentModelDisplayName)
+                                    .font(DesignSystem.Typography.body.weight(.semibold))
+                                    .foregroundColor(DesignSystem.Colors.accent)
+
+                                HStack(spacing: DesignSystem.Spacing.md) {
+                                    Label(modelSettings.currentDevice, systemImage: "cpu")
+                                    Label("\(modelSettings.currentEmbeddingDim)-dim", systemImage: "number")
+                                }
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                            Spacer()
+                        }
+                        .padding(DesignSystem.Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(colorScheme == .dark ?
+                                    DesignSystem.Colors.darkTertiaryBackground :
+                                    DesignSystem.Colors.tertiaryBackground)
+                        )
+                    }
+                }
+
+                Divider()
+
+                // Model Selection
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                    Text("Change Model")
+                        .font(DesignSystem.Typography.callout.weight(.medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("Select a different CLIP model from HuggingFace")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    // Model Picker
+                    ForEach(modelSettings.availableModels) { model in
+                        ModelSelectionRow(
+                            model: model,
+                            isSelected: modelSettings.currentModelName == model.id,
+                            isCurrent: modelSettings.currentModelName == model.id,
+                            onSelect: {
+                                if model.id != modelSettings.currentModelName {
+                                    pendingModelId = model.id
+                                    // Check if dimensions are different
+                                    if model.embeddingDim != modelSettings.currentEmbeddingDim {
+                                        showingConfirmation = true
+                                    } else {
+                                        changeModel(to: model.id)
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    // Custom Model Input
+                    DisclosureGroup("Use Custom Model", isExpanded: $showingCustomModelInput) {
+                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                            Text("Enter a HuggingFace model name (e.g., openai/clip-vit-base-patch32)")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                            HStack {
+                                TextField("Model name", text: $customModelName)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(DesignSystem.Typography.body)
+                                    .padding(DesignSystem.Spacing.sm)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                            .fill(colorScheme == .dark ?
+                                                DesignSystem.Colors.darkTertiaryBackground :
+                                                DesignSystem.Colors.tertiaryBackground)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                                    )
+
+                                Button(action: {
+                                    if !customModelName.isEmpty {
+                                        pendingModelId = customModelName
+                                        showingConfirmation = true
+                                    }
+                                }) {
+                                    Text("Load")
+                                        .font(DesignSystem.Typography.callout.weight(.medium))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                                        .padding(.vertical, DesignSystem.Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                                .fill(DesignSystem.Colors.accent)
+                                        )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(customModelName.isEmpty || modelSettings.isChangingModel)
+                            }
+                        }
+                        .padding(.top, DesignSystem.Spacing.sm)
+                    }
+                    .font(DesignSystem.Typography.callout)
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                // Error message
+                if let error = modelSettings.errorMessage {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(DesignSystem.Colors.error)
+                        Text(error)
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.error)
+                    }
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .fill(DesignSystem.Colors.error.opacity(0.1))
+                    )
+                }
+
+                // Re-index warning
+                if modelSettings.requiresReindex {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("Re-indexing required! The new model has different embedding dimensions.")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(.orange)
+                    }
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                            .fill(Color.orange.opacity(0.1))
+                    )
+                }
+
+                // Loading overlay
+                if modelSettings.isChangingModel {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading model...")
+                            .font(DesignSystem.Typography.caption)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    .padding(DesignSystem.Spacing.md)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                            .fill(colorScheme == .dark ?
+                                DesignSystem.Colors.darkTertiaryBackground :
+                                DesignSystem.Colors.tertiaryBackground)
+                    )
+                }
+            }
+            .padding(DesignSystem.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                    .fill(colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+                    .stroke(DesignSystem.Colors.border, lineWidth: 1)
+            )
+        }
+        .onAppear {
+            modelSettings.fetchCurrentModel()
+        }
+        .alert("Change Model?", isPresented: $showingConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Change & Re-index") {
+                changeModel(to: pendingModelId)
+            }
+        } message: {
+            Text("This model has different embedding dimensions. Your image index will need to be rebuilt, which may take some time.")
+        }
+    }
+
+    private func changeModel(to modelId: String) {
+        modelSettings.changeModel(to: modelId) { success, message in
+            if success && modelSettings.requiresReindex {
+                showingReindexAlert = true
+            }
+        }
+    }
+}
+
+// MARK: - Model Selection Row
+struct ModelSelectionRow: View {
+    let model: CLIPModelInfo
+    let isSelected: Bool
+    let isCurrent: Bool
+    let onSelect: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: DesignSystem.Spacing.md) {
+                // Selection indicator
+                ZStack {
+                    Circle()
+                        .stroke(isCurrent ? DesignSystem.Colors.accent : DesignSystem.Colors.border, lineWidth: 2)
+                        .frame(width: 20, height: 20)
+
+                    if isCurrent {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 12, height: 12)
+                    }
+                }
+
+                // Model info
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(model.name)
+                            .font(DesignSystem.Typography.body.weight(.medium))
+                            .foregroundColor(isCurrent ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
+
+                        if isCurrent {
+                            Text("Current")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                        }
+                    }
+
+                    Text(model.description)
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        Label("\(model.embeddingDim)-dim", systemImage: "number")
+                        Label("\(model.sizeMB) MB", systemImage: "internaldrive")
+                    }
+                    .font(DesignSystem.Typography.caption)
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+
+                Spacer()
+            }
+            .padding(DesignSystem.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .fill(isCurrent ?
+                        DesignSystem.Colors.accent.opacity(0.1) :
+                        (colorScheme == .dark ?
+                            DesignSystem.Colors.darkTertiaryBackground :
+                            DesignSystem.Colors.tertiaryBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    .stroke(isCurrent ? DesignSystem.Colors.accent : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
@@ -599,15 +1557,9 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            // Background
-            LinearGradient(
-                colors: colorScheme == .dark ?
-                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
-                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Clean solid background
+            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Modern Header
@@ -637,24 +1589,16 @@ struct SettingsView: View {
                         .padding(.vertical, DesignSystem.Spacing.sm)
                         .background(
                             Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
+                                .fill(DesignSystem.Colors.accent)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
                 .padding(DesignSystem.Spacing.xl)
                 .background(
-                    (colorScheme == .dark ?
-                        DesignSystem.Colors.darkSecondaryBackground :
-                        DesignSystem.Colors.secondaryBackground)
-                        .opacity(0.8)
-                        .background(.ultraThinMaterial)
+                    colorScheme == .dark ?
+                        Color(hex: "111111") :
+                        Color(hex: "FAFAFA")
                 )
 
                 ScrollView {
@@ -793,95 +1737,6 @@ struct SettingsView: View {
                                 Text("Images processed at once. Higher = faster but more memory")
                                     .font(DesignSystem.Typography.caption)
                                     .foregroundColor(DesignSystem.Colors.secondaryText)
-                            }
-                        }
-                        .padding(DesignSystem.Spacing.lg)
-                        .background(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                                .fill(colorScheme == .dark ?
-                                    DesignSystem.Colors.darkSecondaryBackground :
-                                    DesignSystem.Colors.secondaryBackground)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
-                        )
-                    }
-
-                    // Watched Directories Section
-                    SettingsSection(title: "Watched Directories", icon: "eye") {
-                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-                            Text("Manage directories that are automatically monitored for new images")
-                                .font(DesignSystem.Typography.caption)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                            // Directory List
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                ForEach(dirManager.watchedDirectories) { directory in
-                                    WatchedDirectoryRow(directory: directory, onDelete: {
-                                        dirManager.removeDirectory(directory)
-                                    })
-                                }
-                            }
-
-                            // Action Buttons
-                            HStack(spacing: DesignSystem.Spacing.md) {
-                                // Re-index All Button
-                                Button(action: {
-                                    performReindex()
-                                }) {
-                                    HStack(spacing: DesignSystem.Spacing.sm) {
-                                        if isReindexing {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                                .tint(.white)
-                                        } else {
-                                            Image(systemName: "arrow.clockwise")
-                                        }
-                                        Text("Re-index All")
-                                    }
-                                    .font(DesignSystem.Typography.callout.weight(.medium))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, DesignSystem.Spacing.md)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .disabled(isReindexing)
-
-                                // Add Directory Button
-                                Button(action: {
-                                    isShowingAddDirectorySheet = true
-                                }) {
-                                    HStack(spacing: DesignSystem.Spacing.sm) {
-                                        Image(systemName: "plus.circle.fill")
-                                        Text("Add Directory")
-                                    }
-                                    .font(DesignSystem.Typography.callout.weight(.medium))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, DesignSystem.Spacing.md)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color(red: 0.2, green: 0.7, blue: 0.6), Color(red: 0.15, green: 0.6, blue: 0.5)],
-                                                    startPoint: .leading,
-                                                    endPoint: .trailing
-                                                )
-                                            )
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                         .padding(DesignSystem.Spacing.lg)
@@ -1040,13 +1895,152 @@ extension UTType {
 class ImageCache {
     static let shared = ImageCache()
     private var cache = NSCache<NSString, NSImage>()
-    
+
     func image(for path: String) -> NSImage? {
         return cache.object(forKey: path as NSString)
     }
-    
+
     func setImage(_ image: NSImage, for path: String) {
         cache.setObject(image, forKey: path as NSString)
+    }
+
+    func clear() {
+        cache.removeAllObjects()
+    }
+}
+
+// MARK: - Efficient Thumbnail Service
+/// Uses CGImageSource to load only thumbnail data from images, not the full file.
+/// This is much faster and uses less memory than loading full images and resizing.
+class ThumbnailService {
+    static let shared = ThumbnailService()
+
+    private let cache = NSCache<NSString, NSImage>()
+    private let queue = DispatchQueue(label: "com.searchy.thumbnails", qos: .userInitiated, attributes: .concurrent)
+
+    private init() {
+        // Allow up to 500 thumbnails in cache
+        cache.countLimit = 500
+    }
+
+    /// Generate a cache key that includes size for different thumbnail sizes
+    private func cacheKey(for path: String, size: Int) -> NSString {
+        return "\(path)_\(size)" as NSString
+    }
+
+    /// Get cached thumbnail if available
+    func cachedThumbnail(for path: String, size: Int) -> NSImage? {
+        return cache.object(forKey: cacheKey(for: path, size: size))
+    }
+
+    /// Load thumbnail efficiently using CGImageSource
+    /// This reads only the necessary bytes from the file, not the entire image
+    func loadThumbnail(for path: String, maxSize: Int, completion: @escaping (NSImage?) -> Void) {
+        let key = cacheKey(for: path, size: maxSize)
+
+        // Check cache first
+        if let cached = cache.object(forKey: key) {
+            DispatchQueue.main.async {
+                completion(cached)
+            }
+            return
+        }
+
+        // Load on background queue
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            let url = URL(fileURLWithPath: path)
+
+            guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            // Options for thumbnail generation
+            let options: [CFString: Any] = [
+                kCGImageSourceThumbnailMaxPixelSize: maxSize,
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,  // Apply EXIF orientation
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+                // Fallback: try loading full image if thumbnail fails (for some formats)
+                self.loadFallbackThumbnail(for: path, maxSize: maxSize, completion: completion)
+                return
+            }
+
+            let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+
+            // Cache it
+            self.cache.setObject(thumbnail, forKey: key)
+
+            DispatchQueue.main.async {
+                completion(thumbnail)
+            }
+        }
+    }
+
+    /// Fallback for formats that don't support CGImageSource thumbnails well
+    private func loadFallbackThumbnail(for path: String, maxSize: Int, completion: @escaping (NSImage?) -> Void) {
+        guard let image = NSImage(contentsOfFile: path) else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+
+        let size = image.size
+        let scale = min(CGFloat(maxSize) / size.width, CGFloat(maxSize) / size.height, 1.0)
+        let newSize = NSSize(width: size.width * scale, height: size.height * scale)
+
+        let thumbnail = NSImage(size: newSize)
+        thumbnail.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: newSize),
+                   from: NSRect(origin: .zero, size: size),
+                   operation: .copy,
+                   fraction: 1.0)
+        thumbnail.unlockFocus()
+
+        let key = cacheKey(for: path, size: maxSize)
+        cache.setObject(thumbnail, forKey: key)
+
+        DispatchQueue.main.async {
+            completion(thumbnail)
+        }
+    }
+
+    /// Synchronous thumbnail load (for when you need it immediately)
+    func loadThumbnailSync(for path: String, maxSize: Int) -> NSImage? {
+        let key = cacheKey(for: path, size: maxSize)
+
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let url = URL(fileURLWithPath: path)
+
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            return nil
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        let thumbnail = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        cache.setObject(thumbnail, forKey: key)
+
+        return thumbnail
+    }
+
+    func clearCache() {
+        cache.removeAllObjects()
     }
 }
 
@@ -1082,40 +2076,29 @@ struct SkeletonView: View {
 }
 
 struct ResultCardSkeleton: View {
-    @StateObject private var prefs = SearchPreferences.shared
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
-            // Image skeleton
+            // Image skeleton - matches ImageCard imageHeight
             SkeletonView()
-                .frame(width: CGFloat(prefs.imageSize), height: CGFloat(prefs.imageSize))
+                .frame(height: 156)
 
-            // Info skeleton
-            VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
-                SkeletonView()
-                    .frame(height: 12)
-                    .frame(maxWidth: .infinity)
-
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    SkeletonView()
-                        .frame(width: 60, height: 20)
-                    SkeletonView()
-                        .frame(width: 60, height: 20)
-                }
-            }
-            .padding(DesignSystem.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                colorScheme == .dark ?
-                    DesignSystem.Colors.darkSecondaryBackground :
-                    DesignSystem.Colors.secondaryBackground
-            )
+            // Filename skeleton - matches ImageCard filenameSection
+            SkeletonView()
+                .frame(height: 14)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 14)
         }
-        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+        .frame(height: 200)
+        .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "FEF7EE"))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: 6,
+            x: 0,
+            y: 3
         )
     }
 }
@@ -1174,6 +2157,741 @@ struct ExampleQueryChip: View {
     }
 }
 
+// MARK: - Filter Capsule
+struct FilterCapsule: View {
+    let label: String
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(isActive ?
+                            DesignSystem.Colors.accent.opacity(0.12) :
+                            (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.04))
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isHovered ? 1.03 : 1.0)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Masonry Grid (Bento Layout)
+struct MasonryGrid<Content: View, Item: Identifiable>: View {
+    let items: [Item]
+    let columns: Int
+    let spacing: CGFloat
+    let content: (Item) -> Content
+
+    init(items: [Item], columns: Int = 4, spacing: CGFloat = 12, @ViewBuilder content: @escaping (Item) -> Content) {
+        self.items = items
+        self.columns = columns
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            ForEach(0..<columns, id: \.self) { columnIndex in
+                LazyVStack(spacing: spacing) {
+                    ForEach(itemsForColumn(columnIndex)) { item in
+                        content(item)
+                    }
+                }
+            }
+        }
+    }
+
+    private func itemsForColumn(_ column: Int) -> [Item] {
+        items.enumerated().compactMap { index, item in
+            index % columns == column ? item : nil
+        }
+    }
+}
+
+// MARK: - Masonry Image Card (Dynamic Height)
+struct MasonryImageCard: View {
+    let result: SearchResult
+    var showSimilarity: Bool = false
+    var onFindSimilar: ((String) -> Void)? = nil
+    var onHoverStart: ((SearchResult) -> Void)? = nil
+    var onHoverEnd: (() -> Void)? = nil
+
+    @State private var isFavorite: Bool = false
+    @State private var isHovered = false
+    @State private var showCopied = false
+    @State private var thumbnail: NSImage?
+    @State private var aspectRatio: CGFloat = 1.0
+    @Environment(\.colorScheme) var colorScheme
+
+    private let baseWidth: CGFloat = 200
+
+    var body: some View {
+        ZStack {
+            // Full photo background
+            imageContent
+
+            // Bottom gradient with filename
+            VStack {
+                Spacer()
+                filenameOverlay
+            }
+            .allowsHitTesting(false)
+
+            // Hover overlay
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+
+            // Top row - favorite button and similarity badge
+            VStack {
+                HStack {
+                    if isHovered {
+                        favoriteButton
+                    }
+                    Spacer()
+                    if showSimilarity {
+                        similarityBadge
+                    }
+                }
+                Spacer()
+            }
+        }
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
+            x: 0,
+            y: isHovered ? 6 : 3
+        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                onHoverStart?(result)
+            } else {
+                onHoverEnd?()
+            }
+        }
+        .onTapGesture(count: 2) { handleCopy() }
+        .contextMenu { contextMenuContent }
+        .onAppear {
+            loadThumbnail()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+    }
+
+    private var imageContent: some View {
+        GeometryReader { geo in
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    )
+            }
+        }
+    }
+
+    private var filenameOverlay: some View {
+        Text(URL(fileURLWithPath: result.path).lastPathComponent)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color.clear, Color.black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+    }
+
+    private var favoriteButton: some View {
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
+        }) {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isFavorite ? .red : .white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(isFavorite ? Color.white : Color.black.opacity(0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(6)
+    }
+
+    private var similarityBadge: some View {
+        Text("\(Int(result.similarity * 100))%")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.black.opacity(0.5)))
+            .padding(6)
+    }
+
+    private var hoverOverlay: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 8) {
+                // Quick actions
+                Button(action: { openInPreview() }) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Open in Preview")
+
+                Button(action: { openInFinder() }) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Show in Finder")
+
+                if onFindSimilar != nil {
+                    Button(action: { onFindSimilar?(result.path) }) {
+                        Image(systemName: "sparkle.magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.black.opacity(0.5)))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help("Find Similar")
+                }
+
+                Button(action: { handleCopy() }) {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Copy")
+            }
+            .padding(.bottom, 36)
+        }
+    }
+
+    private var copiedFeedback: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Copied")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.green))
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button(action: { openInPreview() }) {
+            Label("Open in Preview", systemImage: "eye")
+        }
+        Button(action: { handleCopy() }) {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        Button(action: { openInFinder() }) {
+            Label("Show in Finder", systemImage: "folder")
+        }
+        if let onFindSimilar = onFindSimilar {
+            Button(action: { onFindSimilar(result.path) }) {
+                Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+            }
+        }
+        Divider()
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
+        }) {
+            Label(isFavorite ? "Remove from Favorites" : "Add to Favorites", systemImage: isFavorite ? "heart.slash" : "heart")
+        }
+    }
+
+    private func loadThumbnail() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = loadOptimizedThumbnail(from: result.path, maxSize: 400) {
+                let ratio = image.size.width / max(image.size.height, 1)
+                DispatchQueue.main.async {
+                    self.thumbnail = image
+                    self.aspectRatio = max(0.5, min(2.0, ratio)) // Clamp between 0.5 and 2.0
+                }
+            }
+        }
+    }
+
+    private func loadOptimizedThumbnail(from path: String, maxSize: Int) -> NSImage? {
+        let url = URL(fileURLWithPath: path)
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
+    private func handleCopy() {
+        guard let image = NSImage(contentsOfFile: result.path) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+
+        showCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopied = false
+        }
+    }
+
+    private func openInFinder() {
+        NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+    }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
+}
+
+// MARK: - Preview Panel (Maccy-style)
+struct PreviewPanel: View {
+    let result: SearchResult
+    let onClose: () -> Void
+
+    @State private var fullImage: NSImage?
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Image preview
+            ZStack {
+                if let image = fullImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: 300)
+                } else {
+                    Rectangle()
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                        .frame(height: 200)
+                        .overlay(ProgressView())
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.bottom, 12)
+
+            // Metadata
+            VStack(alignment: .leading, spacing: 8) {
+                // Filename
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(2)
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                // Path
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text(URL(fileURLWithPath: result.path).deletingLastPathComponent().path)
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                // Size
+                if let size = result.size {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text(formatFileSize(size))
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                // Date
+                if let dateStr = result.date, let date = ISO8601DateFormatter().date(from: dateStr) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text(date, style: .date)
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                }
+
+                // Similarity
+                if result.similarity < 1.0 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                        Text("\(Int(result.similarity * 100))% match")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+                    }
+                }
+
+                Divider()
+                    .padding(.vertical, 4)
+
+                // Actions hint
+                Text("Double-click to copy • ⌘O to open")
+                    .font(.system(size: 10))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+            }
+
+            Spacer()
+        }
+        .padding(16)
+        .frame(width: 280)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1), lineWidth: 1)
+        )
+        .onAppear {
+            loadFullImage()
+        }
+        .onChange(of: result.path) { _ in
+            loadFullImage()
+        }
+    }
+
+    private func loadFullImage() {
+        fullImage = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = NSImage(contentsOfFile: result.path) {
+                DispatchQueue.main.async {
+                    self.fullImage = image
+                }
+            }
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+}
+
+// MARK: - Resizable Preview Panel (shared between app and widget)
+struct ResizablePreviewPanel: View {
+    let result: SearchResult
+    @Binding var width: CGFloat
+    @Binding var isVisible: Bool
+    var style: PreviewPanelStyle = .app
+    var onFindSimilar: ((String) -> Void)? = nil
+
+    enum PreviewPanelStyle {
+        case app      // For main app - solid background
+        case widget   // For spotlight widget - translucent
+    }
+
+    @State private var fullImage: NSImage?
+    @State private var dragStartWidth: CGFloat = 0
+    @State private var isFavorite: Bool = false
+    @State private var showCopied: Bool = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Resize handle (left edge)
+            resizeHandle
+
+            // Content
+            VStack(alignment: .leading, spacing: 12) {
+                // Header with close button
+                HStack {
+                    Text("Preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(style == .widget ? .white.opacity(0.6) : DesignSystem.Colors.secondaryText)
+                    Spacer()
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            isVisible = false
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(style == .widget ? .white.opacity(0.4) : DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Image preview
+                ZStack {
+                    if let image = fullImage {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: 280)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05)))
+                            .frame(height: 150)
+                            .overlay(ProgressView())
+                    }
+                }
+
+                // Metadata
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(style == .widget ? .white : DesignSystem.Colors.primaryText)
+                        .lineLimit(2)
+
+                    Text(URL(fileURLWithPath: result.path).deletingLastPathComponent().path)
+                        .font(.system(size: 10))
+                        .foregroundColor(style == .widget ? .white.opacity(0.5) : DesignSystem.Colors.tertiaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    HStack(spacing: 12) {
+                        if let size = result.size {
+                            Label(formatFileSize(size), systemImage: "doc")
+                                .font(.system(size: 10))
+                                .foregroundColor(style == .widget ? .white.opacity(0.5) : DesignSystem.Colors.secondaryText)
+                        }
+
+                        if result.similarity < 1.0 {
+                            Label("\(Int(result.similarity * 100))%", systemImage: "sparkle")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(style == .widget ? .cyan : DesignSystem.Colors.accent)
+                        }
+                    }
+                }
+
+                Divider()
+                    .opacity(0.3)
+
+                // Quick actions
+                quickActionsSection
+
+                Spacer()
+            }
+            .padding(12)
+        }
+        .frame(width: width)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(style == .widget ?
+                    AnyShapeStyle(.ultraThinMaterial.opacity(0.6)) :
+                    AnyShapeStyle(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1)), lineWidth: 1)
+        )
+        .onAppear {
+            loadFullImage()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+        .onChange(of: result.path) { _, _ in
+            loadFullImage()
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+    }
+
+    private var buttonBackground: Color {
+        style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+    }
+
+    private var primaryTextColor: Color {
+        style == .widget ? .white.opacity(0.8) : DesignSystem.Colors.primaryText
+    }
+
+    @ViewBuilder
+    private var quickActionsSection: some View {
+        VStack(spacing: 8) {
+            if showCopied {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Copied!")
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Capsule().fill(Color.green))
+            }
+
+            actionButton(icon: "doc.on.doc", title: "Copy Image", action: copyImage)
+            actionButton(icon: "eye", title: "Open in Preview", action: openInPreview)
+            actionButton(icon: "folder", title: "Show in Finder", action: openInFinder)
+
+            if onFindSimilar != nil {
+                actionButton(icon: "sparkle.magnifyingglass", title: "Find Similar", color: style == .widget ? .cyan : DesignSystem.Colors.accent) {
+                    onFindSimilar?(result.path)
+                }
+            }
+
+            actionButton(icon: isFavorite ? "heart.fill" : "heart", title: isFavorite ? "Remove Favorite" : "Add to Favorites", color: isFavorite ? .red : primaryTextColor, action: toggleFavorite)
+        }
+    }
+
+    private func actionButton(icon: String, title: String, color: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                Text(title)
+                Spacer()
+            }
+            .font(.system(size: 11))
+            .foregroundColor(color ?? primaryTextColor)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(buttonBackground))
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var resizeHandle: some View {
+        Rectangle()
+            .fill(Color.gray.opacity(0.01)) // Nearly invisible but captures events
+            .frame(width: 12)
+            .overlay(
+                Rectangle()
+                    .fill(style == .widget ? Color.white.opacity(0.3) : DesignSystem.Colors.tertiaryText.opacity(0.5))
+                    .frame(width: 3, height: 30)
+                    .clipShape(Capsule())
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        if dragStartWidth == 0 {
+                            dragStartWidth = width
+                        }
+                        let newWidth = dragStartWidth - value.translation.width
+                        width = max(200, min(450, newWidth))
+                    }
+                    .onEnded { _ in
+                        dragStartWidth = 0
+                    }
+            )
+    }
+
+    private func loadFullImage() {
+        fullImage = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let image = NSImage(contentsOfFile: result.path) {
+                DispatchQueue.main.async {
+                    self.fullImage = image
+                }
+            }
+        }
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
+
+    private func openInFinder() {
+        NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+    }
+
+    private func copyImage() {
+        guard let image = NSImage(contentsOfFile: result.path) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+
+        showCopied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopied = false
+        }
+    }
+
+    private func toggleFavorite() {
+        isFavorite.toggle()
+        FavoritesManager.shared.toggleFavorite(result.path)
+    }
+}
+
+// Legacy alias for compatibility
+typealias SpotlightPreviewPanel = ResizablePreviewPanel
+
 // MARK: - Action Button Component
 struct ActionButton: View {
     let icon: String
@@ -1223,12 +2941,20 @@ struct ActionButton: View {
 // MARK: - Spotlight Search View
 struct SpotlightSearchView: View {
     @ObservedObject private var searchManager = SearchManager.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
     @State private var searchText = ""
     @State private var selectedIndex: Int = 0
     @State private var recentImages: [SearchResult] = []
     @State private var hasPerformedSearch = false
     @State private var isLoadingRecent = false
     @State private var searchDebounceTimer: Timer?
+    @State private var pastedImage: NSImage? = nil
+    @State private var isDropTargeted = false
+    @State private var keyMonitor: Any? = nil
+    @State private var showPreviewPanel = false
+    @State private var previewTimer: Timer? = nil
+    @State private var previewPanelWidth: CGFloat = 280
+    @State private var isResizingPanel = false
     let previousApp: NSRunningApplication?
     @Environment(\.colorScheme) var colorScheme
     @FocusState private var isSearchFocused: Bool
@@ -1258,6 +2984,15 @@ struct SpotlightSearchView: View {
         }
     }
 
+    private func startPreviewTimer() {
+        previewTimer?.invalidate()
+        previewTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            withAnimation(.easeOut(duration: 0.15)) {
+                showPreviewPanel = true
+            }
+        }
+    }
+
     private var displayResults: [SearchResult] {
         if hasPerformedSearch {
             return searchManager.results
@@ -1282,60 +3017,100 @@ struct SpotlightSearchView: View {
         VStack(spacing: 0) {
                 // Compact search bar
                 HStack(spacing: DesignSystem.Spacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color.black.opacity(0.6))
+                    // Show pasted image or search icon
+                    if let image = pastedImage {
+                        ZStack(alignment: .topTrailing) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 28, height: 28)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.white.opacity(0.8), lineWidth: 2)
+                                )
 
-                    TextField("Search images...", text: $searchText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(DesignSystem.Typography.title)
-                        .foregroundColor(.white)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            if !searchManager.isSearching && !searchText.isEmpty {
-                                // Cancel debounce timer and search immediately
-                                searchDebounceTimer?.invalidate()
-                                performSearch()
+                            Button(action: {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    pastedImage = nil
+                                    hasPerformedSearch = false
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white)
+                                    .background(Circle().fill(Color.black.opacity(0.6)))
                             }
+                            .buttonStyle(PlainButtonStyle())
+                            .offset(x: 5, y: -5)
                         }
-                        .onChange(of: searchText) { oldValue, newValue in
-                            selectedIndex = 0
 
-                            // Cancel any existing timer
-                            searchDebounceTimer?.invalidate()
+                        Text("Finding similar...")
+                            .font(DesignSystem.Typography.title)
+                            .foregroundColor(.white.opacity(0.7))
 
-                            // If search text is empty, show recent images
-                            if newValue.isEmpty {
-                                hasPerformedSearch = false
-                                return
-                            }
+                        Spacer()
 
-                            // Debounce: wait 400ms after user stops typing before searching
-                            searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                                if !searchManager.isSearching && !newValue.isEmpty {
+                        if searchManager.isSearching {
+                            ProgressView()
+                                .scaleEffect(1.0)
+                        }
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(Color.black.opacity(0.6))
+
+                        TextField("Search images...", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(DesignSystem.Typography.title)
+                            .foregroundColor(.white)
+                            .focused($isSearchFocused)
+                            .onSubmit {
+                                if !searchManager.isSearching && !searchText.isEmpty {
+                                    // Cancel debounce timer and search immediately
+                                    searchDebounceTimer?.invalidate()
                                     performSearch()
                                 }
                             }
-                        }
-
-                    if searchManager.isSearching {
-                        ProgressView()
-                            .scaleEffect(1.0)
-                            .transition(.scale.combined(with: .opacity))
-                    } else if !searchText.isEmpty {
-                        Button(action: {
-                            withAnimation {
-                                searchText = ""
+                            .onChange(of: searchText) { oldValue, newValue in
                                 selectedIndex = 0
-                                hasPerformedSearch = false
+
+                                // Cancel any existing timer
+                                searchDebounceTimer?.invalidate()
+
+                                // If search text is empty, show recent images
+                                if newValue.isEmpty {
+                                    hasPerformedSearch = false
+                                    return
+                                }
+
+                                // Debounce: wait 400ms after user stops typing before searching
+                                searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                                    if !searchManager.isSearching && !newValue.isEmpty {
+                                        performSearch()
+                                    }
+                                }
                             }
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 20))
-                                .foregroundColor(Color.black.opacity(0.4))
+
+                        if searchManager.isSearching {
+                            ProgressView()
+                                .scaleEffect(1.0)
+                                .transition(.scale.combined(with: .opacity))
+                        } else if !searchText.isEmpty {
+                            Button(action: {
+                                withAnimation {
+                                    searchText = ""
+                                    selectedIndex = 0
+                                    hasPerformedSearch = false
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(Color.black.opacity(0.4))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .transition(.scale.combined(with: .opacity))
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .padding(DesignSystem.Spacing.md)
@@ -1343,17 +3118,17 @@ struct SpotlightSearchView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
                         .stroke(
-                            LinearGradient(
-                                colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.5
+                            isDropTargeted ? Color.white : Color.black.opacity(0.1),
+                            lineWidth: isDropTargeted ? 2 : 1
                         )
                 )
+                .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
+                    handleDroppedImage(providers: providers)
+                    return true
+                }
                 .padding(.horizontal, DesignSystem.Spacing.md)
 
-                // Results area
+                // Results area with optional preview panel
                 if isLoadingRecent && recentImages.isEmpty && !hasPerformedSearch {
                     // Show loading indicator while waiting for recent images
                     VStack(spacing: DesignSystem.Spacing.md) {
@@ -1365,47 +3140,60 @@ struct SpotlightSearchView: View {
                     }
                     .padding(DesignSystem.Spacing.xxl)
                 } else if !displayResults.isEmpty {
-                    ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                ForEach(Array(displayResults.prefix(8).enumerated()), id: \.element.id) { index, result in
-                                    SpotlightResultRow(
-                                        result: result,
-                                        isSelected: index == selectedIndex,
-                                        onSelect: {
-                                            closeWindow()
+                    HStack(alignment: .top, spacing: 8) {
+                        // Results list - takes priority in layout
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical, showsIndicators: true) {
+                                VStack(spacing: DesignSystem.Spacing.sm) {
+                                    ForEach(Array(displayResults.enumerated()), id: \.element.id) { index, result in
+                                        SpotlightResultRow(
+                                            result: result,
+                                            isSelected: index == selectedIndex,
+                                            onSelect: {
+                                                closeWindow()
+                                            }
+                                        )
+                                        .id(index)
+                                        .onTapGesture {
+                                            selectedIndex = index
                                         }
-                                    )
-                                    .id(index)
-                                    .onTapGesture {
-                                        selectedIndex = index
                                     }
                                 }
+                                .padding(DesignSystem.Spacing.sm)
+                                .animation(nil, value: selectedIndex)
                             }
-                            .padding(DesignSystem.Spacing.sm)
+                            .frame(minWidth: 320, maxHeight: 400)
                             .animation(nil, value: selectedIndex)
+                            .background(resultsBackground)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
+                                    .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                            )
+                            .padding(.leading, DesignSystem.Spacing.md)
+                            .padding(.top, DesignSystem.Spacing.sm)
+                            .onChange(of: selectedIndex) { oldValue, newValue in
+                                // Scroll instantly with no animation
+                                proxy.scrollTo(newValue, anchor: .center)
+                                // Start preview timer
+                                startPreviewTimer()
+                            }
                         }
-                        .frame(maxHeight: 350)
-                        .animation(nil, value: selectedIndex)
-                        .background(resultsBackground)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.xl)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.5
-                                )
-                        )
-                        .padding(.horizontal, DesignSystem.Spacing.md)
-                        .padding(.top, DesignSystem.Spacing.sm)
-                        .onChange(of: selectedIndex) { oldValue, newValue in
-                            // Scroll instantly with no animation
-                            proxy.scrollTo(newValue, anchor: .center)
+                        .layoutPriority(1)
+
+                        // Preview panel (appears after 500ms dwell)
+                        if showPreviewPanel && selectedIndex < displayResults.count {
+                            ResizablePreviewPanel(
+                                result: displayResults[selectedIndex],
+                                width: $previewPanelWidth,
+                                isVisible: $showPreviewPanel,
+                                style: .widget
+                            )
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .padding(.top, DesignSystem.Spacing.sm)
+                            .padding(.trailing, DesignSystem.Spacing.md)
                         }
                     }
+                    .padding(.trailing, showPreviewPanel ? 0 : DesignSystem.Spacing.md)
                 }
 
                 Spacer()
@@ -1436,9 +3224,13 @@ struct SpotlightSearchView: View {
         .onAppear {
             // Load recent images and focus search field
             loadRecentImages()
+            setupPasteMonitor()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
             }
+        }
+        .onDisappear {
+            removePasteMonitor()
         }
         .onChange(of: searchManager.isSearching) { _, _ in
             // Always restore focus on any search state change
@@ -1545,6 +3337,88 @@ struct SpotlightSearchView: View {
         searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
     }
 
+    // MARK: - Paste/Drop Handling
+    private func setupPasteMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Check for Backspace/Delete to clear pasted image
+            if self.pastedImage != nil && (event.keyCode == 51 || event.keyCode == 117) {
+                DispatchQueue.main.async {
+                    self.pastedImage = nil
+                    self.hasPerformedSearch = false
+                }
+                return nil // Consume the event
+            }
+
+            // Check for Cmd+V
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                let pasteboard = NSPasteboard.general
+                if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil),
+                       let image = images.first as? NSImage {
+                        DispatchQueue.main.async {
+                            self.pastedImage = image
+                            self.hasPerformedSearch = true
+                            self.saveAndSearchImage(image)
+                        }
+                        return nil // Consume the event
+                    }
+                }
+            }
+            return event
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    private func handleDroppedImage(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      let image = NSImage(contentsOf: url) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.hasPerformedSearch = true
+                    self.searchManager.findSimilar(imagePath: url.path)
+                }
+            }
+        } else if provider.hasItemConformingToTypeIdentifier("public.image") {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.hasPerformedSearch = true
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func saveAndSearchImage(_ image: NSImage) {
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFile = tempDir.appendingPathComponent("searchy_paste_\(UUID().uuidString).png")
+
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return
+        }
+
+        do {
+            try pngData.write(to: tempFile)
+            searchManager.findSimilar(imagePath: tempFile.path)
+        } catch {
+            print("Failed to save pasted image: \(error)")
+        }
+    }
+
     private func copyImageAtIndex(_ index: Int) {
         guard index < displayResults.count else { return }
         let result = displayResults[index]
@@ -1625,26 +3499,37 @@ struct SpotlightResultRow: View {
     let onSelect: () -> Void
     @State private var isHovered = false
     @State private var showingCopyNotification = false
+    @State private var thumbnail: NSImage?
     @Environment(\.colorScheme) var colorScheme
+
+    private let thumbnailSize = 50
 
     var body: some View {
         HStack(spacing: DesignSystem.Spacing.sm) {
             // Thumbnail
-            if let image = NSImage(contentsOfFile: result.path) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
-                            .stroke(isSelected ?
-                                DesignSystem.Colors.accent.opacity(0.5) :
-                                DesignSystem.Colors.border.opacity(0.3),
-                                lineWidth: isSelected ? 1.5 : 1)
-                    )
-                    .shadow(color: isSelected ? DesignSystem.Colors.accent.opacity(0.2) : .clear,
-                           radius: 4, x: 0, y: 2)
+            Group {
+                if let image = thumbnail {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                }
+            }
+            .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+                    .stroke(isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.5) :
+                        DesignSystem.Colors.border.opacity(0.3),
+                        lineWidth: isSelected ? 1.5 : 1)
+            )
+            .shadow(color: isSelected ? DesignSystem.Colors.accent.opacity(0.2) : .clear,
+                   radius: 4, x: 0, y: 2)
+            .onAppear {
+                loadThumbnail()
             }
 
             // Info
@@ -1654,13 +3539,19 @@ struct SpotlightResultRow: View {
                     .foregroundColor(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
                     .lineLimit(1)
 
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 8))
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 8, weight: .bold))
                     Text("\(Int(result.similarity * 100))%")
-                        .font(DesignSystem.Typography.caption2)
+                        .font(DesignSystem.Typography.caption2.weight(.semibold))
                 }
-                .foregroundColor(similarityColor)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(similarityColor)
+                )
             }
 
             Spacer()
@@ -1672,20 +3563,22 @@ struct SpotlightResultRow: View {
                     showCopyNotification()
                 }) {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(DesignSystem.Colors.accent)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Copy")
 
                 Button(action: {
                     NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
                     onSelect()
                 }) {
                     Image(systemName: "folder")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(DesignSystem.Colors.secondaryText)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .help("Reveal in Finder")
             }
             .opacity((isHovered || isSelected) ? 1 : 0.3)
         }
@@ -1749,10 +3642,34 @@ struct SpotlightResultRow: View {
         }
     }
 
+    private var similarityGradient: [Color] {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return [Color(hex: "10B981"), Color(hex: "059669")]
+        } else if percentage >= 60 {
+            return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
+        } else if percentage >= 40 {
+            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+        } else {
+            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
+        }
+    }
+
     private func showCopyNotification() {
         showingCopyNotification = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             showingCopyNotification = false
+        }
+    }
+
+    private func loadThumbnail() {
+        let size = thumbnailSize * 2  // 2x for retina
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: result.path, size: size) {
+            self.thumbnail = cached
+            return
+        }
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: size) { thumb in
+            self.thumbnail = thumb
         }
     }
 
@@ -1966,42 +3883,57 @@ struct ResultCardView: View {
                 )
                 .scaleEffect(isPressed ? 0.95 : 1.0)
 
-                // Hover overlay with gradient
-                if isHovered {
+                // Hover overlay with icon-only actions
+                if isHovered && !showingCopyNotification {
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.black.opacity(0), Color.black.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
+                        .fill(Color.black.opacity(0.4))
+                        .overlay(
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    copyImage(path: result.path)
+                                    showCopyNotification()
+                                }) {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(Circle().fill(Color.black.opacity(0.6)))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .help("Copy")
+
+                                Button(action: {
+                                    revealInFinder(path: result.path)
+                                }) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(Circle().fill(Color.black.opacity(0.6)))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .help("Reveal in Finder")
+                            }
                         )
-                        .allowsHitTesting(false)
                         .transition(.opacity)
                 }
 
-                // Similarity badge with glass effect
+                // Similarity badge with gradient
                 HStack(spacing: DesignSystem.Spacing.xs) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 8))
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 9, weight: .bold))
                     Text("\(Int(result.similarity * 100))%")
-                        .font(DesignSystem.Typography.caption2.weight(.semibold))
+                        .font(DesignSystem.Typography.caption2.weight(.bold))
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.xs + 2)
                 .background(
-                    ZStack {
-                        Capsule()
-                            .fill(similarityColor.opacity(0.9))
-                        Capsule()
-                            .fill(.ultraThinMaterial)
-                            .blendMode(.overlay)
-                    }
-                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                    Capsule()
+                        .fill(similarityColor)
                 )
                 .padding(DesignSystem.Spacing.sm)
-                .scaleEffect(isHovered ? 1.05 : 1.0)
+                .scaleEffect(isHovered ? 1.08 : 1.0)
                 .allowsHitTesting(false)
 
                 // Copy notification overlay
@@ -2012,78 +3944,54 @@ struct ResultCardView: View {
                 }
             }
 
-            // Info section with enhanced buttons
-            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                    .lineLimit(1)
-                    .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                // Action buttons with hover states
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    ActionButton(
-                        icon: "doc.on.doc.fill",
-                        title: "Copy",
-                        color: DesignSystem.Colors.accent
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                            copyImage(path: result.path)
-                            showCopyNotification()
-                        }
-                    }
-
-                    ActionButton(
-                        icon: "folder.fill",
-                        title: "Reveal",
-                        color: DesignSystem.Colors.secondaryText
-                    ) {
-                        revealInFinder(path: result.path)
-                    }
-
-                    Spacer()
-                }
-            }
-            .padding(DesignSystem.Spacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                colorScheme == .dark ?
-                    DesignSystem.Colors.darkSecondaryBackground :
-                    DesignSystem.Colors.secondaryBackground
-            )
+            // Minimal info section - just filename
+            Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                .lineLimit(1)
+                .font(DesignSystem.Typography.caption.weight(.medium))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    colorScheme == .dark ?
+                        DesignSystem.Colors.darkSecondaryBackground :
+                        DesignSystem.Colors.secondaryBackground
+                )
         }
         .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
         .overlay(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
                 .stroke(
-                    isHovered ?
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                    lineWidth: isHovered ? 1.5 : 1
+                    isHovered ? DesignSystem.Colors.accent.opacity(0.5) : DesignSystem.Colors.border,
+                    lineWidth: 1
                 )
         )
-        .shadow(
-            color: isHovered ? DesignSystem.Shadows.large(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-            radius: isHovered ? 16 : 6,
-            x: 0,
-            y: isHovered ? 8 : 3
-        )
-        .scaleEffect(isHovered ? 1.03 : 1.0)
-        .rotation3DEffect(
-            .degrees(isHovered ? 2 : 0),
-            axis: (x: 0, y: 1, z: 0),
-            perspective: 1.0
-        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
         .onHover { hovering in
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                 isHovered = hovering
+            }
+        }
+        .contextMenu {
+            Button(action: {
+                copyImage(path: result.path)
+                showCopyNotification()
+            }) {
+                Label("Copy Image", systemImage: "doc.on.doc")
+            }
+
+            Button(action: {
+                revealInFinder(path: result.path)
+            }) {
+                Label("Reveal in Finder", systemImage: "folder")
+            }
+
+            Divider()
+
+            Button(action: {
+                NSWorkspace.shared.open(URL(fileURLWithPath: result.path))
+            }) {
+                Label("Open in Preview", systemImage: "eye")
             }
         }
     }
@@ -2096,6 +4004,19 @@ struct ResultCardView: View {
             return DesignSystem.Colors.accent
         } else {
             return DesignSystem.Colors.warning
+        }
+    }
+
+    private var similarityGradient: [Color] {
+        let percentage = result.similarity * 100
+        if percentage >= 80 {
+            return [Color(hex: "10B981"), Color(hex: "059669")]
+        } else if percentage >= 60 {
+            return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
+        } else if percentage >= 40 {
+            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+        } else {
+            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
         }
     }
 
@@ -2118,141 +4039,922 @@ struct ResultCardView: View {
     }
 }
 
-// MARK: - Recent Image Card
-struct RecentImageCard: View {
-    let result: SearchResult
-    @State private var showingCopyNotification = false
+// MARK: - Person Card for Face Recognition
+struct PersonCard: View {
+    let person: Person
+    var isPinned: Bool = false
+    var isHidden: Bool = false
+    var isSelected: Bool = false
+    var onRename: ((String) -> Void)?
+    var onSelect: (() -> Void)?
+    var onTogglePin: (() -> Void)?
+    var onToggleHide: (() -> Void)?
+    var onToggleSelection: (() -> Void)?
+    @State private var thumbnail: NSImage?
     @State private var isHovered = false
-    @State private var isPressed = false
+    @State private var isEditing = false
+    @State private var editedName = ""
+    @State private var showPreview = false
+    @State private var previewWorkItem: DispatchWorkItem?
+    @FocusState private var isNameFieldFocused: Bool
     @Environment(\.colorScheme) var colorScheme
 
+    private let cardSize: CGFloat = 120
+    private let hoverDelay: Double = 0.5
+
     var body: some View {
-        VStack(spacing: 0) {
-            // Image container
-            ZStack(alignment: .center) {
-                if let image = NSImage(contentsOfFile: result.path) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 150, height: 150)
-                        .clipped()
-                } else {
-                    Rectangle()
-                        .fill(colorScheme == .dark ?
-                            DesignSystem.Colors.darkTertiaryBackground :
-                            DesignSystem.Colors.tertiaryBackground)
-                        .frame(width: 150, height: 150)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .font(.system(size: 32))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        )
-                }
+        ZStack {
+            // Full bleed face image
+            imageContent
 
-                // Hover overlay
-                if isHovered {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.3))
-                        .overlay(
-                            VStack(spacing: DesignSystem.Spacing.sm) {
-                                Button(action: {
-                                    copyImage(path: result.path)
-                                    showCopyNotification()
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "doc.on.doc.fill")
-                                        Text("Copy")
-                                    }
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(DesignSystem.Colors.accent))
-                                }
-                                .buttonStyle(PlainButtonStyle())
+            // Bottom gradient with name
+            VStack {
+                Spacer()
+                nameOverlay
+            }
 
-                                Button(action: {
-                                    NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
-                                }) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "folder.fill")
-                                        Text("Reveal")
-                                    }
-                                    .font(.system(size: 12, weight: .medium))
+            // Top right - selection checkbox (always visible)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { onToggleSelection?() }) {
+                        ZStack {
+                            Circle()
+                                .fill(isSelected ? DesignSystem.Colors.accent : Color.black.opacity(0.4))
+                                .frame(width: 22, height: 22)
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.white.opacity(0.3)))
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                            } else {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                                    .frame(width: 22, height: 22)
                             }
-                        )
-                        .transition(.opacity)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(6)
                 }
+                Spacer()
+            }
 
-                // Copy notification
-                if showingCopyNotification {
-                    CopyNotification(isShowing: $showingCopyNotification)
-                        .allowsHitTesting(false)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Top left - pin button (visible when pinned or hovering)
+            if isPinned || (isHovered && !isEditing) {
+                VStack {
+                    HStack {
+                        pinButton
+                        Spacer()
+                    }
+                    Spacer()
                 }
             }
-            .scaleEffect(isPressed ? 0.95 : 1.0)
 
-            // Filename
-            Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                .lineLimit(1)
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(DesignSystem.Colors.primaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    colorScheme == .dark ?
-                        DesignSystem.Colors.darkSecondaryBackground :
-                        DesignSystem.Colors.secondaryBackground
-                )
+            // Edit button on hover (next to pin)
+            if isHovered && !isEditing {
+                VStack {
+                    HStack {
+                        // Spacer for pin button width
+                        Color.clear.frame(width: 30, height: 1)
+                        editButton
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+
+            // Bottom right - unverified badge (only when unverified > 0)
+            if person.unverifiedCount > 0 {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        unverifiedBadge
+                    }
+                }
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md))
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(
-                    isHovered ?
-                        DesignSystem.Colors.accent.opacity(0.5) :
-                        DesignSystem.Colors.border,
-                    lineWidth: isHovered ? 1.5 : 1
-                )
-        )
+        .frame(width: cardSize, height: cardSize)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .opacity(isHidden ? 0.5 : 1.0)
         .shadow(
-            color: isHovered ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-            radius: isHovered ? 12 : 4,
-            x: 0,
-            y: isHovered ? 6 : 2
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
+            y: isHovered ? 6 : 3
         )
         .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .onHover { hovering in
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            withAnimation(.easeOut(duration: 0.15)) {
                 isHovered = hovering
             }
-        }
-        .onTapGesture(count: 2) {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                isPressed = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                    isPressed = false
+            // Handle preview with delay
+            previewWorkItem?.cancel()
+            if hovering && person.faces.count > 1 {
+                let workItem = DispatchWorkItem {
+                    withAnimation { showPreview = true }
                 }
+                previewWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + hoverDelay, execute: workItem)
+            } else {
+                withAnimation { showPreview = false }
             }
-            copyImage(path: result.path)
-            showCopyNotification()
+        }
+        .popover(isPresented: $showPreview, arrowEdge: .bottom) {
+            hoverPreviewContent
+        }
+        .onTapGesture {
+            if !isEditing {
+                onSelect?()
+            }
+        }
+        .contextMenu {
+            Button(action: { onTogglePin?() }) {
+                Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            Button(action: { onToggleHide?() }) {
+                Label(isHidden ? "Unhide" : "Hide", systemImage: isHidden ? "eye" : "eye.slash")
+            }
+            Divider()
+            Button(action: { startEditing() }) {
+                Label("Rename", systemImage: "pencil")
+            }
+        }
+        .onAppear { loadThumbnail() }
+    }
+
+    private var imageContent: some View {
+        Group {
+            if let thumb = thumbnail {
+                Image(nsImage: thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: cardSize, height: cardSize)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
+                    )
+            }
         }
     }
 
-    private func showCopyNotification() {
-        showingCopyNotification = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showingCopyNotification = false
+    private var nameOverlay: some View {
+        Group {
+            if isEditing {
+                TextField("Name", text: $editedName)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.7))
+                    .focused($isNameFieldFocused)
+                    .onSubmit { commitRename() }
+                    .onExitCommand { cancelRename() }
+            } else {
+                Text(person.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.clear, Color.black.opacity(0.6)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .onTapGesture(count: 2) { startEditing() }
+            }
+        }
+    }
+
+    private var photoBadge: some View {
+        Text("\(person.faceCount)")
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.black.opacity(0.5)))
+            .padding(6)
+    }
+
+    private var unverifiedBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 8))
+            Text("\(person.unverifiedCount)")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.orange))
+        .padding(6)
+        .padding(.bottom, 28) // Above the name overlay
+    }
+
+    private var hoverPreviewContent: some View {
+        VStack(spacing: 8) {
+            Text(person.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+
+            // Show up to 4 sample faces
+            HStack(spacing: 6) {
+                ForEach(Array(person.faces.prefix(4).enumerated()), id: \.offset) { index, face in
+                    FaceThumbnail(imagePath: face.imagePath)
+                }
+            }
+
+            Text("\(person.faces.count) photos")
+                .font(.system(size: 11))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+        }
+        .padding(12)
+        .background(DesignSystem.Colors.secondaryBackground)
+    }
+
+    private var editButton: some View {
+        Button(action: { startEditing() }) {
+            Image(systemName: "pencil")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.black.opacity(0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.top, 6)
+        .transition(.opacity)
+    }
+
+    private var pinButton: some View {
+        Button(action: { onTogglePin?() }) {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(isPinned ? .yellow : .white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(Color.black.opacity(isPinned ? 0.7 : 0.5)))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(6)
+        .transition(.opacity)
+    }
+
+    private func loadThumbnail() {
+        guard let path = person.thumbnailPath else { return }
+        let size = Int(cardSize) * 2
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: size) {
+            self.thumbnail = cached
+            return
+        }
+        ThumbnailService.shared.loadThumbnail(for: path, maxSize: size) { thumb in
+            self.thumbnail = thumb
+        }
+    }
+
+    private func startEditing() {
+        editedName = person.name
+        isEditing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            isNameFieldFocused = true
+        }
+    }
+
+    private func commitRename() {
+        let trimmed = editedName.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty && trimmed != person.name {
+            onRename?(trimmed)
+        }
+        isEditing = false
+    }
+
+    private func cancelRename() {
+        isEditing = false
+        editedName = person.name
+    }
+}
+
+// MARK: - Face Verification View
+struct FaceVerificationView: View {
+    let person: Person
+    @ObservedObject var faceManager: FaceManager
+    let onDismiss: () -> Void
+
+    @State private var offset: CGFloat = 0
+    @State private var isAnimating = false
+    @State private var verificationResults: [String: Bool] = [:]
+    @Environment(\.colorScheme) var colorScheme
+
+    private var facesToReview: [(id: String, thumbnailPath: String?, imagePath: String)] {
+        person.faces.compactMap { face in
+            if verificationResults[face.id.uuidString] == nil {
+                return (id: face.id.uuidString, thumbnailPath: nil, imagePath: face.imagePath)
+            }
+            return nil
+        }
+    }
+
+    private var progress: Double {
+        let total = person.faces.count
+        let reviewed = verificationResults.count
+        return total > 0 ? Double(reviewed) / Double(total) : 0
+    }
+
+    private var confirmedCount: Int {
+        verificationResults.filter { $0.value }.count
+    }
+
+    private var rejectedCount: Int {
+        verificationResults.filter { !$0.value }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerView
+            Divider()
+            if facesToReview.isEmpty {
+                completionView
+            } else {
+                swipeInterface
+            }
+        }
+        .frame(width: 500, height: 600)
+        .background(DesignSystem.Colors.secondaryBackground)
+    }
+
+    private var headerView: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Review Faces")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("Reviewing \(person.name)")
+                    .font(.system(size: 13))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                Text("\(verificationResults.count)/\(person.faces.count)")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                CircularProgressView(progress: progress)
+                    .frame(width: 24, height: 24)
+            }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding()
+    }
+
+    private var completionView: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundColor(.green)
+            Text("All faces reviewed!")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+            Text("\(confirmedCount) confirmed, \(rejectedCount) rejected")
+                .font(.system(size: 14))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+            Button(action: onDismiss) {
+                Text("Done")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(DesignSystem.Colors.accent))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.top, 12)
+            Spacer()
+        }
+    }
+
+    private var swipeInterface: some View {
+        VStack {
+            cardStack
+                .padding(32)
+            actionButtons
+                .padding(.bottom, 32)
+            Text("Swipe right to confirm, left to reject")
+                .font(.system(size: 12))
+                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                .padding(.bottom, 16)
+        }
+    }
+
+    private var cardStack: some View {
+        ZStack {
+            ForEach(Array(facesToReview.prefix(3).enumerated().reversed()), id: \.element.id) { index, face in
+                if index > 0 {
+                    FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
+                        .scaleEffect(1.0 - CGFloat(index) * 0.05)
+                        .offset(y: CGFloat(index) * 8)
+                        .opacity(1.0 - Double(index) * 0.2)
+                }
+            }
+            if let currentFace = facesToReview.first {
+                currentCardView(face: currentFace)
+            }
+        }
+    }
+
+    private func currentCardView(face: (id: String, thumbnailPath: String?, imagePath: String)) -> some View {
+        FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
+            .offset(x: offset)
+            .rotationEffect(.degrees(Double(offset / 20)))
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if !isAnimating { offset = value.translation.width }
+                    }
+                    .onEnded { value in
+                        handleSwipe(value: value, faceId: face.id)
+                    }
+            )
+            .overlay(swipeIndicators)
+    }
+
+    private var swipeIndicators: some View {
+        ZStack {
+            HStack {
+                Spacer()
+                VStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundColor(.green)
+                    Text("Confirm")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.green)
+                }
+                .padding(24)
+                .opacity(offset > 50 ? Double(min(1, (offset - 50) / 50)) : 0)
+            }
+            HStack {
+                VStack {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 48))
+                        .foregroundColor(.red)
+                    Text("Reject")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.red)
+                }
+                .padding(24)
+                .opacity(offset < -50 ? Double(min(1, (-offset - 50) / 50)) : 0)
+                Spacer()
+            }
+        }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 40) {
+            Button(action: { if let f = facesToReview.first { swipeLeft(faceId: f.id) } }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(Circle().fill(Color.red))
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Button(action: { if let f = facesToReview.first { swipeRight(faceId: f.id) } }) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(Circle().fill(Color.green))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+
+    private func handleSwipe(value: DragGesture.Value, faceId: String) {
+        let threshold: CGFloat = 100
+        if value.translation.width > threshold {
+            swipeRight(faceId: faceId)
+        } else if value.translation.width < -threshold {
+            swipeLeft(faceId: faceId)
+        } else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { offset = 0 }
+        }
+    }
+
+    private func swipeRight(faceId: String) {
+        isAnimating = true
+        withAnimation(.easeOut(duration: 0.3)) { offset = 500 }
+        Task { await verifyFace(faceId: faceId, isCorrect: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            verificationResults[faceId] = true
+            offset = 0
+            isAnimating = false
+        }
+    }
+
+    private func swipeLeft(faceId: String) {
+        isAnimating = true
+        withAnimation(.easeOut(duration: 0.3)) { offset = -500 }
+        Task { await verifyFace(faceId: faceId, isCorrect: false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            verificationResults[faceId] = false
+            offset = 0
+            isAnimating = false
+        }
+    }
+
+    private func verifyFace(faceId: String, isCorrect: Bool) async {
+        var components = URLComponents(string: "\(faceManager.baseURL)/face-verify")
+        components?.queryItems = [
+            URLQueryItem(name: "face_id", value: faceId),
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "is_correct", value: isCorrect ? "true" : "false"),
+            URLQueryItem(name: "data_dir", value: faceManager.dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await faceManager.loadClustersFromAPI()
+        } catch {
+            print("Error verifying face: \(error)")
+        }
+    }
+}
+
+// Small face thumbnail for hover preview
+struct FaceThumbnail: View {
+    let imagePath: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 50, height: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 50, height: 50)
+            }
+        }
+        .onAppear { loadImage() }
+    }
+
+    private func loadImage() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let nsImage = NSImage(contentsOfFile: imagePath) {
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            }
+        }
+    }
+}
+
+// Face review card for the swipe interface
+struct FaceReviewCard: View {
+    let imagePath: String
+    let thumbnailPath: String?
+    @State private var image: NSImage?
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 20)
+            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white)
+            .frame(width: 320, height: 400)
+            .shadow(color: Color.black.opacity(0.2), radius: 20, y: 10)
+            .overlay(
+                Group {
+                    if let img = image {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 300, height: 380)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                    } else {
+                        ProgressView()
+                    }
+                }
+            )
+            .onAppear { loadImage() }
+    }
+
+    private func loadImage() {
+        // Try thumbnail first, then full image
+        let pathToLoad = thumbnailPath ?? imagePath
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let nsImage = NSImage(contentsOfFile: pathToLoad) {
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            } else if thumbnailPath != nil, let nsImage = NSImage(contentsOfFile: imagePath) {
+                // Fallback to full image if thumbnail fails
+                DispatchQueue.main.async {
+                    self.image = nsImage
+                }
+            }
+        }
+    }
+}
+
+// Circular progress indicator
+struct CircularProgressView: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut, value: progress)
+        }
+    }
+}
+
+// MARK: - Recent Image Card (Craft-style warm, floating card)
+struct ImageCard: View {
+    let result: SearchResult
+    var showSimilarity: Bool = false
+    var cardHeight: CGFloat = 200
+    var onFindSimilar: ((String) -> Void)? = nil
+    @State private var isFavorite: Bool = false
+
+    @State private var isHovered = false
+    @State private var showCopied = false
+    @State private var thumbnail: NSImage?
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        ZStack {
+            // Full photo background
+            imageContent
+
+            // Bottom gradient with filename
+            VStack {
+                Spacer()
+                filenameOverlay
+            }
+
+            // Hover overlay with action buttons (below top buttons)
+            if isHovered && !showCopied { hoverOverlay }
+            if showCopied { copiedFeedback }
+
+            // Top row - favorite button (left) and similarity badge (right) - ON TOP
+            VStack {
+                HStack {
+                    if isHovered {
+                        favoriteButton
+                    }
+                    Spacer()
+                    if showSimilarity {
+                        similarityBadge
+                    }
+                }
+                Spacer()
+            }
+        }
+        .frame(minHeight: cardHeight, maxHeight: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            radius: isHovered ? 12 : 6,
+            x: 0,
+            y: isHovered ? 6 : 3
+        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+        .animation(.easeOut(duration: 0.2), value: showCopied)
+        .onHover { isHovered = $0 }
+        .onTapGesture(count: 2) { handleCopy() }
+        .contextMenu { contextMenuContent }
+    }
+
+    private var filenameOverlay: some View {
+        Text(URL(fileURLWithPath: result.path).lastPathComponent)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color.clear, Color.black.opacity(0.6)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+    }
+
+    private var favoriteButton: some View {
+        Button(action: {
+            isFavorite.toggle()
+            FavoritesManager.shared.toggleFavorite(result.path)
+        }) {
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isFavorite ? .red : .white)
+                .frame(width: 28, height: 28)
+                .background(
+                    Circle()
+                        .fill(isFavorite ? Color.white : Color.black.opacity(0.5))
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .help(isFavorite ? "Remove from favorites" : "Add to favorites")
+        .padding(6)
+        .onAppear {
+            isFavorite = FavoritesManager.shared.isFavorite(result.path)
+        }
+    }
+
+    private var similarityBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 9, weight: .bold))
+            Text("\(Int(result.similarity * 100))%")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(DesignSystem.Colors.accent)
+        )
+        .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 4, y: 2)
+        .padding(8)
+    }
+
+    private var imageContent: some View {
+        GeometryReader { geo in
+            if let image = thumbnail {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(hex: "F8F8F8"))
+                    .overlay(
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    )
+            }
+        }
+        .onAppear {
+            loadThumbnail()
+        }
+    }
+
+    private func loadThumbnail() {
+        let maxSize = Int(cardHeight * 2)  // 2x for retina
+
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: result.path, size: maxSize) {
+            self.thumbnail = cached
+            return
+        }
+
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: maxSize) { thumb in
+            self.thumbnail = thumb
+        }
+    }
+
+    private var hoverOverlay: some View {
+        ZStack(alignment: .bottom) {
+            // Gradient background - non-interactive
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.1), Color.black.opacity(0.5)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .allowsHitTesting(false)
+
+            // Buttons - interactive
+            hoverButtons
+        }
+        .transition(.opacity)
+    }
+
+    private var hoverButtons: some View {
+        HStack(spacing: 6) {
+            Button(action: openInPreview) {
+                Image(systemName: "eye")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Open in Preview")
+
+            Button(action: handleCopy) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Copy")
+
+            if onFindSimilar != nil {
+                Button(action: { onFindSimilar?(result.path) }) {
+                    Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Find similar")
+            }
+
+            Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
+                Image(systemName: "folder")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.black.opacity(0.5)))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Reveal in Finder")
+        }
+        .padding(.bottom, 10)
+    }
+
+    private var copiedFeedback: some View {
+        Rectangle()
+            .fill(Color.black.opacity(0.6))
+            .overlay(
+                VStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.success)
+                    Text("Copied!")
+                        .font(DesignSystem.Typography.friendlyLabel)
+                        .foregroundColor(.white)
+                }
+            )
+            .transition(.opacity)
+    }
+
+
+    @ViewBuilder
+    private var contextMenuContent: some View {
+        Button(action: openInPreview) {
+            Label("Open in Preview", systemImage: "eye")
+        }
+        Button(action: { copyImage(path: result.path) }) {
+            Label("Copy Image", systemImage: "doc.on.doc")
+        }
+        Button(action: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") }) {
+            Label("Reveal in Finder", systemImage: "folder")
+        }
+        if onFindSimilar != nil {
+            Button(action: { onFindSimilar?(result.path) }) {
+                Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+            }
+        }
+    }
+
+    private func handleCopy() {
+        copyImage(path: result.path)
+        withAnimation(.easeOut(duration: 0.15)) { showCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            withAnimation { showCopied = false }
         }
     }
 
@@ -2262,7 +4964,18 @@ struct RecentImageCard: View {
             NSPasteboard.general.writeObjects([image])
         }
     }
+
+    private func openInPreview() {
+        NSWorkspace.shared.open(
+            [URL(fileURLWithPath: result.path)],
+            withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
+    }
 }
+
+// Backward compatibility alias
+typealias RecentImageCard = ImageCard
 
 struct DoubleClickImageView: View {
     let filePath: String
@@ -2290,62 +5003,26 @@ struct DoubleClickImageView: View {
     }
 
     private func loadImage() {
-        if let cachedImage = ImageCache.shared.image(for: filePath) {
-            self.image = cachedImage
+        let maxSize = Int(prefs.imageSize) * 2  // 2x for retina
+
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: filePath, size: maxSize) {
+            self.image = cached
             return
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let loadedImage = NSImage(contentsOfFile: filePath) {
-                let maxSize = CGFloat(SearchPreferences.shared.imageSize)
-                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
-                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
-                ImageCache.shared.setImage(resizedImage, for: filePath)
-                DispatchQueue.main.async {
-                    self.image = resizedImage
-                }
-            }
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: filePath, maxSize: maxSize) { thumbnail in
+            self.image = thumbnail
         }
-    }
-
-    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
-        let imageWidth = image.size.width
-        let imageHeight = image.size.height
-
-        let widthRatio = maxSize / imageWidth
-        let heightRatio = maxSize / imageHeight
-
-        let ratio = min(widthRatio, heightRatio)
-
-        return NSSize(
-            width: imageWidth * ratio,
-            height: imageHeight * ratio
-        )
-    }
-
-    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
-        let newImage = NSImage(size: targetSize)
-
-        newImage.lockFocus()
-
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: targetSize).fill()
-
-        image.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1.0
-        )
-
-        newImage.unlockFocus()
-        return newImage
     }
 }
 
 // MARK: - Async Thumbnail View
+/// Efficiently loads thumbnails using CGImageSource (reads minimal bytes from file)
 struct AsyncThumbnailView: View {
     let path: String
+    var maxSize: Int = 200
     var contentMode: ContentMode = .fill
     @State private var image: NSImage?
 
@@ -2365,51 +5042,21 @@ struct AsyncThumbnailView: View {
             }
         }
         .onAppear {
-            loadImage()
+            loadThumbnail()
         }
     }
 
-    private func loadImage() {
-        if let cachedImage = ImageCache.shared.image(for: path) {
-            self.image = cachedImage
+    private func loadThumbnail() {
+        // Check cache first
+        if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: maxSize) {
+            self.image = cached
             return
         }
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            if let loadedImage = NSImage(contentsOfFile: path) {
-                let maxSize: CGFloat = 200
-                let newSize = calculateAspectRatioSize(for: loadedImage, maxSize: maxSize)
-                let resizedImage = resizeImage(loadedImage, targetSize: newSize)
-                ImageCache.shared.setImage(resizedImage, for: path)
-                DispatchQueue.main.async {
-                    self.image = resizedImage
-                }
-            }
+        // Load efficiently using ThumbnailService
+        ThumbnailService.shared.loadThumbnail(for: path, maxSize: maxSize) { thumbnail in
+            self.image = thumbnail
         }
-    }
-
-    private func calculateAspectRatioSize(for image: NSImage, maxSize: CGFloat) -> NSSize {
-        let imageWidth = image.size.width
-        let imageHeight = image.size.height
-        let widthRatio = maxSize / imageWidth
-        let heightRatio = maxSize / imageHeight
-        let ratio = min(widthRatio, heightRatio)
-        return NSSize(width: imageWidth * ratio, height: imageHeight * ratio)
-    }
-
-    private func resizeImage(_ image: NSImage, targetSize: NSSize) -> NSImage {
-        let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: targetSize).fill()
-        image.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1.0
-        )
-        newImage.unlockFocus()
-        return newImage
     }
 }
 
@@ -2576,7 +5223,7 @@ class SearchManager: ObservableObject {
                 let url = serverURL.appendingPathComponent("recent")
                 var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
                 components.queryItems = [
-                    URLQueryItem(name: "top_k", value: "8"),
+                    URLQueryItem(name: "top_k", value: "50"),
                     URLQueryItem(name: "data_dir", value: "/Users/ausaf/Library/Application Support/searchy")
                 ]
 
@@ -2601,6 +5248,59 @@ class SearchManager: ObservableObject {
                 }
             }
         }
+    }
+
+    func findSimilar(imagePath: String, numberOfResults: Int = 20) {
+        guard !isSearching else { return }
+
+        DispatchQueue.main.async {
+            self.isSearching = true
+            self.errorMessage = nil
+            self.results = []
+            self.searchStats = nil
+        }
+
+        Task {
+            do {
+                let response = try await self.performFindSimilar(imagePath: imagePath, numberOfResults: numberOfResults)
+                DispatchQueue.main.async {
+                    self.results = response.results
+                    self.searchStats = response.stats
+                    self.isSearching = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = error.localizedDescription
+                    self.isSearching = false
+                }
+            }
+        }
+    }
+
+    private func performFindSimilar(imagePath: String, numberOfResults: Int) async throws -> SearchResponse {
+        guard let serverURL = await self.serverURL else {
+            throw NSError(domain: "Server not ready", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server is still starting up. Please wait a moment."])
+        }
+        let url = serverURL.appendingPathComponent("similar")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "image_path": imagePath,
+            "top_k": numberOfResults,
+            "data_dir": "/Users/ausaf/Library/Application Support/searchy"
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let response = try JSONDecoder().decode(SearchResponse.self, from: data)
+
+        if let errorMessage = response.error {
+            throw NSError(domain: "SearchError", code: 0, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        return response
     }
 }
 
@@ -2630,10 +5330,175 @@ struct IndexStats {
     let lastModified: Date?
 }
 
+// MARK: - Setup Tab Helper Views
+
+struct SetupModelRow: View {
+    let model: CLIPModelInfo
+    let isSelected: Bool
+    let isChanging: Bool
+    let onSelect: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
+                // Selection indicator
+                Circle()
+                    .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
+                    .frame(width: 8, height: 8)
+                    .overlay(
+                        Circle()
+                            .stroke(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.border, lineWidth: 1.5)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.name)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundColor(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.primaryText)
+
+                    Text("\(model.embeddingDim)-dim • \(model.sizeMB)MB")
+                        .font(.system(size: 10))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+            }
+            .padding(.horizontal, DesignSystem.Spacing.sm)
+            .padding(.vertical, DesignSystem.Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ?
+                        DesignSystem.Colors.accent.opacity(0.08) :
+                        (colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02)))
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isChanging)
+        .opacity(isChanging && !isSelected ? 0.5 : 1)
+    }
+}
+
+struct SetupDirectoryRow: View {
+    let directory: WatchedDirectory
+    let onDelete: () -> Void
+    @State private var isHovered = false
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 14))
+                .foregroundColor(DesignSystem.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(URL(fileURLWithPath: directory.path).lastPathComponent)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .lineLimit(1)
+
+                Text(directory.path)
+                    .font(.system(size: 10))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            // Filter badge if present
+            if directory.filterType != .all && !directory.filter.isEmpty {
+                Text(directory.filter)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(DesignSystem.Colors.accent.opacity(0.1))
+                    )
+            }
+
+            // Delete button on hover
+            if isHovered {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.sm)
+        .padding(.vertical, DesignSystem.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+struct SetupStatRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+
+    var body: some View {
+        HStack(spacing: DesignSystem.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(color)
+                .frame(width: 24)
+
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+
+            Spacer()
+
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+        }
+        .padding(.horizontal, DesignSystem.Spacing.sm)
+        .padding(.vertical, DesignSystem.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+        )
+    }
+}
+
 // MARK: - App Tabs
 enum AppTab: String, CaseIterable {
-    case search = "Search"
+    case faces = "Faces"
+    case search = "Searchy"
     case duplicates = "Duplicates"
+    case favorites = "Favorites"
+    case setup = "Setup"
+
+    var icon: String {
+        switch self {
+        case .faces: return "person.2"
+        case .search: return "magnifyingglass"
+        case .duplicates: return "doc.on.doc"
+        case .favorites: return "heart.fill"
+        case .setup: return "slider.horizontal.3"
+        }
+    }
 }
 
 // MARK: - Duplicates Models
@@ -2821,10 +5686,746 @@ class DuplicatesManager: ObservableObject {
     }
 }
 
+// MARK: - Favorites Manager
+class FavoritesManager: ObservableObject {
+    static let shared = FavoritesManager()
+
+    @Published var favorites: Set<String> = []
+    @Published var favoriteImages: [SearchResult] = []
+    @Published var isLoading = false
+
+    private let favoritesFileURL: URL
+
+    private init() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let searchyDir = appSupport.appendingPathComponent("searchy")
+        try? FileManager.default.createDirectory(at: searchyDir, withIntermediateDirectories: true)
+        favoritesFileURL = searchyDir.appendingPathComponent("favorites.json")
+        loadFavorites()
+    }
+
+    private func loadFavorites() {
+        guard FileManager.default.fileExists(atPath: favoritesFileURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: favoritesFileURL)
+            let paths = try JSONDecoder().decode([String].self, from: data)
+            favorites = Set(paths)
+            refreshFavoriteImages()
+        } catch {
+            print("Failed to load favorites: \(error)")
+        }
+    }
+
+    private func saveFavorites() {
+        do {
+            let data = try JSONEncoder().encode(Array(favorites))
+            try data.write(to: favoritesFileURL)
+        } catch {
+            print("Failed to save favorites: \(error)")
+        }
+    }
+
+    func toggleFavorite(_ path: String) {
+        objectWillChange.send()  // Force UI update
+        if favorites.contains(path) {
+            favorites.remove(path)
+        } else {
+            favorites.insert(path)
+        }
+        saveFavorites()
+        refreshFavoriteImages()
+    }
+
+    func isFavorite(_ path: String) -> Bool {
+        favorites.contains(path)
+    }
+
+    func refreshFavoriteImages() {
+        isLoading = true
+        let currentFavorites = Array(favorites)
+
+        Task.detached(priority: .userInitiated) {
+            let images = currentFavorites.compactMap { path -> SearchResult? in
+                guard FileManager.default.fileExists(atPath: path) else { return nil }
+                let url = URL(fileURLWithPath: path)
+                let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+                let size = attrs?[.size] as? Int ?? 0
+                let date = attrs?[.modificationDate] as? Date
+                let dateStr = date.map { ISO8601DateFormatter().string(from: $0) }
+                return SearchResult(
+                    path: path,
+                    similarity: 1.0,
+                    size: size,
+                    date: dateStr,
+                    type: url.pathExtension.lowercased()
+                )
+            }.sorted { ($0.date ?? "") > ($1.date ?? "") }
+
+            await MainActor.run {
+                self.favoriteImages = images
+                self.isLoading = false
+            }
+        }
+    }
+}
+
+// MARK: - Face Detection & Clustering
+
+// MARK: - Face Data Models (matching Python API)
+
+struct FaceData: Codable, Identifiable {
+    let face_id: String
+    let image_path: String
+    let bbox: FaceBBox
+    let confidence: Double
+    let thumbnail_path: String?
+    let verified: Bool?
+    let added_date: String?
+
+    var id: String { face_id }
+    var imagePath: String { image_path }
+    var thumbnailPath: String? { thumbnail_path }
+    var isVerified: Bool { verified ?? false }
+
+    struct FaceBBox: Codable {
+        let x: Int
+        let y: Int
+        let w: Int
+        let h: Int
+    }
+}
+
+struct FaceCluster: Codable, Identifiable {
+    let cluster_id: String
+    let name: String
+    let face_count: Int
+    let unverified_count: Int?
+    let thumbnail_path: String?
+    let faces: [FaceData]
+
+    var id: String { cluster_id }
+    var faceCount: Int { face_count }
+    var unverifiedCount: Int { unverified_count ?? face_count }
+    var thumbnailPath: String? { thumbnail_path }
+}
+
+struct FaceClustersResponse: Codable {
+    let clusters: [FaceCluster]
+    let total_clusters: Int
+    let total_faces: Int
+}
+
+struct FaceScanStatusResponse: Codable {
+    let is_scanning: Bool
+    let progress: Double
+    let status: String
+    let total_to_scan: Int
+    let scanned_count: Int
+    let total_faces: Int
+    let total_clusters: Int
+}
+
+struct FaceNewCountResponse: Codable {
+    let new_count: Int
+    let total_indexed: Int
+    let already_scanned: Int
+}
+
+// Keep legacy types for compatibility with existing views
+struct DetectedFace: Codable, Identifiable {
+    var id = UUID()
+    let imagePath: String
+    let boundingBox: CGRect
+    var embedding: [Float]?
+    var personId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, imagePath, boundingBox, embedding, personId
+    }
+
+    init(id: UUID = UUID(), imagePath: String, boundingBox: CGRect, embedding: [Float]? = nil, personId: String? = nil) {
+        self.id = id
+        self.imagePath = imagePath
+        self.boundingBox = boundingBox
+        self.embedding = embedding
+        self.personId = personId
+    }
+
+    // Create from FaceData (Python API response)
+    init(from faceData: FaceData) {
+        self.id = UUID()
+        self.imagePath = faceData.image_path
+        self.boundingBox = CGRect(
+            x: CGFloat(faceData.bbox.x),
+            y: CGFloat(faceData.bbox.y),
+            width: CGFloat(faceData.bbox.w),
+            height: CGFloat(faceData.bbox.h)
+        )
+        self.embedding = nil
+        self.personId = nil
+    }
+}
+
+struct Person: Identifiable {
+    let id: String
+    var name: String
+    var faces: [DetectedFace]
+    var thumbnailPath: String?
+    var unverifiedCount: Int
+
+    var faceCount: Int { faces.count }
+
+    // Create from FaceCluster (Python API response)
+    init(from cluster: FaceCluster) {
+        self.id = cluster.cluster_id
+        self.name = cluster.name
+        self.faces = cluster.faces.map { DetectedFace(from: $0) }
+        self.thumbnailPath = cluster.thumbnail_path
+        self.unverifiedCount = cluster.unverifiedCount
+    }
+
+    init(id: String, name: String, faces: [DetectedFace], thumbnailPath: String? = nil, unverifiedCount: Int = 0) {
+        self.id = id
+        self.name = name
+        self.faces = faces
+        self.thumbnailPath = thumbnailPath
+        self.unverifiedCount = unverifiedCount
+    }
+}
+
+class FaceManager: ObservableObject {
+    static let shared = FaceManager()
+
+    @Published var people: [Person] = []
+    @Published var isScanning = false
+    @Published var scanProgress: String = ""
+    @Published var scanPercentage: Double = 0
+    @Published var totalFacesDetected = 0
+    @Published var hasScannedBefore = false
+    @Published var newImagesCount = 0
+    @Published var pinnedClusterIds: Set<String> = []
+    @Published var hiddenClusterIds: Set<String> = []
+    @Published var showHidden: Bool = false
+
+    let baseURL = "http://localhost:7860"
+    let dataDir = "/Users/ausaf/Library/Application Support/searchy"
+    private var statusPollTimer: Timer?
+
+    private init() {
+        // Load initial state from Python backend
+        Task {
+            await loadPinnedClusters()
+            await loadHiddenClusters()
+            await loadGroups()
+            await loadClustersFromAPI()
+            await checkForNewImages()
+        }
+    }
+
+    // MARK: - API Calls
+
+    /// Check for new indexed images that haven't been scanned
+    func checkForNewImages() async {
+        guard let url = URL(string: "\(baseURL)/face-new-count?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceNewCountResponse.self, from: data)
+            await MainActor.run {
+                self.newImagesCount = response.new_count
+                self.hasScannedBefore = response.already_scanned > 0
+            }
+        } catch {
+            print("Failed to check new images: \(error)")
+        }
+    }
+
+    /// Load face clusters from Python backend
+    func loadClustersFromAPI() async {
+        guard let url = URL(string: "\(baseURL)/face-clusters?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceClustersResponse.self, from: data)
+            await MainActor.run {
+                self.people = response.clusters.map { Person(from: $0) }
+                self.totalFacesDetected = response.total_faces
+                self.hasScannedBefore = response.total_faces > 0
+            }
+        } catch {
+            print("Failed to load clusters: \(error)")
+        }
+    }
+
+    /// Start face scanning via Python backend
+    func scanForFaces(fullRescan: Bool = false) {
+        guard !isScanning else { return }
+
+        Task {
+            await MainActor.run {
+                self.isScanning = true
+                self.scanProgress = "Starting face scan..."
+                self.scanPercentage = 0
+            }
+
+            // Call the Python API to start scanning
+            guard let url = URL(string: "\(baseURL)/face-scan") else {
+                await MainActor.run {
+                    self.isScanning = false
+                    self.scanProgress = "Error: Invalid URL"
+                }
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "data_dir": dataDir,
+                "incremental": !fullRescan
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let status = json["status"] as? String {
+                    if status == "started" || status == "already_scanning" {
+                        // Start polling for status
+                        await startStatusPolling()
+                    } else if status == "error" {
+                        let message = json["message"] as? String ?? "Unknown error"
+                        await MainActor.run {
+                            self.isScanning = false
+                            self.scanProgress = "Error: \(message)"
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isScanning = false
+                    self.scanProgress = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Start polling for scan status
+    private func startStatusPolling() async {
+        await MainActor.run {
+            self.statusPollTimer?.invalidate()
+            self.statusPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task {
+                    await self?.pollScanStatus()
+                }
+            }
+        }
+    }
+
+    /// Poll scan status from Python backend
+    private func pollScanStatus() async {
+        guard let url = URL(string: "\(baseURL)/face-scan-status?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(FaceScanStatusResponse.self, from: data)
+
+            await MainActor.run {
+                self.scanProgress = response.status
+                self.scanPercentage = response.progress
+                self.totalFacesDetected = response.total_faces
+
+                if !response.is_scanning {
+                    // Scan complete - stop polling and load results
+                    self.statusPollTimer?.invalidate()
+                    self.statusPollTimer = nil
+                    self.isScanning = false
+                    self.newImagesCount = 0
+
+                    // Load updated clusters
+                    Task {
+                        await self.loadClustersFromAPI()
+                    }
+                }
+            }
+        } catch {
+            print("Failed to poll status: \(error)")
+        }
+    }
+
+    /// Clear all face data via Python backend
+    func clearAllFaces() {
+        Task {
+            guard let url = URL(string: "\(baseURL)/face-clear?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+
+            do {
+                let _ = try await URLSession.shared.data(for: request)
+                await MainActor.run {
+                    self.people = []
+                    self.totalFacesDetected = 0
+                    self.hasScannedBefore = false
+                    self.newImagesCount = 0
+                    self.scanProgress = "All face data cleared"
+                }
+                // Check for new images after clearing
+                await checkForNewImages()
+            } catch {
+                print("Failed to clear faces: \(error)")
+            }
+        }
+    }
+
+    /// Get images for a specific person
+    func getImagesForPerson(_ person: Person) -> [SearchResult] {
+        let uniquePaths = Set(person.faces.map { $0.imagePath })
+        return uniquePaths.compactMap { path -> SearchResult? in
+            guard FileManager.default.fileExists(atPath: path) else { return nil }
+            let url = URL(fileURLWithPath: path)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+            let size = attrs?[.size] as? Int ?? 0
+            let date = attrs?[.modificationDate] as? Date
+            let dateStr = date.map { ISO8601DateFormatter().string(from: $0) }
+            return SearchResult(
+                path: path,
+                similarity: 1.0,
+                size: size,
+                date: dateStr,
+                type: url.pathExtension.lowercased()
+            )
+        }.sorted { ($0.date ?? "") > ($1.date ?? "") }
+    }
+
+    /// Refresh new images count - call from UI
+    func refreshNewImagesCount() {
+        Task {
+            await checkForNewImages()
+        }
+    }
+
+    /// Rename a person with a custom name
+    func renamePerson(_ person: Person, to newName: String) async -> Bool {
+        // Build URL with query parameters
+        var components = URLComponents(string: "\(baseURL)/face-rename")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "name", value: newName),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                print("Rename response: \(json)")
+                if let status = json["status"] as? String, status == "success" {
+                    // Update local state - replace entire element to trigger SwiftUI update
+                    await MainActor.run {
+                        self.objectWillChange.send()
+                        if let index = self.people.firstIndex(where: { $0.id == person.id }) {
+                            var updatedPerson = self.people[index]
+                            updatedPerson.name = newName
+                            self.people[index] = updatedPerson
+                            print("Updated person at index \(index) to name: \(newName)")
+                        } else {
+                            print("Person not found in people array: \(person.id)")
+                        }
+                    }
+                    return true
+                } else if let error = json["error"] as? String, error.contains("not found") {
+                    // Cluster IDs may have changed - reload clusters
+                    print("Cluster not found, reloading clusters from API...")
+                    await loadClustersFromAPI()
+                } else {
+                    print("Rename failed - status not success: \(json)")
+                }
+            }
+        } catch {
+            print("Failed to rename person: \(error)")
+        }
+        return false
+    }
+
+    // MARK: - Pin/Favorite Methods
+
+    /// Load pinned clusters from backend
+    func loadPinnedClusters() async {
+        guard let url = URL(string: "\(baseURL)/face-pinned?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let pinned = json["pinned"] as? [String] {
+                await MainActor.run {
+                    self.pinnedClusterIds = Set(pinned)
+                }
+            }
+        } catch {
+            print("Failed to load pinned clusters: \(error)")
+        }
+    }
+
+    /// Check if a person is pinned
+    func isPinned(_ person: Person) -> Bool {
+        return pinnedClusterIds.contains(person.id)
+    }
+
+    /// Toggle pin status for a person
+    func togglePin(_ person: Person) async {
+        let isPinned = pinnedClusterIds.contains(person.id)
+        let endpoint = isPinned ? "face-unpin" : "face-pin"
+
+        var components = URLComponents(string: "\(baseURL)/\(endpoint)")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success",
+               let pinned = json["pinned"] as? [String] {
+                await MainActor.run {
+                    self.pinnedClusterIds = Set(pinned)
+                }
+            }
+        } catch {
+            print("Failed to toggle pin: \(error)")
+        }
+    }
+
+    // MARK: - Hide/Archive Methods
+
+    /// Load hidden clusters from backend
+    func loadHiddenClusters() async {
+        guard let url = URL(string: "\(baseURL)/face-hidden?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let hidden = json["hidden"] as? [String] {
+                await MainActor.run {
+                    self.hiddenClusterIds = Set(hidden)
+                }
+            }
+        } catch {
+            print("Failed to load hidden clusters: \(error)")
+        }
+    }
+
+    /// Check if a person is hidden
+    func isHidden(_ person: Person) -> Bool {
+        return hiddenClusterIds.contains(person.id)
+    }
+
+    /// Toggle hide status for a person
+    func toggleHide(_ person: Person) async {
+        let isHidden = hiddenClusterIds.contains(person.id)
+        let endpoint = isHidden ? "face-unhide" : "face-hide"
+
+        var components = URLComponents(string: "\(baseURL)/\(endpoint)")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: person.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success",
+               let hidden = json["hidden"] as? [String] {
+                await MainActor.run {
+                    self.hiddenClusterIds = Set(hidden)
+                }
+            }
+        } catch {
+            print("Failed to toggle hide: \(error)")
+        }
+    }
+
+    /// Get visible people (filtered by hidden status, sorted with pinned first)
+    var sortedPeople: [Person] {
+        // Filter by hidden status
+        let visible = showHidden ? people : people.filter { !hiddenClusterIds.contains($0.id) }
+        // Sort with pinned first
+        let pinned = visible.filter { pinnedClusterIds.contains($0.id) }
+        let unpinned = visible.filter { !pinnedClusterIds.contains($0.id) }
+        return pinned + unpinned
+    }
+
+    /// Count of hidden people
+    var hiddenCount: Int {
+        return hiddenClusterIds.count
+    }
+
+    /// Total count of unverified faces across all people
+    var totalUnverifiedCount: Int {
+        return people.reduce(0) { $0 + $1.unverifiedCount }
+    }
+
+    // MARK: - Groups/Tags
+
+    @Published var availableGroups: [String] = []
+    @Published var groupAssignments: [String: [String]] = [:] // cluster_id -> [group names]
+    @Published var selectedGroupFilter: String? = nil
+
+    func loadGroups() async {
+        guard let url = URL(string: "\(baseURL)/face-groups?data_dir=\(dataDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataDir)") else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            struct GroupsResponse: Codable {
+                let groups: [String]
+                let assignments: [String: [String]]
+            }
+            let response = try JSONDecoder().decode(GroupsResponse.self, from: data)
+            await MainActor.run {
+                self.availableGroups = response.groups
+                self.groupAssignments = response.assignments
+            }
+        } catch {
+            print("Error loading groups: \(error)")
+        }
+    }
+
+    func createGroup(_ name: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-create")
+        components?.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error creating group: \(error)")
+        }
+    }
+
+    func deleteGroup(_ name: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-delete")
+        components?.queryItems = [
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error deleting group: \(error)")
+        }
+    }
+
+    func assignGroup(_ clusterId: String, group: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-assign")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: clusterId),
+            URLQueryItem(name: "group", value: group),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error assigning group: \(error)")
+        }
+    }
+
+    func removeGroup(_ clusterId: String, group: String) async {
+        var components = URLComponents(string: "\(baseURL)/face-group-remove")
+        components?.queryItems = [
+            URLQueryItem(name: "cluster_id", value: clusterId),
+            URLQueryItem(name: "group", value: group),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (_, _) = try await URLSession.shared.data(for: request)
+            await loadGroups()
+        } catch {
+            print("Error removing group: \(error)")
+        }
+    }
+
+    func getGroupsForCluster(_ clusterId: String) -> [String] {
+        return groupAssignments[clusterId] ?? []
+    }
+
+    // MARK: - Merge Methods
+
+    /// Merge source person into target person
+    func mergePeople(source: Person, into target: Person) async -> Bool {
+        var components = URLComponents(string: "\(baseURL)/face-merge")
+        components?.queryItems = [
+            URLQueryItem(name: "source_cluster_id", value: source.id),
+            URLQueryItem(name: "target_cluster_id", value: target.id),
+            URLQueryItem(name: "data_dir", value: dataDir)
+        ]
+        guard let url = components?.url else { return false }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "success" {
+                // Reload clusters to get updated state
+                await loadClustersFromAPI()
+                await loadPinnedClusters()
+                await loadHiddenClusters()
+                return true
+            }
+        } catch {
+            print("Failed to merge people: \(error)")
+        }
+        return false
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
     @ObservedObject private var duplicatesManager = DuplicatesManager.shared
+    @ObservedObject private var favoritesManager = FavoritesManager.shared
+    @ObservedObject private var faceManager = FaceManager.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var modelSettings = ModelSettings.shared
+    @ObservedObject private var dirManager = DirectoryManager.shared
     @State private var activeTab: AppTab = .search
+    @Namespace private var tabAnimation
+    @State private var selectedPerson: Person? = nil
+    @State private var peopleSearchText = ""
+    @State private var selectedPeopleIds: Set<String> = []
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
@@ -2837,9 +6438,10 @@ struct ContentView: View {
     @State private var indexingSpeed: Double = 0
     @State private var indexingElapsed: Double = 0
     @State private var indexingBatchInfo: String = ""
+    @State private var elapsedTimer: Timer? = nil
+    @State private var indexingStartTime: Date? = nil
     @State private var indexStats: IndexStats? = nil
     @State private var isShowingSettings = false
-    @State private var showFilterSidebar = false
     @State private var filterTypes: Set<String> = []
     @State private var filterSizeMin: Int? = nil
     @State private var filterSizeMax: Int? = nil
@@ -2848,22 +6450,23 @@ struct ContentView: View {
     @State private var searchDebounceTimer: Timer?
     @State private var recentImages: [SearchResult] = []
     @State private var isLoadingRecent = false
+    @State private var pastedImage: NSImage? = nil
+    @State private var isDropTargeted = false
+    @State private var keyMonitor: Any? = nil
+    @State private var previewResult: SearchResult? = nil
+    @State private var previewTimer: Timer? = nil
+    @State private var showPreviewPanel = false
+    @State private var previewPanelWidth: CGFloat = 300
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         ZStack {
-            // Background gradient
-            LinearGradient(
-                colors: colorScheme == .dark ?
-                    [DesignSystem.Colors.darkPrimaryBackground, DesignSystem.Colors.darkSecondaryBackground] :
-                    [DesignSystem.Colors.primaryBackground, DesignSystem.Colors.tertiaryBackground],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Clean solid background
+            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Modern header
+                // Friendly header
                 modernHeader
 
                 // Tab Picker
@@ -2871,12 +6474,20 @@ struct ContentView: View {
                     .padding(.top, DesignSystem.Spacing.md)
 
                 // Main content area based on active tab
-                if activeTab == .search {
+                switch activeTab {
+                case .faces:
+                    facesTabContent
+                case .search:
                     searchTabContent
-                } else {
+                case .duplicates:
                     duplicatesTabContent
+                case .favorites:
+                    favoritesTabContent
+                case .setup:
+                    setupTabContent
                 }
             }
+            .padding(.horizontal, DesignSystem.Spacing.md)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -2885,6 +6496,7 @@ struct ContentView: View {
         .onAppear {
             loadRecentImages()
             loadIndexStats()
+            setupPasteMonitor()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -2892,191 +6504,1987 @@ struct ContentView: View {
         }
         .onDisappear {
             searchManager.cancelSearch()
+            removePasteMonitor()
         }
     }
 
-    // MARK: - Modern Header
+    // MARK: - Header (Friendly, Craft-style)
     private var modernHeader: some View {
-        HStack(spacing: DesignSystem.Spacing.md) {
-            // App title with animated icon
-            HStack(spacing: DesignSystem.Spacing.sm) {
+        HStack(spacing: DesignSystem.Spacing.lg) {
+            // Friendly logo - warm, inviting
+            HStack(spacing: 10) {
+                // Photo icon instead of tech magnifying glass
                 ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.15),
-                                    DesignSystem.Colors.accent.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.Colors.accent.opacity(0.12))
+                        .frame(width: 32, height: 32)
                     Image(systemName: "photo.stack.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Searchy")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-
-                    if searchManager.isSearching {
-                        Text("Searching...")
-                            .font(DesignSystem.Typography.caption2)
-                            .foregroundColor(DesignSystem.Colors.accent)
-                            .transition(.opacity)
-                    } else if !searchManager.results.isEmpty {
-                        Text("\(searchManager.results.count) results")
-                            .font(DesignSystem.Typography.caption2)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                            .transition(.opacity)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.2), value: searchManager.isSearching)
-                .animation(.easeInOut(duration: 0.2), value: searchManager.results.count)
+                Text("Searchy")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
             }
 
             Spacer()
 
-            // Action buttons with status indicator
+            // Friendly icon buttons
             HStack(spacing: DesignSystem.Spacing.sm) {
+                // Indexing indicator (only when active)
                 if isIndexing {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
+                    HStack(spacing: 6) {
                         ProgressView()
-                            .scaleEffect(0.7)
-                        Text("Indexing...")
-                            .font(DesignSystem.Typography.caption)
+                            .scaleEffect(0.6)
+                        Text("\(Int(indexingPercent))%")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(DesignSystem.Colors.accent.opacity(0.1))
+                    .clipShape(Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+
+                MinimalIconButton(icon: "plus", tooltip: "Add folder") {
+                    if !isIndexing { selectAndIndexFolder() }
+                }
+                .disabled(isIndexing)
+
+                MinimalIconButton(icon: "arrow.clockwise", tooltip: "Rebuild index") {
+                    if !isIndexing { rebuildIndex() }
+                }
+                .disabled(isIndexing)
+
+                MinimalIconButton(icon: "gearshape", tooltip: "Settings") {
+                    isShowingSettings = true
+                }
+
+                // Theme switcher - compact
+                ThemeSwitcherCompact()
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Tab Picker (Minimal)
+    private var tabPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                tabButton(for: tab)
+            }
+        }
+        .padding(3)
+        .background(
+            colorScheme == .dark ?
+                Color.white.opacity(0.04) :
+                Color.black.opacity(0.03)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 11))
+    }
+
+    private func tabButton(for tab: AppTab) -> some View {
+        let isActive = activeTab == tab
+
+        return Button(action: {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                activeTab = tab
+            }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 13, weight: .medium))
+                Text(tab.rawValue)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+            }
+            .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+            .scaleEffect(isActive ? 1.08 : 1.0)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .background(
+            ZStack {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(DesignSystem.Colors.accent.opacity(0.12))
+                        .matchedGeometryEffect(id: "activeTab", in: tabAnimation)
+                }
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    // MARK: - Faces Tab Content
+
+    private var filteredPeople: [Person] {
+        var result = faceManager.sortedPeople
+
+        // Filter by search text
+        if !peopleSearchText.isEmpty {
+            result = result.filter {
+                $0.name.localizedCaseInsensitiveContains(peopleSearchText)
+            }
+        }
+
+        // Filter by group
+        if let groupFilter = faceManager.selectedGroupFilter {
+            result = result.filter {
+                faceManager.getGroupsForCluster($0.id).contains(groupFilter)
+            }
+        }
+
+        return result
+    }
+
+    private var facesTabContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("People")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    if faceManager.totalFacesDetected > 0 {
+                        if !peopleSearchText.isEmpty {
+                            Text("\(filteredPeople.count) of \(faceManager.people.count) people")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        } else {
+                            Text("\(faceManager.people.count) people • \(faceManager.totalFacesDetected) faces")
+                                .font(DesignSystem.Typography.caption)
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // Selected count indicator (when items selected)
+                if !selectedPeopleIds.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("\(selectedPeopleIds.count) selected")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.accent)
+
+                        Button(action: {
+                            withAnimation {
+                                selectedPeopleIds.removeAll()
+                            }
+                        }) {
+                            Text("Clear")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.trailing, 8)
+                }
+
+                if faceManager.hasScannedBefore && !faceManager.isScanning && selectedPeopleIds.isEmpty {
+                    Button(action: {
+                        faceManager.clearAllFaces()
+                    }) {
+                        Text("Clear All")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.trailing, 8)
+                }
+
+                // Show new images badge if there are unscanned images
+                if faceManager.newImagesCount > 0 && !faceManager.isScanning {
+                    Text("\(faceManager.newImagesCount) new")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.orange))
+                        .padding(.trailing, 4)
+                }
+
+                // Show unverified count badge
+                if faceManager.totalUnverifiedCount > 0 && !faceManager.isScanning {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 9))
+                        Text("\(faceManager.totalUnverifiedCount) to review")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.8)))
+                    .padding(.trailing, 4)
+                }
+
+                // Show Hidden toggle (only when there are hidden people)
+                if faceManager.hiddenCount > 0 {
+                    Button(action: {
+                        withAnimation {
+                            faceManager.showHidden.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: faceManager.showHidden ? "eye" : "eye.slash")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("\(faceManager.hiddenCount)")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(faceManager.showHidden ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(faceManager.showHidden
+                                      ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1)
+                                      : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.trailing, 4)
+                }
+
+                Button(action: {
+                    if faceManager.isScanning {
+                        // Could add cancel functionality
+                    } else {
+                        faceManager.scanForFaces()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        if faceManager.isScanning {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        Text(faceManager.isScanning ? "Scanning..." :
+                             (faceManager.newImagesCount > 0 ? "Scan New" : "Scan Faces"))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(faceManager.isScanning ? Color.gray : DesignSystem.Colors.accent)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(faceManager.isScanning)
+            }
+            .padding(.bottom, DesignSystem.Spacing.md)
+            .onAppear {
+                faceManager.refreshNewImagesCount()
+            }
+
+            // Search bar - only show when there are people
+            if !faceManager.people.isEmpty && selectedPerson == nil {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                    TextField("Search people...", text: $peopleSearchText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    if !peopleSearchText.isEmpty {
+                        Button(action: {
+                            withAnimation {
+                                peopleSearchText = ""
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
+                )
+                .padding(.bottom, DesignSystem.Spacing.sm)
+            }
+
+            // Group filter bar - only show when there are groups
+            if !faceManager.availableGroups.isEmpty && selectedPerson == nil {
+                groupFilterBar
+                    .padding(.bottom, DesignSystem.Spacing.md)
+            }
+
+            // Scanning progress
+            if faceManager.isScanning {
+                VStack(spacing: 16) {
+                    HStack(spacing: 12) {
+                        // Animated face icon
+                        ZStack {
+                            Circle()
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "faceid")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.accent)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Scanning for faces...")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                            Text(faceManager.scanProgress)
+                                .font(.system(size: 11))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Text("\(Int(faceManager.scanPercentage * 100))%")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundColor(DesignSystem.Colors.accent)
                     }
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(DesignSystem.Colors.accent.opacity(0.1))
-                    )
-                    .transition(.scale.combined(with: .opacity))
-                }
 
-                ModernButton(
-                    icon: "plus.square.fill",
-                    title: "Index Folder",
-                    style: .secondary,
-                    isDisabled: isIndexing
-                ) {
-                    if !isIndexing {
-                        selectAndIndexFolder()
+                    // Modern progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
+                                .frame(height: 6)
+
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geometry.size.width * faceManager.scanPercentage, height: 6)
+                                .animation(.easeInOut(duration: 0.3), value: faceManager.scanPercentage)
+                        }
                     }
+                    .frame(height: 6)
                 }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03))
+                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.05), radius: 8, y: 2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.clear, lineWidth: 1)
+                )
+                .padding(.bottom, DesignSystem.Spacing.lg)
+            }
 
-                ModernButton(
-                    icon: "arrow.triangle.2.circlepath",
-                    title: "Replace Index",
-                    style: .secondary,
-                    isDisabled: isIndexing
-                ) {
-                    if !isIndexing {
-                        selectAndReplaceIndex()
+            // Content
+            if selectedPerson != nil {
+                personDetailView
+            } else if faceManager.people.isEmpty && !faceManager.isScanning {
+                // Empty state - modern card design
+                VStack(spacing: 24) {
+                    Spacer()
+
+                    // Icon with gradient background
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.25 : 0.15),
+                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.1 : 0.05)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 120)
+
+                        Image(systemName: "person.2.crop.square.stack")
+                            .font(.system(size: 48, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.8 : 0.7))
                     }
-                }
 
-                ModernButton(
-                    icon: "gearshape.fill",
-                    title: nil,
-                    style: .tertiary,
-                    isDisabled: false
-                ) {
-                    isShowingSettings = true
+                    VStack(spacing: 8) {
+                        Text("Face Recognition")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+
+                        Text(faceManager.hasScannedBefore
+                             ? "No faces found in your photos.\nTry scanning more images."
+                             : "Find and group people in your photos\nusing face detection.")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+                    }
+
+                    if !faceManager.hasScannedBefore {
+                        Button(action: {
+                            faceManager.scanForFaces()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "faceid")
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("Start Scanning")
+                                    .font(.system(size: 14, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, y: 4)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.top, 8)
+                    }
+
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // People grid
+                if filteredPeople.isEmpty && !peopleSearchText.isEmpty {
+                    // No search results
+                    VStack(spacing: 16) {
+                        Spacer()
+                        Image(systemName: "person.slash")
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text("No people matching \"\(peopleSearchText)\"")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Button(action: { peopleSearchText = "" }) {
+                            Text("Clear Search")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.accent)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 12)
+                        ], spacing: 14) {
+                            ForEach(filteredPeople) { person in
+                                PersonCard(
+                                    person: person,
+                                    isPinned: faceManager.isPinned(person),
+                                    isHidden: faceManager.isHidden(person),
+                                    isSelected: selectedPeopleIds.contains(person.id),
+                                    onRename: { newName in
+                                        Task {
+                                            await faceManager.renamePerson(person, to: newName)
+                                        }
+                                    },
+                                    onSelect: {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            selectedPerson = person
+                                        }
+                                    },
+                                    onTogglePin: {
+                                        Task {
+                                            await faceManager.togglePin(person)
+                                        }
+                                    },
+                                    onToggleHide: {
+                                        Task {
+                                            await faceManager.toggleHide(person)
+                                        }
+                                    },
+                                    onToggleSelection: {
+                                        withAnimation {
+                                            if selectedPeopleIds.contains(person.id) {
+                                                selectedPeopleIds.remove(person.id)
+                                            } else {
+                                                selectedPeopleIds.insert(person.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, !selectedPeopleIds.isEmpty ? 80 : 16)
+                    }
+
+                    // Floating selection action bar
+                    if !selectedPeopleIds.isEmpty {
+                        selectionActionBar
+                    }
                 }
             }
         }
         .padding(.horizontal, DesignSystem.Spacing.xl)
-        .padding(.vertical, DesignSystem.Spacing.lg)
-        .background(
-            (colorScheme == .dark ?
-                DesignSystem.Colors.darkSecondaryBackground :
-                DesignSystem.Colors.secondaryBackground)
-                .opacity(0.7)
-                .background(.ultraThinMaterial)
-        )
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(DesignSystem.Colors.border.opacity(0.5))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Tab Picker
-    private var tabPicker: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
-            ForEach(AppTab.allCases, id: \.self) { tab in
+    private var groupFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // All filter (no filter)
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        activeTab = tab
-                    }
+                    withAnimation { faceManager.selectedGroupFilter = nil }
                 }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        Image(systemName: tab == .search ? "magnifyingglass" : "square.on.square")
+                    Text("All")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(faceManager.selectedGroupFilter == nil ? .white : DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(faceManager.selectedGroupFilter == nil ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Group filters
+                ForEach(faceManager.availableGroups, id: \.self) { group in
+                    Button(action: {
+                        withAnimation {
+                            faceManager.selectedGroupFilter = faceManager.selectedGroupFilter == group ? nil : group
+                        }
+                    }) {
+                        Text(group)
                             .font(.system(size: 12, weight: .medium))
-                        Text(tab.rawValue)
-                            .font(DesignSystem.Typography.callout.weight(.medium))
+                            .foregroundColor(faceManager.selectedGroupFilter == group ? .white : DesignSystem.Colors.secondaryText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(faceManager.selectedGroupFilter == group ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                            )
                     }
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(activeTab == tab ? DesignSystem.Colors.accent : Color.clear)
-                    )
-                    .foregroundColor(activeTab == tab ? .white : DesignSystem.Colors.secondaryText)
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Add group button
+                Button(action: { showAddGroupSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, DesignSystem.Spacing.xl)
+    }
+
+    @State private var showAddGroupSheet = false
+    @State private var newGroupName = ""
+
+    private var selectionActionBar: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 16) {
+                // Hide/Unhide button
+                Button(action: {
+                    Task {
+                        for id in selectedPeopleIds {
+                            if let person = faceManager.people.first(where: { $0.id == id }) {
+                                await faceManager.toggleHide(person)
+                            }
+                        }
+                        withAnimation {
+                            selectedPeopleIds.removeAll()
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 18))
+                        Text("Hide")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Pin/Unpin button
+                Button(action: {
+                    Task {
+                        for id in selectedPeopleIds {
+                            if let person = faceManager.people.first(where: { $0.id == id }) {
+                                await faceManager.togglePin(person)
+                            }
+                        }
+                        withAnimation {
+                            selectedPeopleIds.removeAll()
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "pin")
+                            .font(.system(size: 18))
+                        Text("Pin")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                // Merge button (only when 2+ selected)
+                if selectedPeopleIds.count >= 2 {
+                    Button(action: {
+                        bulkMergeTargetId = nil
+                        showBulkMergeSheet = true
+                    }) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                                .font(.system(size: 18))
+                            Text("Merge")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: 60)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Select All button
+                Button(action: {
+                    withAnimation {
+                        if selectedPeopleIds.count == filteredPeople.count {
+                            selectedPeopleIds.removeAll()
+                        } else {
+                            selectedPeopleIds = Set(filteredPeople.map { $0.id })
+                        }
+                    }
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: selectedPeopleIds.count == filteredPeople.count ? "checkmark.circle" : "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                        Text(selectedPeopleIds.count == filteredPeople.count ? "Deselect" : "All")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(width: 60)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.85))
+                    .shadow(color: Color.black.opacity(0.3), radius: 10, y: 4)
+            )
+            .padding(.bottom, 16)
+        }
+        .sheet(isPresented: $showBulkMergeSheet) {
+            bulkMergeSheet
+        }
+    }
+
+    private var bulkMergeSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Merge \(selectedPeopleIds.count) People")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { showBulkMergeSheet = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding()
+
+            // Info text
+            Text("Select which person to keep. All other selected people will be merged into them.")
+                .font(.system(size: 13))
+                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .padding(.horizontal)
+                .padding(.bottom, 16)
+
+            // List of selected people to pick target
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(bulkMergeSelectedPeople) { person in
+                        bulkMergeTargetRow(person)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, bulkMergeTargetId == nil ? 16 : 80)
+            }
+
+            // Bottom action bar when target is selected
+            if let targetId = bulkMergeTargetId,
+               let target = faceManager.people.first(where: { $0.id == targetId }) {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Keep: \(target.name)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                            Text("Merge \(selectedPeopleIds.count - 1) others into this person")
+                                .font(.system(size: 11))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+
+                        Spacer()
+
+                        if isMerging {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Merging...")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                        } else {
+                            Button(action: performBulkMerge) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.merge")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("Merge")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                }
+                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+            }
+        }
+        .frame(width: 380, height: 450)
+        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+    }
+
+    private var bulkMergeSelectedPeople: [Person] {
+        return faceManager.people.filter { selectedPeopleIds.contains($0.id) }
+    }
+
+    private func bulkMergeTargetRow(_ person: Person) -> some View {
+        let isTarget = bulkMergeTargetId == person.id
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                bulkMergeTargetId = person.id
+            }
+        }) {
+            HStack(spacing: 12) {
+                // Radio button
+                ZStack {
+                    Circle()
+                        .stroke(isTarget ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .frame(width: 22, height: 22)
+                    if isTarget {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 14, height: 14)
+                    }
+                }
+
+                // Thumbnail
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("\(person.faceCount) photos")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                if isTarget {
+                    Text("Keep")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent.opacity(0.15))
+                        )
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isTarget
+                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
+                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isTarget ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isMerging)
+    }
+
+    private func performBulkMerge() {
+        guard let targetId = bulkMergeTargetId,
+              let target = faceManager.people.first(where: { $0.id == targetId }) else { return }
+
+        let sourceIds = selectedPeopleIds.filter { $0 != targetId }
+        guard !sourceIds.isEmpty else { return }
+
+        isMerging = true
+
+        Task {
+            var allSuccess = true
+            for sourceId in sourceIds {
+                if let source = faceManager.people.first(where: { $0.id == sourceId }) {
+                    let success = await faceManager.mergePeople(source: source, into: target)
+                    if !success {
+                        allSuccess = false
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isMerging = false
+                if allSuccess {
+                    showBulkMergeSheet = false
+                    selectedPeopleIds.removeAll()
+                    bulkMergeTargetId = nil
+                }
+            }
+        }
+    }
+
+    @State private var isEditingPersonName = false
+    @State private var editingPersonName = ""
+    @FocusState private var personNameFieldFocused: Bool
+    @State private var showMergeSheet = false
+    @State private var mergeSearchText = ""
+    @State private var mergeSelectedIds: Set<String> = []
+    @State private var isMerging = false
+    @State private var showBulkMergeSheet = false
+    @State private var bulkMergeTargetId: String? = nil
+    @State private var showVerificationView = false
+
+    private var personDetailView: some View {
+        VStack(spacing: 0) {
+            // Header with back button, name, and photo count
+            HStack(alignment: .center, spacing: 12) {
+                // Back button
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedPerson = nil
+                        isEditingPersonName = false
+                    }
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                if let person = selectedPerson {
+                    // Person name (editable)
+                    if isEditingPersonName {
+                        TextField("Name", text: $editingPersonName)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                            )
+                            .focused($personNameFieldFocused)
+                            .onSubmit { commitPersonNameEdit() }
+                            .onExitCommand { cancelPersonNameEdit() }
+                            .frame(maxWidth: 200)
+                    } else {
+                        HStack(spacing: 6) {
+                            Text(person.name)
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .foregroundColor(DesignSystem.Colors.primaryText)
+                                .lineLimit(1)
+
+                            Button(action: { startPersonNameEdit() }) {
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+
+                    Spacer()
+
+                    // Review button (only show if there are unverified faces)
+                    if person.unverifiedCount > 0 {
+                        Button(action: {
+                            showVerificationView = true
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text("Review")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(Color.orange.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    // Merge button
+                    Button(action: {
+                        mergeSearchText = ""
+                        mergeSelectedIds.removeAll()
+                        showMergeSheet = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Merge")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Share button
+                    Button(action: {
+                        sharePersonPhotos(person)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Share")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Create Album button
+                    Button(action: {
+                        createAlbumForPerson(person)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Album")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    // Photo count badge
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 12))
+                        Text("\(person.faceCount) photos")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                    )
+                }
+            }
+            .padding(.bottom, DesignSystem.Spacing.lg)
+
+            // Person's photos grid
+            if let person = selectedPerson {
+                let images = faceManager.getImagesForPerson(person)
+                if images.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer()
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 48, weight: .light))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        Text("No photos available")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Spacer()
+                    }
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [
+                            GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)
+                        ], spacing: 16) {
+                            ForEach(images) { result in
+                                ImageCard(result: result, onFindSimilar: { _ in })
+                            }
+                        }
+                        .padding(.bottom, 20)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showMergeSheet) {
+            mergePersonSheet
+        }
+        .sheet(isPresented: $showVerificationView) {
+            if let person = selectedPerson {
+                FaceVerificationView(
+                    person: person,
+                    faceManager: faceManager,
+                    onDismiss: {
+                        showVerificationView = false
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showAddGroupSheet) {
+            addGroupSheet
+        }
+    }
+
+    private var addGroupSheet: some View {
+        VStack(spacing: 16) {
+            Text("Create Group")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(DesignSystem.Colors.primaryText)
+
+            TextField("Group name", text: $newGroupName)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.system(size: 14))
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                )
+
+            HStack(spacing: 12) {
+                Button(action: { showAddGroupSheet = false; newGroupName = "" }) {
+                    Text("Cancel")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: {
+                    if !newGroupName.isEmpty {
+                        Task {
+                            await faceManager.createGroup(newGroupName)
+                            newGroupName = ""
+                            showAddGroupSheet = false
+                        }
+                    }
+                }) {
+                    Text("Create")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(DesignSystem.Colors.accent))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(newGroupName.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 280)
+        .background(DesignSystem.Colors.secondaryBackground)
+    }
+
+    private var mergePersonSheet: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Merge People")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { showMergeSheet = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding()
+
+            // Info text
+            if let target = selectedPerson {
+                Text("Select people to merge into \"\(target.name)\". Their faces will be combined into this person.")
+                    .font(.system(size: 13))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+            }
+
+            // Search bar
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                TextField("Search people...", text: $mergeSearchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 14))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+
+                if !mergeSearchText.isEmpty {
+                    Button(action: { mergeSearchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+            )
+            .padding(.horizontal)
+            .padding(.bottom, 12)
+
+            // People list with multi-select
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(mergeTargetPeople) { person in
+                        mergePeopleRow(person)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, mergeSelectedIds.isEmpty ? 16 : 80)
+            }
+
+            // Bottom action bar
+            if !mergeSelectedIds.isEmpty {
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack {
+                        Text("\(mergeSelectedIds.count) selected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                        Spacer()
+
+                        if isMerging {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Merging...")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                            }
+                        } else {
+                            Button(action: performMerge) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.triangle.merge")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("Merge into \(selectedPerson?.name ?? "Person")")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(DesignSystem.Colors.accent)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                }
+                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+            }
+        }
+        .frame(width: 420, height: 520)
+        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+    }
+
+    private var mergeTargetPeople: [Person] {
+        // Exclude the currently selected person and filter by search
+        let available = faceManager.people.filter { $0.id != selectedPerson?.id }
+        if mergeSearchText.isEmpty {
+            return available
+        }
+        return available.filter {
+            $0.name.localizedCaseInsensitiveContains(mergeSearchText)
+        }
+    }
+
+    private func mergePeopleRow(_ person: Person) -> some View {
+        let isSelected = mergeSelectedIds.contains(person.id)
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if isSelected {
+                    mergeSelectedIds.remove(person.id)
+                } else {
+                    mergeSelectedIds.insert(person.id)
+                }
+            }
+        }) {
+            HStack(spacing: 12) {
+                // Selection checkbox
+                ZStack {
+                    Circle()
+                        .stroke(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .frame(width: 22, height: 22)
+                    if isSelected {
+                        Circle()
+                            .fill(DesignSystem.Colors.accent)
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                // Thumbnail
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(person.name)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    Text("\(person.faceCount) photos")
+                        .font(.system(size: 12))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected
+                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
+                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .disabled(isMerging)
+    }
+
+    private func performMerge() {
+        guard let target = selectedPerson, !mergeSelectedIds.isEmpty else { return }
+        isMerging = true
+
+        Task {
+            var allSuccess = true
+            // Merge each selected person into the target (current person)
+            for sourceId in mergeSelectedIds {
+                if let source = faceManager.people.first(where: { $0.id == sourceId }) {
+                    let success = await faceManager.mergePeople(source: source, into: target)
+                    if !success {
+                        allSuccess = false
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isMerging = false
+                if allSuccess {
+                    showMergeSheet = false
+                    mergeSelectedIds.removeAll()
+                    // Update selectedPerson to refreshed version
+                    if let updated = faceManager.people.first(where: { $0.id == target.id }) {
+                        selectedPerson = updated
+                    }
+                }
+            }
+        }
+    }
+
+    private func startPersonNameEdit() {
+        guard let person = selectedPerson else { return }
+        editingPersonName = person.name
+        isEditingPersonName = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            personNameFieldFocused = true
+        }
+    }
+
+    private func commitPersonNameEdit() {
+        let trimmed = editingPersonName.trimmingCharacters(in: .whitespaces)
+        if let person = selectedPerson, !trimmed.isEmpty && trimmed != person.name {
+            Task {
+                let success = await faceManager.renamePerson(person, to: trimmed)
+                if success {
+                    // Update local selectedPerson reference
+                    await MainActor.run {
+                        if let updated = faceManager.people.first(where: { $0.id == person.id }) {
+                            selectedPerson = updated
+                        }
+                    }
+                }
+            }
+        }
+        isEditingPersonName = false
+    }
+
+    private func cancelPersonNameEdit() {
+        isEditingPersonName = false
+        editingPersonName = selectedPerson?.name ?? ""
+    }
+
+    private func sharePersonPhotos(_ person: Person) {
+        let images = faceManager.getImagesForPerson(person)
+        let urls = images.compactMap { URL(fileURLWithPath: $0.path) }
+
+        guard !urls.isEmpty else { return }
+
+        // Get the key window to show the share picker
+        guard let window = NSApp.keyWindow else { return }
+
+        let picker = NSSharingServicePicker(items: urls)
+        // Show the picker relative to the window's content view
+        if let contentView = window.contentView {
+            let rect = CGRect(x: contentView.bounds.midX, y: contentView.bounds.maxY - 50, width: 1, height: 1)
+            picker.show(relativeTo: rect, of: contentView, preferredEdge: .minY)
+        }
+    }
+
+    private func createAlbumForPerson(_ person: Person) {
+        // Show save panel to select location
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = person.name
+        panel.canCreateDirectories = true
+        panel.title = "Create Album"
+        panel.message = "Choose a location to save the album folder"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+
+            // Create directory
+            do {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+
+                // Get images for person
+                let images = faceManager.getImagesForPerson(person)
+
+                // Create symlinks for each image
+                for image in images {
+                    let sourceURL = URL(fileURLWithPath: image.path)
+                    let destURL = url.appendingPathComponent(sourceURL.lastPathComponent)
+
+                    // Handle duplicate filenames
+                    var finalDestURL = destURL
+                    var counter = 1
+                    while FileManager.default.fileExists(atPath: finalDestURL.path) {
+                        let name = sourceURL.deletingPathExtension().lastPathComponent
+                        let ext = sourceURL.pathExtension
+                        finalDestURL = url.appendingPathComponent("\(name)_\(counter).\(ext)")
+                        counter += 1
+                    }
+
+                    try FileManager.default.createSymbolicLink(at: finalDestURL, withDestinationURL: sourceURL)
+                }
+
+                // Open folder in Finder
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
+            } catch {
+                print("Error creating album: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Favorites Tab Content
+    private var favoritesTabContent: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Favorites")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("\(favoritesManager.favoriteImages.count) images")
+                        .font(DesignSystem.Typography.callout)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, DesignSystem.Spacing.lg)
+            .padding(.vertical, DesignSystem.Spacing.md)
+
+            if favoritesManager.isLoading {
+                Spacer()
+                ProgressView()
+                    .scaleEffect(1.2)
+                Spacer()
+            } else if favoritesManager.favoriteImages.isEmpty {
+                Spacer()
+                VStack(spacing: DesignSystem.Spacing.lg) {
+                    Image(systemName: "heart.slash")
+                        .font(.system(size: 64, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                    Text("No Favorites Yet")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(DesignSystem.Colors.primaryText)
+
+                    Text("Hover over any image and click the heart\nto add it to your favorites.")
+                        .font(DesignSystem.Typography.body)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20),
+                        GridItem(.flexible(), spacing: 20)
+                    ], spacing: 24) {
+                        ForEach(favoritesManager.favoriteImages) { result in
+                            ImageCard(
+                                result: result,
+                                showSimilarity: false,
+                                onFindSimilar: { path in
+                                    activeTab = .search
+                                    searchManager.findSimilar(imagePath: path)
+                                }
+                            )
+                        }
+                    }
+                    .padding(DesignSystem.Spacing.lg)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            favoritesManager.refreshFavoriteImages()
+        }
+    }
+
+    // MARK: - Setup Tab Content
+    private var setupTabContent: some View {
+        ScrollView {
+            VStack(spacing: DesignSystem.Spacing.xxl) {
+                // Header
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Setup")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundColor(DesignSystem.Colors.primaryText)
+
+                        Text("Configure your search index and CLIP model")
+                            .font(DesignSystem.Typography.callout)
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+                .padding(.top, DesignSystem.Spacing.md)
+
+                // Three column layout for cards
+                HStack(alignment: .top, spacing: DesignSystem.Spacing.xl) {
+                    // Model Card
+                    setupModelCard
+
+                    // Directories Card
+                    setupDirectoriesCard
+
+                    // Stats Card
+                    setupStatsCard
+                }
+                .padding(.horizontal, DesignSystem.Spacing.lg)
+
+                Spacer()
+            }
+            .padding(.bottom, DesignSystem.Spacing.xxl)
+        }
+    }
+
+    private var setupModelCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "cpu")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("CLIP Model")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                if modelSettings.isChangingModel {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+            }
+
+            Divider()
+
+            // Current Model
+            if modelSettings.isLoading {
+                HStack {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading model info...")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .padding(DesignSystem.Spacing.sm)
+            } else if modelSettings.currentModelName.isEmpty {
+                // No model loaded
+                VStack(spacing: DesignSystem.Spacing.sm) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                        Text("No model loaded")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                    }
+
+                    Button(action: {
+                        // Load the default model
+                        modelSettings.changeModel(to: "openai/clip-vit-base-patch32") { _, _ in }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10))
+                            Text("Load Default Model")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.accent)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.08))
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(modelSettings.currentModelDisplayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(DesignSystem.Colors.accent)
+
+                    HStack(spacing: DesignSystem.Spacing.md) {
+                        Label(modelSettings.currentDevice, systemImage: "cpu")
+                        Label("\(modelSettings.currentEmbeddingDim)-dim", systemImage: "number")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .padding(DesignSystem.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(DesignSystem.Colors.accent.opacity(0.08))
+                )
+            }
+
+            // Model Selection
+            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
+                Text("Available Models")
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
+
+                ForEach(modelSettings.availableModels) { model in
+                    SetupModelRow(
+                        model: model,
+                        isSelected: modelSettings.currentModelName == model.id,
+                        isChanging: modelSettings.isChangingModel
+                    ) {
+                        changeModelFromSetup(to: model.id, newDim: model.embeddingDim)
+                    }
+                }
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            modelSettings.fetchCurrentModel()
+        }
+    }
+
+    private var setupDirectoriesCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "folder")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Watched Directories")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { addNewDirectory() }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(DesignSystem.Colors.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            // Directory List
+            if dirManager.watchedDirectories.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 32, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No directories added")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.xl)
+            } else {
+                VStack(spacing: DesignSystem.Spacing.sm) {
+                    ForEach(dirManager.watchedDirectories) { directory in
+                        SetupDirectoryRow(directory: directory) {
+                            dirManager.removeDirectory(directory)
+                        }
+                    }
+                }
+            }
+
+            // Quick add button
+            Button(action: { addNewDirectory() }) {
+                HStack {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Add Directory")
+                        .font(DesignSystem.Typography.caption.weight(.medium))
+                }
+                .foregroundColor(DesignSystem.Colors.accent)
+                .padding(.horizontal, DesignSystem.Spacing.md)
+                .padding(.vertical, DesignSystem.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+                        .background(DesignSystem.Colors.accent.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private var setupStatsCard: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+            // Card Header
+            HStack {
+                Image(systemName: "chart.bar")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                Text("Index Stats")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Spacer()
+                Button(action: { loadIndexStats() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Divider()
+
+            if let stats = indexStats {
+                VStack(spacing: DesignSystem.Spacing.md) {
+                    // Total Images
+                    SetupStatRow(
+                        icon: "photo.stack",
+                        label: "Total Images",
+                        value: "\(stats.totalImages.formatted())",
+                        color: DesignSystem.Colors.accent
+                    )
+
+                    // Index Size
+                    SetupStatRow(
+                        icon: "externaldrive",
+                        label: "Index Size",
+                        value: stats.fileSize,
+                        color: .orange
+                    )
+
+                    // Last Updated
+                    if let lastMod = stats.lastModified {
+                        SetupStatRow(
+                            icon: "clock",
+                            label: "Last Updated",
+                            value: formatRelativeDate(lastMod),
+                            color: .green
+                        )
+                    }
+
+                    // Directories Count
+                    SetupStatRow(
+                        icon: "folder",
+                        label: "Directories",
+                        value: "\(dirManager.watchedDirectories.count)",
+                        color: .purple
+                    )
+                }
+            } else {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading stats...")
+                        .font(DesignSystem.Typography.caption)
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.xl)
+            }
+
+            Divider()
+
+            // Quick Actions
+            VStack(spacing: DesignSystem.Spacing.sm) {
+                Button(action: { if !isIndexing { selectAndIndexFolder() } }) {
+                    HStack {
+                        Image(systemName: "plus.circle")
+                        Text("Add to Index")
+                        Spacer()
+                    }
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(DesignSystem.Colors.accent.opacity(0.08))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isIndexing)
+
+                Button(action: { if !isIndexing { rebuildIndex() } }) {
+                    HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Rebuild Index")
+                        Spacer()
+                    }
+                    .font(DesignSystem.Typography.caption.weight(.medium))
+                    .foregroundColor(.orange)
+                    .padding(DesignSystem.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.orange.opacity(0.08))
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(isIndexing)
+            }
+        }
+        .padding(DesignSystem.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatRelativeDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func addNewDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a directory to watch for images"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            let newDir = WatchedDirectory(path: url.path)
+            dirManager.addDirectory(newDir)
+        }
+    }
+
+    @State private var showingModelChangeAlert = false
+    @State private var pendingModelChange: (id: String, dim: Int)?
+
+    private func changeModelFromSetup(to modelId: String, newDim: Int) {
+        guard modelId != modelSettings.currentModelName else { return }
+
+        // Check if embedding dimension changes (requires reindex)
+        if newDim != modelSettings.currentEmbeddingDim {
+            pendingModelChange = (modelId, newDim)
+            showingModelChangeAlert = true
+        } else {
+            modelSettings.changeModel(to: modelId) { _, _ in }
+        }
     }
 
     // MARK: - Search Tab Content
     private var searchTabContent: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: DesignSystem.Spacing.xl) {
-                if isIndexing {
-                    indexingProgressView
-                } else if let report = indexingReport {
-                    indexingReportView(report)
-                } else if let stats = indexStats {
-                    indexStatsView(stats)
-                        .padding(.top, DesignSystem.Spacing.xxl)
-                }
-
+        VStack(spacing: 20) {
+            // Show indexing progress or search bar
+            if isIndexing {
+                indexingProgressView
+            } else if let report = indexingReport {
+                indexingReportView(report)
+            } else {
                 modernSearchBar
-                errorView
+                    .padding(.top, 12)
+            }
 
-                // Results area
+            // Filter bar (show when there are results or recent images)
+            if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
+                filterBar
+            }
+
+            errorView
+
+            // Results area with optional preview panel
+            HStack(alignment: .top, spacing: 16) {
+                // Results
                 Group {
                     if searchManager.isSearching {
-                        VStack(spacing: DesignSystem.Spacing.md) {
+                        VStack {
                             Spacer()
                             ProgressView()
-                                .scaleEffect(1.2)
                             Text("Searching...")
-                                .font(DesignSystem.Typography.callout)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .font(.system(size: 13))
+                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .padding(.top, 8)
                             Spacer()
                         }
                     } else if !searchManager.results.isEmpty {
                         ScrollView {
                             filteredResultsList
-                                .padding(DesignSystem.Spacing.xl)
+                                .padding(.horizontal, DesignSystem.Spacing.xl)
                         }
                     } else if searchText.isEmpty {
                         recentImagesSection
@@ -3085,20 +8493,48 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .padding(.horizontal, DesignSystem.Spacing.xl)
 
-            // Filter sidebar
-            if showFilterSidebar {
-                filterSidebar
+                // Preview panel (appears after 500ms hover)
+                if showPreviewPanel, let result = previewResult {
+                    ResizablePreviewPanel(
+                        result: result,
+                        width: $previewPanelWidth,
+                        isVisible: $showPreviewPanel,
+                        style: .app
+                    )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .onChange(of: showPreviewPanel) { _, newValue in
+                        if !newValue {
+                            previewResult = nil
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(.top, 8)
+    }
+
+    // MARK: - Preview Hover Handling
+    private func handlePreviewHoverStart(_ result: SearchResult) {
+        previewTimer?.invalidate()
+        previewTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+            withAnimation(.easeOut(duration: 0.2)) {
+                previewResult = result
+                showPreviewPanel = true
             }
         }
     }
 
+    private func handlePreviewHoverEnd() {
+        previewTimer?.invalidate()
+        previewTimer = nil
+        // Keep panel visible when hovering different items - only hide when mouse leaves all results
+    }
+
     // MARK: - Filtered Results
-    private var filteredResults: [SearchResult] {
-        searchManager.results.filter { result in
+    private func applyFilters(to results: [SearchResult]) -> [SearchResult] {
+        results.filter { result in
             // Type filter
             if !filterTypes.isEmpty {
                 if !filterTypes.contains(result.fileExtension) {
@@ -3129,15 +8565,22 @@ struct ContentView: View {
         }
     }
 
+    private var filteredResults: [SearchResult] {
+        applyFilters(to: searchManager.results)
+    }
+
+    private var filteredRecentImages: [SearchResult] {
+        applyFilters(to: recentImages)
+    }
+
+    private var displayedResults: [SearchResult] {
+        searchManager.results.isEmpty ? filteredRecentImages : filteredResults
+    }
+
     private var filteredResultsList: some View {
         let results = filteredResults.filter { result in
             result.similarity >= SearchPreferences.shared.similarityThreshold
         }
-
-        let columns = Array(
-            repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
-            count: SearchPreferences.shared.gridColumns
-        )
 
         return VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
             // Stats header
@@ -3181,12 +8624,127 @@ struct ContentView: View {
                 .padding(.bottom, DesignSystem.Spacing.sm)
             }
 
-            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
-                ForEach(results) { result in
-                    ResultCardView(result: result)
-                }
+            MasonryGrid(items: results, columns: 4, spacing: 12) { result in
+                MasonryImageCard(
+                    result: result,
+                    showSimilarity: true,
+                    onFindSimilar: { path in
+                        searchManager.findSimilar(imagePath: path)
+                    },
+                    onHoverStart: handlePreviewHoverStart,
+                    onHoverEnd: handlePreviewHoverEnd
+                )
             }
         }
+    }
+
+    // MARK: - Filter Bar (Minimal Capsules)
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Type filters
+                ForEach(["JPG", "PNG", "GIF", "HEIC"], id: \.self) { type in
+                    FilterCapsule(
+                        label: type,
+                        isActive: filterTypes.contains(type.lowercased()),
+                        action: {
+                            if filterTypes.contains(type.lowercased()) {
+                                filterTypes.remove(type.lowercased())
+                            } else {
+                                filterTypes.insert(type.lowercased())
+                            }
+                        }
+                    )
+                }
+
+                Divider()
+                    .frame(height: 16)
+                    .opacity(0.3)
+
+                // Size filters
+                FilterCapsule(
+                    label: "Small",
+                    isActive: filterSizeMax == 100 * 1024,
+                    action: {
+                        if filterSizeMax == 100 * 1024 {
+                            filterSizeMin = nil; filterSizeMax = nil
+                        } else {
+                            filterSizeMin = nil; filterSizeMax = 100 * 1024
+                        }
+                    }
+                )
+                FilterCapsule(
+                    label: "Large",
+                    isActive: filterSizeMin == 1024 * 1024,
+                    action: {
+                        if filterSizeMin == 1024 * 1024 {
+                            filterSizeMin = nil; filterSizeMax = nil
+                        } else {
+                            filterSizeMin = 1024 * 1024; filterSizeMax = nil
+                        }
+                    }
+                )
+
+                Divider()
+                    .frame(height: 16)
+                    .opacity(0.3)
+
+                // Date filters
+                FilterCapsule(
+                    label: "Today",
+                    isActive: filterDateFrom == Calendar.current.startOfDay(for: Date()),
+                    action: {
+                        if filterDateFrom == Calendar.current.startOfDay(for: Date()) {
+                            filterDateFrom = nil; filterDateTo = nil
+                        } else {
+                            filterDateFrom = Calendar.current.startOfDay(for: Date()); filterDateTo = nil
+                        }
+                    }
+                )
+                FilterCapsule(
+                    label: "This Week",
+                    isActive: dateFilterLabel == "This Week",
+                    action: {
+                        if dateFilterLabel == "This Week" {
+                            filterDateFrom = nil; filterDateTo = nil
+                        } else {
+                            filterDateFrom = Calendar.current.date(byAdding: .day, value: -7, to: Date()); filterDateTo = nil
+                        }
+                    }
+                )
+
+                // Clear all (only when filters active)
+                if activeFilterCount > 0 {
+                    Button(action: clearFilters) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var sizeFilterLabel: String {
+        if filterSizeMin == nil && filterSizeMax == nil { return "Size" }
+        if filterSizeMax == 100 * 1024 { return "Small" }
+        if filterSizeMin == 100 * 1024 && filterSizeMax == 1024 * 1024 { return "Medium" }
+        if filterSizeMin == 1024 * 1024 { return "Large" }
+        return "Size"
+    }
+
+    private var dateFilterLabel: String {
+        if filterDateFrom == nil && filterDateTo == nil { return "Date" }
+        if let from = filterDateFrom {
+            let days = Calendar.current.dateComponents([.day], from: from, to: Date()).day ?? 0
+            if days <= 1 { return "Today" }
+            if days <= 7 { return "This Week" }
+            if days <= 31 { return "This Month" }
+            return "This Year"
+        }
+        return "Date"
     }
 
     private var activeFilterCount: Int {
@@ -3195,204 +8753,6 @@ struct ContentView: View {
         if filterSizeMin != nil || filterSizeMax != nil { count += 1 }
         if filterDateFrom != nil || filterDateTo != nil { count += 1 }
         return count
-    }
-
-    // MARK: - Filter Sidebar
-    private var filterSidebar: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
-            // Header
-            HStack {
-                Text("Filters")
-                    .font(DesignSystem.Typography.headline)
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                Spacer()
-
-                Button(action: { clearFilters() }) {
-                    Text("Clear")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showFilterSidebar = false
-                    }
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DesignSystem.Spacing.xl) {
-                    // File Type Section
-                    filterSection(title: "File Type") {
-                        let types = ["jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff"]
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: DesignSystem.Spacing.sm) {
-                            ForEach(types, id: \.self) { type in
-                                filterChip(type.uppercased(), isSelected: filterTypes.contains(type)) {
-                                    if filterTypes.contains(type) {
-                                        filterTypes.remove(type)
-                                    } else {
-                                        filterTypes.insert(type)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Size Section
-                    filterSection(title: "File Size") {
-                        VStack(spacing: DesignSystem.Spacing.sm) {
-                            HStack {
-                                sizePresetButton("< 1 MB", minSize: nil, maxSize: 1_000_000)
-                                sizePresetButton("1-5 MB", minSize: 1_000_000, maxSize: 5_000_000)
-                                sizePresetButton("> 5 MB", minSize: 5_000_000, maxSize: nil)
-                            }
-                            if filterSizeMin != nil || filterSizeMax != nil {
-                                HStack {
-                                    Text(sizeRangeText)
-                                        .font(DesignSystem.Typography.caption)
-                                        .foregroundColor(DesignSystem.Colors.accent)
-                                    Spacer()
-                                    Button("Clear") {
-                                        filterSizeMin = nil
-                                        filterSizeMax = nil
-                                    }
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-                        }
-                    }
-
-                    // Date Section
-                    filterSection(title: "Date Range") {
-                        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                            HStack {
-                                Text("From:")
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                                    .frame(width: 40)
-                                DatePicker("", selection: Binding(
-                                    get: { filterDateFrom ?? Date.distantPast },
-                                    set: { filterDateFrom = $0 }
-                                ), displayedComponents: .date)
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-
-                                if filterDateFrom != nil {
-                                    Button(action: { filterDateFrom = nil }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-
-                            HStack {
-                                Text("To:")
-                                    .font(DesignSystem.Typography.caption)
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                                    .frame(width: 40)
-                                DatePicker("", selection: Binding(
-                                    get: { filterDateTo ?? Date() },
-                                    set: { filterDateTo = $0 }
-                                ), displayedComponents: .date)
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-
-                                if filterDateTo != nil {
-                                    Button(action: { filterDateTo = nil }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .padding(DesignSystem.Spacing.lg)
-        .frame(width: 220)
-        .background(
-            colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground
-        )
-        .overlay(
-            Rectangle()
-                .frame(width: 1)
-                .foregroundColor(DesignSystem.Colors.border)
-                .frame(maxHeight: .infinity),
-            alignment: .leading
-        )
-    }
-
-    private func filterSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-            Text(title)
-                .font(DesignSystem.Typography.callout.weight(.medium))
-                .foregroundColor(DesignSystem.Colors.primaryText)
-            content()
-        }
-    }
-
-    private func filterChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
-                )
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-
-    private func sizePresetButton(_ label: String, minSize: Int?, maxSize: Int?) -> some View {
-        let isSelected = filterSizeMin == minSize && filterSizeMax == maxSize
-        return Button(action: {
-            if isSelected {
-                filterSizeMin = nil
-                filterSizeMax = nil
-            } else {
-                filterSizeMin = minSize
-                filterSizeMax = maxSize
-            }
-        }) {
-            Text(label)
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(isSelected ? .white : DesignSystem.Colors.secondaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
-                .padding(.vertical, DesignSystem.Spacing.xs)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? DesignSystem.Colors.accent : Color.clear)
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color.clear : DesignSystem.Colors.border, lineWidth: 1)
-                )
-        }
-        .buttonStyle(PlainButtonStyle())
     }
 
     private var sizeRangeText: String {
@@ -3596,9 +8956,13 @@ struct ContentView: View {
         VStack(spacing: DesignSystem.Spacing.md) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Find Duplicates")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.on.square.badge.person.crop")
+                            .font(.system(size: 18, weight: .medium))
+                        Text("Find Duplicates")
+                            .font(DesignSystem.Typography.title2)
+                    }
+                    .foregroundColor(DesignSystem.Colors.primaryText)
 
                     if !duplicatesManager.groups.isEmpty {
                         Text("\(duplicatesManager.totalDuplicates) duplicate\(duplicatesManager.totalDuplicates == 1 ? "" : "s") in \(duplicatesManager.groups.count) group\(duplicatesManager.groups.count == 1 ? "" : "s")")
@@ -3860,9 +9224,13 @@ struct ContentView: View {
 
     private var duplicatesActionBar: some View {
         HStack(spacing: DesignSystem.Spacing.lg) {
-            Text("\(duplicatesManager.totalSelected) selected")
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13))
+                Text("\(duplicatesManager.totalSelected) selected")
+                    .font(DesignSystem.Typography.callout)
+            }
+            .foregroundColor(DesignSystem.Colors.secondaryText)
 
             Spacer()
 
@@ -3934,166 +9302,131 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var modernSearchBar: some View {
-        HStack(spacing: DesignSystem.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(DesignSystem.Colors.accent.opacity(isSearchFocused ? 0.15 : 0.1))
-                    .frame(width: 32, height: 32)
+        HStack(spacing: 12) {
+            // Pasted image preview or search icon
+            if let image = pastedImage {
+                // Show pasted image thumbnail
+                ZStack(alignment: .topTrailing) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(DesignSystem.Colors.accent, lineWidth: 2)
+                        )
 
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(isSearchFocused ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-            }
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
-
-            TextField(isIndexing ? "Search indexed images (indexing in progress)..." : "Search your images with natural language...", text: $searchText)
-                .textFieldStyle(PlainTextFieldStyle())
-                .font(DesignSystem.Typography.body)
-                .focused($isSearchFocused)
-                .onSubmit {
-                    if !searchManager.isSearching && !searchText.isEmpty {
-                        performSearch()
+                    // Clear button
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            pastedImage = nil
+                        }
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
                     }
-                    // Keep focus after searching
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        isSearchFocused = true
-                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .offset(x: 6, y: -6)
                 }
-                .onChange(of: searchText) { oldValue, newValue in
-                    // Cancel previous timer
-                    searchDebounceTimer?.invalidate()
 
-                    // Clear results if search is empty
-                    if newValue.isEmpty {
-                        searchManager.clearResults()
-                        return
-                    }
+                Text("Finding similar images...")
+                    .font(.system(size: 14))
+                    .foregroundColor(DesignSystem.Colors.secondaryText)
 
-                    // Debounce: wait 400ms before searching
-                    searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
-                        if !searchManager.isSearching && !newValue.isEmpty {
+                Spacer()
+
+                if searchManager.isSearching {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                }
+            } else {
+                // Normal search mode
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+                // Clean text field
+                TextField("Search by text or drop an image here...", text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 14))
+                    .focused($isSearchFocused)
+                    .onSubmit {
+                        if !searchManager.isSearching && !searchText.isEmpty {
                             performSearch()
                         }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isSearchFocused = true
+                        }
                     }
-                }
-
-            if !searchText.isEmpty {
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        searchText = ""
+                    .onChange(of: searchText) { oldValue, newValue in
+                        // Clear pasted image when user starts typing
+                        if pastedImage != nil && !newValue.isEmpty {
+                            pastedImage = nil
+                        }
+                        searchDebounceTimer?.invalidate()
+                        if newValue.isEmpty {
+                            searchManager.clearResults()
+                            return
+                        }
+                        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                            if !searchManager.isSearching && !newValue.isEmpty {
+                                performSearch()
+                            }
+                        }
                     }
-                }) {
-                    ZStack {
-                        Circle()
-                            .fill(DesignSystem.Colors.tertiaryText.opacity(0.1))
-                            .frame(width: 20, height: 20)
 
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .semibold))
+                // Right side: clear button, loading, or filter
+                if searchManager.isSearching {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                        .transition(.opacity)
+                } else if !searchText.isEmpty {
+                    Button(action: { searchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
                             .foregroundColor(DesignSystem.Colors.tertiaryText)
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .transition(.opacity)
                 }
-                .buttonStyle(PlainButtonStyle())
-                .transition(.scale.combined(with: .opacity))
-            }
 
-            if searchManager.isSearching {
-                HStack(spacing: DesignSystem.Spacing.xs) {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                    Text("Searching")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
-                }
-                .transition(.scale.combined(with: .opacity))
-            } else if !searchText.isEmpty {
-                Button(action: { performSearch() }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        Text("Search")
-                            .font(DesignSystem.Typography.callout.weight(.semibold))
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 14))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, x: 0, y: 4)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .scale(scale: 0.9).combined(with: .opacity)
-                ))
             }
-
-            // Filter button
-            Button(action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showFilterSidebar.toggle()
-                }
-            }) {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: showFilterSidebar ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 20))
-                        .foregroundColor(activeFilterCount > 0 || showFilterSidebar ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-
-                    if activeFilterCount > 0 {
-                        Text("\(activeFilterCount)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 14, height: 14)
-                            .background(Circle().fill(DesignSystem.Colors.accent))
-                            .offset(x: 4, y: -4)
-                    }
-                }
-            }
-            .buttonStyle(PlainButtonStyle())
         }
-        .padding(DesignSystem.Spacing.lg)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground)
-                .shadow(
-                    color: isSearchFocused ? DesignSystem.Shadows.medium(colorScheme) : DesignSystem.Shadows.small(colorScheme),
-                    radius: isSearchFocused ? 12 : 8,
-                    x: 0,
-                    y: isSearchFocused ? 4 : 2
-                )
+            RoundedRectangle(cornerRadius: 12)
+                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(
-                    isSearchFocused ?
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.accent.opacity(0.5), DesignSystem.Colors.accent.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ) :
-                        LinearGradient(
-                            colors: [DesignSystem.Colors.border, DesignSystem.Colors.border],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                    lineWidth: isSearchFocused ? 1.5 : 1
+                    isSearchFocused ? DesignSystem.Colors.accent : Color.clear,
+                    lineWidth: isSearchFocused ? 1.5 : 0
                 )
         )
-        .scaleEffect(isSearchFocused ? 1.01 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSearchFocused)
+        .animation(.easeOut(duration: 0.2), value: isSearchFocused)
         .contentShape(Rectangle())
-        .onTapGesture {
-            isSearchFocused = true
+        .onTapGesture { isSearchFocused = true }
+        .onDrop(of: [.image, .fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDroppedImage(providers: providers)
+            return true
         }
-        .padding(.top, DesignSystem.Spacing.xl)
+        .overlay(
+            Group {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(DesignSystem.Colors.accent, lineWidth: 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                        )
+                }
+            }
+        )
     }
 
     // MARK: - Indexing Progress View
@@ -4178,6 +9511,7 @@ struct ContentView: View {
         DispatchQueue.main.async {
             isIndexing = false
             indexingProcess = nil
+            stopElapsedTimer()
             indexingPercent = 0
             indexingETA = ""
             indexingProgress = ""
@@ -4247,45 +9581,36 @@ struct ContentView: View {
 
     // MARK: - Index Stats View
     private func indexStatsView(_ stats: IndexStats) -> some View {
-        HStack(spacing: DesignSystem.Spacing.lg) {
-            // Database icon
-            Image(systemName: "cylinder.split.1x2")
-                .font(.system(size: 20))
-                .foregroundColor(DesignSystem.Colors.accent)
-
-            // Stats
-            HStack(spacing: DesignSystem.Spacing.xl) {
-                Label("\(stats.totalImages) images", systemImage: "photo.stack")
-
-                Label(stats.fileSize, systemImage: "internaldrive")
-
-                if let lastMod = stats.lastModified {
-                    Label(formatRelativeDate(lastMod), systemImage: "clock")
-                }
+        // Minimal inline stats with icons
+        HStack(spacing: 16) {
+            HStack(spacing: 5) {
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 11))
+                Text("\(stats.totalImages) indexed")
+                    .font(.system(size: 12))
             }
-            .font(DesignSystem.Typography.caption)
-            .foregroundColor(DesignSystem.Colors.secondaryText)
+            .foregroundColor(DesignSystem.Colors.tertiaryText)
+
+            if let lastMod = stats.lastModified {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 10))
+                    Text(formatRelativeDate(lastMod))
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(DesignSystem.Colors.tertiaryText.opacity(0.7))
+            }
 
             Spacer()
 
-            // Refresh button
             Button(action: { loadIndexStats() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .font(.system(size: 11))
+                    .foregroundColor(DesignSystem.Colors.tertiaryText)
             }
             .buttonStyle(.plain)
+            .opacity(0.6)
         }
-        .padding(DesignSystem.Spacing.md)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .fill(DesignSystem.Colors.accent.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(DesignSystem.Colors.accent.opacity(0.15), lineWidth: 1)
-        )
     }
 
     private func loadIndexStats() {
@@ -4341,12 +9666,6 @@ struct ContentView: View {
         }
     }
 
-    private func formatRelativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
     private func formatDuration(_ seconds: Double) -> String {
         if seconds < 60 {
             return String(format: "%.1fs", seconds)
@@ -4369,51 +9688,15 @@ struct ContentView: View {
             Spacer()
 
             VStack(spacing: DesignSystem.Spacing.xl) {
-                // Animated icon
+                // Clean icon
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.1),
-                                    DesignSystem.Colors.accent.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 120, height: 120)
-                        .blur(radius: 20)
-
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    DesignSystem.Colors.accent.opacity(0.3),
-                                    DesignSystem.Colors.accent.opacity(0.1)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2
-                        )
+                        .fill(DesignSystem.Colors.accent.opacity(0.08))
                         .frame(width: 100, height: 100)
-                        .rotationEffect(.degrees(emptyStateIconRotation))
 
                     Image(systemName: "photo.stack")
-                        .font(.system(size: 48, weight: .light))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.6)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .onAppear {
-                    withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
-                        emptyStateIconRotation = 360
-                    }
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
                 }
 
                 VStack(spacing: DesignSystem.Spacing.md) {
@@ -4450,88 +9733,45 @@ struct ContentView: View {
 
     // MARK: - Recent Images Section
     private var recentImagesSection: some View {
-        VStack(spacing: DesignSystem.Spacing.md) {
-            // Header with title and refresh button
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent Images")
-                        .font(DesignSystem.Typography.title2)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-                    Text("8 most recent images from your indexed folders")
-                        .font(DesignSystem.Typography.caption)
+        Group {
+            if recentImages.isEmpty && !isLoadingRecent {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No photos yet")
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Spacer()
                 }
-
-                Spacer()
-
-                Button(action: {
-                    loadRecentImages()
-                }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
-                        if isLoadingRecent {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text("Refresh")
-                    }
-                    .font(DesignSystem.Typography.callout.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                            .fill(DesignSystem.Colors.accent.opacity(0.1))
-                    )
+            } else if filteredRecentImages.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    Text("No photos match filters")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Spacer()
                 }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(isLoadingRecent)
-            }
-            .padding(.horizontal, DesignSystem.Spacing.md)
-
-            // Recent images grid - use frame to prevent layout shifts
-            Group {
-                if isLoadingRecent && recentImages.isEmpty {
-                    VStack(spacing: DesignSystem.Spacing.md) {
-                        Spacer()
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text("Loading recent images...")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Spacer()
+            } else {
+                ScrollView {
+                    MasonryGrid(items: filteredRecentImages, columns: 4, spacing: 12) { result in
+                        MasonryImageCard(
+                            result: result,
+                            onFindSimilar: { path in
+                                searchManager.findSimilar(imagePath: path)
+                            },
+                            onHoverStart: handlePreviewHoverStart,
+                            onHoverEnd: handlePreviewHoverEnd
+                        )
                     }
-                } else if recentImages.isEmpty {
-                    VStack(spacing: DesignSystem.Spacing.md) {
-                        Spacer()
-                        Image(systemName: "photo.stack")
-                            .font(.system(size: 48, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        Text("No recent images")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Text("Index a folder to see recent images here")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        Spacer()
-                    }
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 150, maximum: 200), spacing: DesignSystem.Spacing.md)
-                        ], spacing: DesignSystem.Spacing.md) {
-                            ForEach(recentImages.prefix(8)) { result in
-                                RecentImageCard(result: result)
-                            }
-                        }
-                        .padding(DesignSystem.Spacing.md)
-                    }
+                    .padding(.horizontal, DesignSystem.Spacing.xl)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxHeight: .infinity)
     }
 
     // MARK: - Error View
@@ -4656,13 +9896,13 @@ struct ContentView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Grid of results or skeletons
-            let columns = Array(
-                repeating: GridItem(.flexible(), spacing: DesignSystem.Spacing.lg),
-                count: SearchPreferences.shared.gridColumns
-            )
-
-            LazyVGrid(columns: columns, spacing: DesignSystem.Spacing.lg) {
+            // Grid of results or skeletons - consistent card sizing
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20),
+                GridItem(.flexible(), spacing: 20)
+            ], spacing: 24) {
                 if searchManager.isSearching && searchManager.results.isEmpty {
                     // Show skeleton loaders while searching
                     ForEach(0..<12, id: \.self) { _ in
@@ -4673,11 +9913,17 @@ struct ContentView: View {
                     ForEach(searchManager.results.filter { result in
                         result.similarity >= SearchPreferences.shared.similarityThreshold
                     }) { result in
-                        ResultCardView(result: result)
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.8).combined(with: .opacity),
-                                removal: .scale(scale: 0.9).combined(with: .opacity)
-                            ))
+                        ImageCard(
+                            result: result,
+                            showSimilarity: true,
+                            onFindSimilar: { path in
+                                searchManager.findSimilar(imagePath: path)
+                            }
+                        )
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.8).combined(with: .opacity),
+                            removal: .scale(scale: 0.9).combined(with: .opacity)
+                        ))
                     }
                 }
             }
@@ -4690,16 +9936,202 @@ struct ContentView: View {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
         searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
     }
-    
+
+    // MARK: - Image Paste/Drop Handling
+    private func setupPasteMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Check for Backspace/Delete to clear pasted image
+            if self.pastedImage != nil && (event.keyCode == 51 || event.keyCode == 117) {
+                DispatchQueue.main.async {
+                    self.pastedImage = nil
+                    self.searchManager.clearResults()
+                }
+                return nil // Consume the event
+            }
+
+            // Check for Cmd+V
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                // Check if clipboard has an image
+                let pasteboard = NSPasteboard.general
+                if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                    if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil),
+                       let image = images.first as? NSImage {
+                        DispatchQueue.main.async {
+                            self.pastedImage = image
+                            self.saveAndSearchImage(image)
+                        }
+                        return nil // Consume the event
+                    }
+                }
+            }
+            return event // Let other events pass through
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    private func handleImagePaste(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        // Try to load as image data
+        if provider.hasItemConformingToTypeIdentifier("public.image") {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func handleDroppedImage(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+
+        // Try to load as file URL first (for dragged files)
+        if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil),
+                      let image = NSImage(contentsOf: url) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    // Use the file directly if it exists
+                    self.searchManager.findSimilar(imagePath: url.path)
+                }
+            }
+        } else if provider.hasItemConformingToTypeIdentifier("public.image") {
+            // Fall back to image data
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, error in
+                guard let data = data, let image = NSImage(data: data) else { return }
+                DispatchQueue.main.async {
+                    self.pastedImage = image
+                    self.saveAndSearchImage(image)
+                }
+            }
+        }
+    }
+
+    private func saveAndSearchImage(_ image: NSImage) {
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempFile = tempDir.appendingPathComponent("searchy_paste_\(UUID().uuidString).png")
+
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return
+        }
+
+        do {
+            try pngData.write(to: tempFile)
+            searchManager.findSimilar(imagePath: tempFile.path)
+        } catch {
+            print("Failed to save pasted image: \(error)")
+        }
+    }
+
     private func selectAndIndexFolder() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
+        panel.message = "Select folder(s) to add (⌘-click for multiple)"
+        panel.prompt = "Add"
 
         panel.begin { response in
-            if response == .OK, let url = panel.url {
-                indexFolder(url)
+            if response == .OK, !panel.urls.isEmpty {
+                addAndIndexFolders(panel.urls)
+            }
+        }
+    }
+
+    private func addAndIndexFolders(_ urls: [URL]) {
+        // Add folders to watched directories (avoid duplicates)
+        let dirManager = DirectoryManager.shared
+        var newFolders: [URL] = []
+
+        for url in urls {
+            let alreadyWatched = dirManager.watchedDirectories.contains { $0.path == url.path }
+            if !alreadyWatched {
+                dirManager.addDirectory(WatchedDirectory(path: url.path))
+                newFolders.append(url)
+            }
+        }
+
+        guard !newFolders.isEmpty else {
+            indexingProgress = "Folders already in watch list"
+            return
+        }
+
+        // Incremental index - only new folders, keep existing index
+        let folderCount = newFolders.count
+        let folderText = folderCount == 1 ? "folder" : "folders"
+        print("Adding \(folderCount) new \(folderText) to index")
+        isIndexing = true
+        indexingReport = nil
+        resetIndexingState()
+        indexingProgress = "Indexing \(folderCount) new \(folderText)..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let config = AppConfig.shared
+            let process = Process()
+            let pipe = Pipe()
+
+            // Store process reference for cancellation
+            DispatchQueue.main.async {
+                self.indexingProcess = process
+            }
+
+            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
+            // Pass new folder paths - incremental indexing (no index deletion)
+            process.arguments = [config.embeddingScriptPath] + newFolders.map { $0.path }
+
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            let resourcesPath = Bundle.main.resourcePath ?? ""
+            process.environment = [
+                "PYTHONPATH": resourcesPath,
+                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "PYTHONUNBUFFERED": "1"
+            ]
+            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
+
+            do {
+                try process.run()
+
+                pipe.fileHandleForReading.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    if !data.isEmpty {
+                        if let output = String(data: data, encoding: .utf8) {
+                            print("Received output: \(output)")
+                            self.parseIndexingOutput(output)
+                        }
+                    }
+                }
+
+                process.terminationHandler = { _ in
+                    DispatchQueue.main.async {
+                        self.isIndexing = false
+                        self.indexingProcess = nil
+                        self.stopElapsedTimer()
+                        // Reload recent images and stats after indexing
+                        self.loadRecentImages()
+                        self.loadIndexStats()
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isIndexing = false
+                    self.indexingProcess = nil
+                    self.stopElapsedTimer()
+                    self.indexingProgress = "Error: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -4812,17 +10244,59 @@ struct ContentView: View {
         indexingSpeed = 0
         indexingElapsed = 0
         indexingBatchInfo = ""
+        startElapsedTimer()
     }
 
-    private func indexFolder(_ url: URL) {
-        print("Starting indexing for url: \(url.path)")
+    private func startElapsedTimer() {
+        // Stop existing timer if any
+        elapsedTimer?.invalidate()
+        indexingStartTime = Date()
+        indexingElapsed = 0
+
+        // Create timer on main thread
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if let start = self.indexingStartTime {
+                self.indexingElapsed = Date().timeIntervalSince(start)
+            }
+        }
+    }
+
+    private func stopElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        indexingStartTime = nil
+    }
+
+
+    private func rebuildIndex() {
+        let directories = DirectoryManager.shared.watchedDirectories
+        guard !directories.isEmpty else {
+            indexingProgress = "No folders configured. Add folders first."
+            return
+        }
+
+        let folderCount = directories.count
+        let folderText = folderCount == 1 ? "folder" : "folders"
+        print("Rebuilding index from \(folderCount) watched \(folderText)")
         isIndexing = true
         indexingReport = nil
         resetIndexingState()
-        indexingProgress = "Starting indexing..."
+        indexingProgress = "Clearing existing index..."
 
         DispatchQueue.global(qos: .userInitiated).async {
             let config = AppConfig.shared
+
+            // Delete existing index files
+            let indexPath = "\(config.baseDirectory)/image_index.bin"
+            let indexPklPath = "\(config.baseDirectory)/image_index.pkl"
+            try? FileManager.default.removeItem(atPath: indexPath)
+            try? FileManager.default.removeItem(atPath: indexPklPath)
+
+            DispatchQueue.main.async {
+                self.indexingProgress = "Rebuilding index from \(folderCount) \(folderText)..."
+            }
+
+            // Index all watched directories
             let process = Process()
             let pipe = Pipe()
 
@@ -4832,7 +10306,8 @@ struct ContentView: View {
             }
 
             process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
-            process.arguments = [config.embeddingScriptPath, url.path]
+            // Pass all watched folder paths as arguments
+            process.arguments = [config.embeddingScriptPath] + directories.map { $0.path }
 
             process.standardOutput = pipe
             process.standardError = pipe
@@ -4862,7 +10337,8 @@ struct ContentView: View {
                     DispatchQueue.main.async {
                         self.isIndexing = false
                         self.indexingProcess = nil
-                        // Reload recent images and stats after indexing
+                        self.stopElapsedTimer()
+                        // Reload recent images after re-indexing
                         self.loadRecentImages()
                         self.loadIndexStats()
                     }
@@ -4871,88 +10347,7 @@ struct ContentView: View {
                 DispatchQueue.main.async {
                     self.isIndexing = false
                     self.indexingProcess = nil
-                    self.indexingProgress = "Error: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func selectAndReplaceIndex() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.message = "Select a folder to replace the current index"
-        panel.prompt = "Replace Index"
-
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                replaceAndIndexFolder(url)
-            }
-        }
-    }
-
-    private func replaceAndIndexFolder(_ url: URL) {
-        print("Replacing index with folder: \(url.path)")
-        isIndexing = true
-        indexingReport = nil
-        resetIndexingState()
-        indexingProgress = "Clearing existing index..."
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let config = AppConfig.shared
-
-            // Delete existing index files
-            let indexPath = "\(config.baseDirectory)/image_index.bin"
-            let indexPklPath = "\(config.baseDirectory)/image_index.pkl"
-            try? FileManager.default.removeItem(atPath: indexPath)
-            try? FileManager.default.removeItem(atPath: indexPklPath)
-
-            DispatchQueue.main.async {
-                self.indexingProgress = "Starting fresh index..."
-            }
-
-            // Now index the new folder
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: config.pythonExecutablePath)
-            process.arguments = [config.embeddingScriptPath, url.path]
-
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            let resourcesPath = Bundle.main.resourcePath ?? ""
-            process.environment = [
-                "PYTHONPATH": resourcesPath,
-                "PATH": "\(config.baseDirectory)/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-                "PYTHONUNBUFFERED": "1"
-            ]
-            process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
-
-            do {
-                try process.run()
-
-                pipe.fileHandleForReading.readabilityHandler = { handle in
-                    let data = handle.availableData
-                    if !data.isEmpty {
-                        if let output = String(data: data, encoding: .utf8) {
-                            print("Received output: \(output)")
-                            self.parseIndexingOutput(output)
-                        }
-                    }
-                }
-
-                process.terminationHandler = { _ in
-                    DispatchQueue.main.async {
-                        self.isIndexing = false
-                        // Reload recent images after re-indexing
-                        self.loadRecentImages()
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.isIndexing = false
+                    self.stopElapsedTimer()
                     self.indexingProgress = "Error: \(error.localizedDescription)"
                 }
             }

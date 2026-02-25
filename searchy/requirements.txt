@@ -1,9 +1,19 @@
-pillow
-tqdm
-numpy
-scikit-learn
-torch
-transformers
-watchdog
-fastapi
-uvicorn
+# Core dependencies (pinned versions for reproducibility)
+pillow>=10.0.0,<11.0.0
+tqdm>=4.65.0,<5.0.0
+numpy>=1.24.0,<2.0.0
+scikit-learn>=1.3.0,<2.0.0
+torch>=2.0.0,<3.0.0
+transformers>=4.30.0,<5.0.0
+watchdog>=3.0.0,<4.0.0
+fastapi>=0.100.0,<1.0.0
+uvicorn>=0.22.0,<1.0.0
+
+# OCR support (macOS Vision framework)
+pyobjc-core>=9.0,<11.0
+pyobjc-framework-Quartz>=9.0,<11.0
+pyobjc-framework-Vision>=9.0,<11.0
+
+# Face recognition
+deepface>=0.0.79,<1.0.0
+tf-keras>=2.15.0,<3.0.0
