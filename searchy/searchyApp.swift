@@ -257,7 +257,8 @@ class SetupManager: ObservableObject {
     private func verifyInstallation() async throws {
         let checkTask = Process()
         checkTask.executableURL = URL(fileURLWithPath: pythonPath)
-        checkTask.arguments = ["-c", "import torch; import transformers; import PIL; print('verified')"]
+        // Verify all critical dependencies including face recognition and OCR
+        checkTask.arguments = ["-c", "import torch; import transformers; import PIL; import deepface; import Vision; print('verified')"]
 
         let pipe = Pipe()
         checkTask.standardOutput = pipe
@@ -303,21 +304,34 @@ class SetupManager: ObservableObject {
         try upgradePip.run()
         upgradePip.waitUntilExit()
 
-        // Install packages
-        let packages = [
-            "torch",
-            "transformers",
-            "pillow",
-            "numpy",
-            "tqdm",
-            "watchdog",
-            "fastapi",
-            "uvicorn"
-        ]
-
+        // Install from requirements.txt if available, otherwise use fallback list
         let task = Process()
         task.executableURL = URL(fileURLWithPath: pipPath)
-        task.arguments = ["install"] + packages
+
+        if let requirementsPath = Bundle.main.path(forResource: "requirements", ofType: "txt") {
+            print("📦 Installing from requirements.txt...")
+            task.arguments = ["install", "-r", requirementsPath]
+        } else {
+            // Fallback: install all required packages directly
+            print("📦 Installing packages directly...")
+            let packages = [
+                "torch",
+                "transformers",
+                "pillow",
+                "numpy",
+                "tqdm",
+                "watchdog",
+                "fastapi",
+                "uvicorn",
+                "scikit-learn",
+                "pyobjc-core",
+                "pyobjc-framework-Quartz",
+                "pyobjc-framework-Vision",
+                "deepface",
+                "tf-keras"
+            ]
+            task.arguments = ["install"] + packages
+        }
 
         let pipe = Pipe()
         task.standardOutput = pipe
