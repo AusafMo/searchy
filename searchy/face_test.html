@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Face Detection Test</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f7;
+        }
+        h1 { color: #1d1d1f; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            background: #007aff;
+            color: white;
+            font-weight: 500;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.danger { background: #ff3b30; }
+        button.danger:hover { background: #d63027; }
+        .status {
+            padding: 15px;
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .progress-bar {
+            height: 8px;
+            background: #e5e5ea;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #007aff;
+            transition: width 0.3s;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .stat {
+            background: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stat-value { font-size: 28px; font-weight: 600; color: #1d1d1f; }
+        .stat-label { font-size: 12px; color: #86868b; margin-top: 4px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .person {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .person:hover { transform: translateY(-2px); }
+        .person img {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: #f5f5f7;
+        }
+        .person-name { font-weight: 600; margin-top: 10px; color: #1d1d1f; }
+        .person-count { font-size: 13px; color: #86868b; }
+        .threshold-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+        }
+        .threshold-control input { width: 80px; }
+        .log {
+            background: #1d1d1f;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Face Detection Test</h1>
+
+    <div class="controls">
+        <button onclick="startScan(false, 200)">Scan 200 Images</button>
+        <button onclick="startScan(false, 0)">Scan All New</button>
+        <button onclick="startScan(true, 0)" class="danger">Full Rescan</button>
+        <button onclick="stopScan()" class="danger" id="stopBtn" disabled>Stop Scan</button>
+        <button onclick="clearFaces()" class="danger">Clear All</button>
+        <button onclick="loadClusters()">Refresh</button>
+        <div class="threshold-control">
+            <label>Threshold:</label>
+            <input type="number" id="threshold" value="0.55" step="0.05" min="0.3" max="0.9">
+            <button onclick="recluster()">Re-cluster</button>
+        </div>
+    </div>
+
+    <div class="status" id="status">
+        Ready. Click "Scan Faces" to start.
+    </div>
+
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value" id="peopleCount">0</div>
+            <div class="stat-label">People</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="facesCount">0</div>
+            <div class="stat-label">Faces</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="imagesScanned">0</div>
+            <div class="stat-label">Images Scanned</div>
+        </div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        const API = 'http://localhost:7860';
+        const DATA_DIR = '/Users/ausaf/Library/Application Support/searchy';
+        let pollInterval = null;
+
+        function log(msg) {
+            const logEl = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logEl.innerHTML = `[${time}] ${msg}\n` + logEl.innerHTML;
+        }
+
+        function updateStatus(text, progress = null) {
+            let html = text;
+            if (progress !== null) {
+                html += `<div class="progress-bar"><div class="progress-fill" style="width: ${progress * 100}%"></div></div>`;
+            }
+            document.getElementById('status').innerHTML = html;
+        }
+
+        async function startScan(fullRescan = false, limit = 0) {
+            log(`Starting face scan (limit=${limit}, fullRescan=${fullRescan})...`);
+            updateStatus('Starting scan...', 0);
+            document.getElementById('stopBtn').disabled = false;
+
+            try {
+                const resp = await fetch(`${API}/face-scan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data_dir: DATA_DIR,
+                        incremental: !fullRescan,
+                        limit: limit
+                    })
+                });
+                const data = await resp.json();
+                log(`Scan started: will_scan=${data.will_scan} of ${data.new_images} new images`);
+
+                if (data.status === 'started' || data.status === 'already_scanning') {
+                    startPolling();
+                } else {
+                    updateStatus(`Error: ${data.message || 'Unknown error'}`);
+                }
+            } catch (e) {
+                log(`Error: ${e.message}`);
+                updateStatus(`Error: ${e.message}`);
+            }
+        }
+
+        function startPolling() {
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(pollStatus, 500);
+        }
+
+        async function pollStatus() {
+            try {
+                const resp = await fetch(`${API}/face-scan-status?data_dir=${encodeURIComponent(DATA_DIR)}`);
+                const data = await resp.json();
+
+                document.getElementById('facesCount').textContent = data.total_faces;
+                document.getElementById('imagesScanned').textContent = data.scanned_count;
+
+                if (data.is_scanning) {
+                    updateStatus(data.status, data.progress);
+                } else {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    document.getElementById('stopBtn').disabled = true;
+                    updateStatus(data.status || 'Done!');
+                    log(`Scan complete: ${data.total_faces} faces found`);
+                    loadClusters();
+                }
+            } catch (e) {
+                log(`Poll error: ${e.message}`);
+            }
+        }
+
+        async function stopScan() {
+            log('Stopping scan...');
+            try {
+                await fetch(`${API}/face-stop?data_dir=${encodeURIComponent(DATA_DIR)}`, { method: 'POST' });
+                log('Stop requested');
+                document.getElementById('stopBtn').disabled = true;
+            } catch (e) {
+                log(`Error stopping: ${e.message}`);
+            }
+        }
+
+        async function loadClusters() {
+            log('Loading clusters...');
+            try {
+                const resp = await fetch(`${API}/face-clusters?data_dir=${encodeURIComponent(DATA_DIR)}`);
+                const data = await resp.json();
+
+                document.getElementById('peopleCount').textContent = data.total_clusters;
+                document.getElementById('facesCount').textContent = data.total_faces;
+
+                const grid = document.getElementById('grid');
+                grid.innerHTML = '';
+
+                // Sort by face count descending
+                const clusters = data.clusters.sort((a, b) => b.face_count - a.face_count);
+
+                for (const cluster of clusters) {
+                    const div = document.createElement('div');
+                    div.className = 'person';
+
+                    const imgSrc = cluster.thumbnail_path
+                        ? `file://${cluster.thumbnail_path}`
+                        : 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23ddd"/></svg>';
+
+                    div.innerHTML = `
+                        <img src="${imgSrc}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22%23ddd%22/></svg>'">
+                        <div class="person-name">${cluster.name}</div>
+                        <div class="person-count">${cluster.face_count} photo${cluster.face_count !== 1 ? 's' : ''}</div>
+                    `;
+                    grid.appendChild(div);
+                }
+
+                log(`Loaded ${data.total_clusters} clusters with ${data.total_faces} faces`);
+            } catch (e) {
+                log(`Error loading clusters: ${e.message}`);
+            }
+        }
+
+        async function clearFaces() {
+            if (!confirm('Clear all face data?')) return;
+            log('Clearing face data...');
+            try {
+                await fetch(`${API}/face-clear?data_dir=${encodeURIComponent(DATA_DIR)}`, { method: 'POST' });
+                log('Cleared!');
+                updateStatus('All face data cleared.');
+                document.getElementById('peopleCount').textContent = '0';
+                document.getElementById('facesCount').textContent = '0';
+                document.getElementById('imagesScanned').textContent = '0';
+                document.getElementById('grid').innerHTML = '';
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+
+        async function recluster() {
+            const threshold = parseFloat(document.getElementById('threshold').value);
+            log(`Re-clustering with threshold ${threshold}...`);
+            updateStatus(`Re-clustering with threshold ${threshold}...`);
+
+            try {
+                // Call a recluster endpoint (we need to add this)
+                const resp = await fetch(`${API}/face-recluster?data_dir=${encodeURIComponent(DATA_DIR)}&threshold=${threshold}`, { method: 'POST' });
+                const data = await resp.json();
+                log(`Re-clustered: ${JSON.stringify(data)}`);
+                loadClusters();
+            } catch (e) {
+                log(`Error: ${e.message}`);
+                updateStatus(`Error: ${e.message}`);
+            }
+        }
+
+        // Load clusters on page load
+        loadClusters();
+    </script>
+</body>
+</html>
