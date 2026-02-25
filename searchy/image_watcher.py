@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Image Watcher - Monitors directories for new images and auto-indexes them
-Supports filename filters and uses IndexingSettings from Swift app
+
+This watcher does NOT load its own CLIP model. Instead, it calls the server's
+/index endpoint to index files, ensuring only ONE model instance is running
+across the entire application.
 """
 import os
 import sys
@@ -9,13 +12,18 @@ import time
 import json
 import re
 import argparse
+import urllib.request
+import urllib.error
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from generate_embeddings import index_images_with_clip, get_device
 
 # Supported image extensions
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic'}
+
+# Default server URL (can be overridden via --server-url)
+DEFAULT_SERVER_URL = "http://127.0.0.1:7860"
+
 
 def matches_filter(filename, filter_type, filter_value):
     """Check if filename matches the filter criteria"""
@@ -38,10 +46,75 @@ def matches_filter(filename, filter_type, filter_value):
             return False
     return True
 
+
+def call_server_notify(server_url, file_path):
+    """Notify the server that a new image was detected (for immediate display)."""
+    url = f"{server_url}/notify-new-image"
+
+    request_data = {
+        "file_path": file_path,
+        "detection_time": time.time()
+    }
+
+    try:
+        data = json.dumps(request_data).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result
+
+    except Exception as e:
+        # Don't fail hard on notify errors - indexing will still happen
+        print(f"Notify error (non-fatal): {e}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}
+
+
+def call_server_index(server_url, data_dir, files, fast_indexing=True,
+                      max_dimension=384, batch_size=64):
+    """Call the server's /index endpoint to index files."""
+    url = f"{server_url}/index"
+
+    request_data = {
+        "data_dir": data_dir,
+        "files": files,
+        "fast_indexing": fast_indexing,
+        "max_dimension": max_dimension,
+        "batch_size": batch_size
+    }
+
+    try:
+        data = json.dumps(request_data).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result
+
+    except urllib.error.URLError as e:
+        print(f"Error calling server: {e}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}
+
+
 class ImageEventHandler(FileSystemEventHandler):
-    def __init__(self, data_dir, filter_type=None, filter_value=None,
+    def __init__(self, data_dir, server_url=DEFAULT_SERVER_URL,
+                 filter_type=None, filter_value=None,
                  fast_indexing=True, max_dimension=384, batch_size=64):
         self.data_dir = data_dir
+        self.server_url = server_url
         self.filter_type = filter_type
         self.filter_value = filter_value
         self.fast_indexing = fast_indexing
@@ -49,7 +122,7 @@ class ImageEventHandler(FileSystemEventHandler):
         self.batch_size = batch_size
         self.pending_files = set()
         self.last_index_time = time.time()
-        self.debounce_delay = 2.0  # Wait 2 seconds before indexing
+        self.debounce_delay = 0.5  # Wait 0.5 seconds before indexing (reduced for faster response)
 
     def on_created(self, event):
         """Called when a file or directory is created"""
@@ -58,7 +131,10 @@ class ImageEventHandler(FileSystemEventHandler):
 
         file_path = event.src_path
         if self._is_valid_image(file_path):
-            print(f"📸 New image detected: {os.path.basename(file_path)}", file=sys.stderr)
+            print(f"New image detected: {os.path.basename(file_path)}", file=sys.stderr)
+            # Immediately notify server so image appears in UI
+            call_server_notify(self.server_url, file_path)
+            # Queue for indexing
             self.pending_files.add(file_path)
             self.last_index_time = time.time()
 
@@ -69,7 +145,10 @@ class ImageEventHandler(FileSystemEventHandler):
 
         dest_path = event.dest_path
         if self._is_valid_image(dest_path):
-            print(f"📸 Image moved/added: {os.path.basename(dest_path)}", file=sys.stderr)
+            print(f"Image moved/added: {os.path.basename(dest_path)}", file=sys.stderr)
+            # Immediately notify server so image appears in UI
+            call_server_notify(self.server_url, dest_path)
+            # Queue for indexing
             self.pending_files.add(dest_path)
             self.last_index_time = time.time()
 
@@ -92,7 +171,7 @@ class ImageEventHandler(FileSystemEventHandler):
         # Apply filter if set
         if self.filter_type and self.filter_value:
             if not matches_filter(filename, self.filter_type, self.filter_value):
-                print(f"⏭️ Skipping (doesn't match filter): {filename}", file=sys.stderr)
+                print(f"Skipping (doesn't match filter): {filename}", file=sys.stderr)
                 return False
 
         return True
@@ -116,10 +195,10 @@ class ImageEventHandler(FileSystemEventHandler):
                             f.read(1)  # Just read 1 byte to verify
                         files_to_index.append(file_path)
                     except Exception as e:
-                        print(f"⚠️ File not ready yet, will retry: {os.path.basename(file_path)}", file=sys.stderr)
+                        print(f"File not ready yet, will retry: {os.path.basename(file_path)}", file=sys.stderr)
                         continue
                 else:
-                    print(f"⚠️ File disappeared: {os.path.basename(file_path)}", file=sys.stderr)
+                    print(f"File disappeared: {os.path.basename(file_path)}", file=sys.stderr)
 
             # Clear all files from pending (including ones that weren't ready)
             self.pending_files.clear()
@@ -127,40 +206,44 @@ class ImageEventHandler(FileSystemEventHandler):
             if not files_to_index:
                 return
 
-            print(f"🔄 Auto-indexing {len(files_to_index)} new image(s)...", file=sys.stderr)
+            print(f"Auto-indexing {len(files_to_index)} new image(s) via server...", file=sys.stderr)
             print(f"   Settings: fast={self.fast_indexing}, max_dim={self.max_dimension}, batch={self.batch_size}", file=sys.stderr)
 
-            # Index the new images with settings
-            try:
-                index_images_with_clip(
-                    self.data_dir,
-                    incremental=True,
-                    new_files=files_to_index,
-                    fast_indexing=self.fast_indexing,
-                    max_dimension=self.max_dimension,
-                    batch_size=self.batch_size
-                )
-                print(f"✅ Successfully indexed {len(files_to_index)} image(s)", file=sys.stderr)
-            except Exception as e:
-                print(f"❌ Error indexing images: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc()
+            # Call server to index (server has the model loaded)
+            result = call_server_index(
+                self.server_url,
+                self.data_dir,
+                files_to_index,
+                fast_indexing=self.fast_indexing,
+                max_dimension=self.max_dimension,
+                batch_size=self.batch_size
+            )
+
+            if result.get("status") == "started":
+                print(f"Server accepted {result.get('files_to_index', 0)} files for indexing", file=sys.stderr)
+            elif result.get("status") == "already_indexing":
+                print("Server is busy indexing, files will be queued", file=sys.stderr)
+                # Re-add files to pending so they get picked up next time
+                self.pending_files.update(files_to_index)
+            else:
+                print(f"Server response: {result}", file=sys.stderr)
 
 
-def watch_directory(watch_path, data_dir, filter_type=None, filter_value=None,
+def watch_directory(watch_path, data_dir, server_url=DEFAULT_SERVER_URL,
+                    filter_type=None, filter_value=None,
                     fast_indexing=True, max_dimension=384, batch_size=64):
-    """Watch directory for new images and auto-index them"""
-    # Initialize device early to show GPU status
-    device = get_device()
+    """Watch directory for new images and auto-index them via server."""
 
-    print(f"👀 Watching for new images in: {watch_path}", file=sys.stderr)
-    print(f"📁 Index location: {data_dir}", file=sys.stderr)
+    print(f"Watching for new images in: {watch_path}", file=sys.stderr)
+    print(f"Index location: {data_dir}", file=sys.stderr)
+    print(f"Server URL: {server_url}", file=sys.stderr)
     if filter_type and filter_value:
-        print(f"🔍 Filter: {filter_type} = '{filter_value}'", file=sys.stderr)
-    print(f"⚙️ Fast indexing: {fast_indexing}, Max dimension: {max_dimension}px, Batch size: {batch_size}", file=sys.stderr)
+        print(f"Filter: {filter_type} = '{filter_value}'", file=sys.stderr)
+    print(f"Settings: fast={fast_indexing}, max_dim={max_dimension}px, batch={batch_size}", file=sys.stderr)
 
     event_handler = ImageEventHandler(
         data_dir,
+        server_url=server_url,
         filter_type=filter_type,
         filter_value=filter_value,
         fast_indexing=fast_indexing,
@@ -176,16 +259,18 @@ def watch_directory(watch_path, data_dir, filter_type=None, filter_value=None,
             time.sleep(0.5)  # Check every 500ms
             event_handler.check_and_index()
     except KeyboardInterrupt:
-        print("\n⏹️  Stopping image watcher...", file=sys.stderr)
+        print("\nStopping image watcher...", file=sys.stderr)
         observer.stop()
 
     observer.join()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Watch directory for new images and auto-index")
+    parser = argparse.ArgumentParser(description="Watch directory for new images and auto-index via server")
     parser.add_argument("watch_dir", help="Directory to watch for new images")
     parser.add_argument("data_dir", help="Directory to store the index")
+    parser.add_argument("--server-url", type=str, default=DEFAULT_SERVER_URL,
+                        help=f"Server URL (default: {DEFAULT_SERVER_URL})")
     parser.add_argument("--filter-type", type=str, default=None,
                         choices=["all", "starts-with", "ends-with", "contains", "regex"],
                         help="Type of filename filter")
@@ -203,7 +288,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not os.path.exists(args.watch_dir):
-        print(f"❌ Watch directory does not exist: {args.watch_dir}", file=sys.stderr)
+        print(f"Watch directory does not exist: {args.watch_dir}", file=sys.stderr)
         sys.exit(1)
 
     os.makedirs(args.data_dir, exist_ok=True)
@@ -211,6 +296,7 @@ if __name__ == "__main__":
     watch_directory(
         args.watch_dir,
         args.data_dir,
+        server_url=args.server_url,
         filter_type=args.filter_type,
         filter_value=args.filter,
         fast_indexing=args.fast,

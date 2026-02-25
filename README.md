@@ -1,14 +1,20 @@
 <h1 align="center">Searchy</h1>
 
-<p align="center">A semantic image search tool for macOS that uses CLIP to find images through natural language queries.</p>
+<p align="center">A hybrid image search tool for macOS that uses CLIP + OCR to find images through natural language queries and text content.</p>
 
-<p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b></p>
+<p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b> · <b>Face recognition</b></p>
 
-https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
+<p align="center"><b>Main App</b></p>
+
+https://github.com/user-attachments/assets/214c1421-0893-4fac-9b18-dd4074eeb68f
+
+<p align="center"><b>Spotlight Widget</b></p>
+
+https://github.com/user-attachments/assets/d9753770-6b62-40f5-be5a-e625a81e5a1d
 
 ---
 
-<p align="center">Photo management on macOS sucks. Searchy indexes your images locally and lets you search them using descriptive phrases like <i>"sunset over mountains"</i>, <i>"person wearing red"</i>, or <i>"cat sleeping on couch"</i>. Access it instantly from the menu bar with a global hotkey.</p>
+<p align="center">Photo management on macOS sucks. Searchy indexes your images locally and lets you search them using descriptive phrases like <i>"sunset over mountains"</i>, <i>"person wearing red"</i>, or text visible in images like <i>"invoice 2024"</i>. Find photos by face, detect duplicates, and access it instantly from the menu bar with a global hotkey.</p>
 
 ---
 
@@ -19,7 +25,7 @@ https://github.com/user-attachments/assets/ec7f203c-3e59-49d9-9aa8-a0b171eaaae7
 1. Download `Searchy.dmg` from [Releases](https://github.com/AusafMo/searchy/releases)
 2. Drag to Applications
 3. Right-click → Open (first time only, macOS security)
-4. Click **Start Setup** — Python & AI models install automatically (3-5 min)
+4. Click **Start Setup** — Python & CLIP models install automatically (3-5 min)
 
 That's it. No manual Python installation required.
 
@@ -35,7 +41,7 @@ Open `searchy.xcodeproj` in Xcode and build (`⌘R`).
 On first launch, Searchy will automatically:
 - Install Python (if not found)
 - Create an isolated virtual environment
-- Download AI dependencies (~2GB)
+- Download dependencies (~2GB)
 - Download the CLIP model
 
 ---
@@ -70,11 +76,14 @@ Access via the gear icon in the header.
 
 <h2 align="center">Features</h2>
 
-**Semantic Search**
+**Hybrid Search (Semantic + OCR)**
 - Query images using natural language descriptions
+- Automatically extracts and indexes text from images (signs, documents, screenshots)
+- Hybrid mode combines visual understanding with text matching
+- Adjustable OCR weight to tune semantic vs text relevance
+- Pure text search mode for exact text matching
 - Real-time results with 400ms debounce
 - Similarity scores displayed as color-coded percentages
-- Adjustable threshold to filter weak matches
 - Filter results by file type, date range, and size
 
 **Duplicate Detection**
@@ -83,6 +92,21 @@ Access via the gear icon in the header.
 - Auto-select smaller duplicates for cleanup
 - Preview images before deleting
 - Move or trash duplicates in bulk
+
+**Face Recognition**
+- Automatic face detection using DeepFace (SSD detector)
+- Face clustering to group photos by person
+- Name people and search by name
+- Pin important faces, hide unwanted ones
+- Merge duplicate person clusters
+- Face verification to confirm matches
+- Create custom face groups/albums
+- Bulk operations for efficient management
+
+**Similar Image Search**
+- Find visually similar images to any selected photo
+- Uses CLIP embeddings for semantic similarity
+- Adjustable result count
 
 **Spotlight-Style Interface**
 - Global hotkey `⌘⇧Space` summons a floating search window
@@ -107,10 +131,23 @@ Access via the gear icon in the header.
 - Isolated virtual environment in Application Support
 - All dependencies installed on first launch
 
+**External Volumes**
+- Index images on external drives and USB devices
+- Separate index per volume stored on the device
+- Search across volumes independently
+- Volume statistics and management
+
+**Model Selection**
+- Choose between multiple CLIP models
+- Switch models without re-indexing
+- Unload models to free memory
+- Automatic model download on first use
+
 **Privacy**
 - All processing runs locally on your machine
 - No network requests after initial setup
 - GPU acceleration via Metal (Apple Silicon)
+- See [Security & Privacy](#security--privacy) for our threat model and decisions
 
 ---
 
@@ -118,15 +155,16 @@ Access via the gear icon in the header.
 
 ```
 searchy/
-├── ContentView.swift       # SwiftUI interface
-├── searchyApp.swift        # App lifecycle, setup manager, server management
-├── server.py               # FastAPI backend
-├── generate_embeddings.py  # CLIP model and embedding generation
-├── image_watcher.py        # File system monitor for auto-indexing
+├── ContentView.swift            # SwiftUI interface
+├── searchyApp.swift             # App lifecycle, setup manager, server management
+├── server.py                    # FastAPI backend
+├── generate_embeddings.py       # CLIP model and embedding generation
+├── face_recognition_service.py  # Face detection & clustering (DeepFace)
+├── image_watcher.py             # File system monitor for auto-indexing
 └── requirements.txt
 ```
 
-**Stack:** SwiftUI + AppKit → FastAPI + Uvicorn → CLIP ViT-B/32 → NumPy embeddings
+**Stack:** SwiftUI + AppKit → FastAPI + Uvicorn → CLIP ViT-B/32 + DeepFace (ArcFace) → NumPy embeddings
 
 ---
 
@@ -238,10 +276,18 @@ The app expects a FastAPI/HTTP server. Implement these endpoints:
 | Endpoint | Method | Request | Response |
 |----------|--------|---------|----------|
 | `/health` | GET | — | `{"status": "ok"}` |
-| `/search` | POST | `{"query": str, "n_results": int, "threshold": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/search` | POST | `{"query": str, "n_results": int, "threshold": float, "ocr_weight": float}` | `{"results": [{"path": str, "similarity": float}, ...]}` |
+| `/text-search` | POST | `{"query": str, "top_k": int}` | `{"results": [...]}` |
 | `/recent` | GET | `?n=int` | `{"results": [{"path": str, "similarity": float}, ...]}` |
 | `/index-count` | GET | — | `{"count": int}` |
 | `/duplicates` | POST | `{"threshold": float, "data_dir": str}` | `{"groups": [...], "total_duplicates": int}` |
+| `/similar` | POST | `{"image_path": str, "top_k": int}` | `{"results": [...]}` |
+| `/face-scan` | POST | `{"data_dir": str}` | `{"status": "started"}` |
+| `/face-clusters` | GET | — | `{"clusters": [...]}` |
+| `/face-rename` | POST | `{"cluster_id": str, "name": str}` | `{"success": bool}` |
+| `/face-merge` | POST | `{"source_id": str, "target_id": str}` | `{"success": bool}` |
+| `/volume/index` | POST | `{"volume_path": str, "index_path": str}` | `{"status": str}` |
+| `/volume/search` | POST | `{"query": str, "index_path": str}` | `{"results": [...]}` |
 
 #### 3. Script Interface
 
@@ -331,7 +377,130 @@ Options:
 - [x] Bundled .app distribution with auto-setup
 - [x] Duplicate image detection
 - [x] Date, size, and file type filters
+- [x] Face recognition & clustering
+- [x] Face naming, pinning, hiding, merging
+- [x] Face groups/albums
+- [x] Similar image search
+- [x] External volume indexing
+- [x] Model selection & management
+- [x] OCR text extraction & hybrid search
 - [ ] Alternative/smaller models
+
+---
+
+## Vision: A Proper Mac Photo Manager
+
+macOS photo management is surprisingly lacking. Apple Photos is bloated and locks you into iCloud. Professional tools like Lightroom are subscription-based editors, not managers. There's no lightweight, native gallery app—the equivalent of a phone's gallery app—for Mac.
+
+**The gap we're filling:**
+
+| App | Problem |
+|-----|---------|
+| Apple Photos | Wants to own/import your files, pushes iCloud |
+| Lightroom | $10/mo subscription, primarily an editor |
+| Photo Mechanic | $139, dated UI, no semantic search |
+| Finder | It's... Finder |
+
+Searchy aims to become the **native macOS media manager** that doesn't exist—with semantic search superpowers.
+
+**Design principles:**
+- **Proxy-based** — Your files stay exactly where they are. We're a lens, not a file manager.
+- **Non-destructive** — Albums, tags, ratings are metadata in our database. Original files never touched.
+- **Symlink exports** — Want a physical folder for an album? We create symlinks. Delete the album? Originals are safe.
+- **Smart search** — Semantic search, face grouping, OCR, smart collections. Find photos without manual tagging.
+
+**Planned features:**
+
+| Feature | Description |
+|---------|-------------|
+| Albums & Collections | Virtual organization, multiple albums per image |
+| Tags & Ratings | Color tags, star ratings, flags |
+| Smart Albums | Auto-populated based on rules (faces, dates, content) |
+| Timeline View | Browse by date with EXIF data |
+| Map View | Browse by location (GPS from EXIF) |
+| Metadata Panel | View/edit EXIF, IPTC, XMP |
+| Quick Look Integration | Spacebar preview like Finder |
+| Import Workflow | Watch folders, camera import |
+| Trash & Recovery | Safe deletion with undo |
+
+**The pitch:** A native macOS photo browser with semantic search built-in. No subscription, no cloud lock-in, no importing. Point at your folders and go.
+
+---
+
+## Security & Privacy
+
+Searchy runs entirely on your device. No cloud, no telemetry, no external requests after initial model download. This section explains our security decisions transparently—including what we deliberately chose *not* to implement.
+
+### Threat Model
+
+We consider two attack paths:
+
+| Path | Scenario | Our Focus |
+|------|----------|-----------|
+| **Path 1** | Searchy is the attack vector (how an attacker gets in) | **Hardened** |
+| **Path 2** | Attacker already has system access | Limited value in additional measures |
+
+### What We Hardened (Path 1)
+
+These protect against Searchy being used as an entry point:
+
+| Measure | Why |
+|---------|-----|
+| **CORS restricted to localhost** | Prevents malicious websites from querying your local API to enumerate images |
+| **Server binds to 127.0.0.1** | API not accessible from other machines on your network |
+| **Dependencies pinned** | Reduces supply chain attack surface from malicious package updates |
+
+### What We Didn't Do (and Why)
+
+| Suggestion | Why We Skipped It |
+|------------|-------------------|
+| **Encrypt face embeddings** | If an attacker has access to read `~/Library/Application Support/searchy/`, they can already access your original images in `~/Pictures`. Encrypting the index while leaving source images unencrypted is security theater. |
+| **API authentication tokens** | The API only accepts localhost connections. Any process that can call the API can also read the index files directly. Authentication adds complexity without security benefit. |
+| **Encrypt the image index** | Same reasoning as biometrics—the original images aren't encrypted, so encrypting their embeddings doesn't protect anything meaningful. |
+| **Sandbox the app** | Would break the core functionality (indexing user-selected directories). We use runtime permissions instead. |
+
+### When Encryption *Would* Help
+
+Encrypting index files would provide value if:
+- Your `~/Library/Application Support/` syncs to iCloud (embeddings would be uploaded)
+- Multiple users share the machine with separate accounts
+- You want defense-in-depth regardless of practical threat model
+
+We may add optional encryption in the future for these scenarios.
+
+### What's Stored Locally
+
+```
+~/Library/Application Support/searchy/
+├── image_index.bin      # Image embeddings + file paths (pickle)
+├── face_index.pkl       # Face embeddings + clusters + person names
+├── model_config.json    # Selected CLIP model
+├── face_groups.json     # Custom face groups/albums
+├── pinned_faces.json    # Pinned face IDs
+├── hidden_faces.json    # Hidden face IDs
+└── venv/                # Isolated Python environment
+```
+
+**Data collected:**
+- File paths of indexed images
+- CLIP embeddings (512-1024 dimensional vectors)
+- OCR-extracted text from images (automatically during indexing)
+- Face embeddings and cluster data (when face recognition is used)
+
+**Not collected:**
+- Search queries (in-memory only, not persisted)
+- Usage analytics or telemetry
+- Any data sent to external servers
+
+### Known Limitations
+
+1. **Pickle deserialization** — The index uses Python pickle format, which can execute arbitrary code if the file is tampered with. If an attacker can write to your Application Support folder, they could replace the index with a malicious one. We're evaluating safer serialization formats.
+
+2. **HuggingFace model loading** — Models are downloaded from HuggingFace without checksum verification. A compromised model could execute code on load.
+
+3. **No biometric consent flow** — Face recognition indexes faces without explicit opt-in consent. This may have legal implications in jurisdictions like Illinois (BIPA).
+
+📄 **[Full Security Audit](security-audit/AUDIT_v1.2.md)** — Detailed findings with severity ratings
 
 ---
 
@@ -340,7 +509,7 @@ Options:
 - macOS 13+
 - Apple Silicon
 - Internet connection (first-time setup only)
-- ~2GB disk space for AI models
+- ~2GB disk space for models
 
 **Supported formats:** jpg, jpeg, png, gif, bmp, tiff, webp, heic
 
