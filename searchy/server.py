@@ -20,6 +20,12 @@ from threading import Thread
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Default data directory - dynamically get user's Application Support folder
+DEFAULT_DATA_DIR = os.path.join(
+    os.path.expanduser("~/Library/Application Support"),
+    "searchy"
+)
+
 
 app = FastAPI()
 
@@ -70,13 +76,13 @@ def get_searcher():
 class SearchRequest(BaseModel):
     query: str
     top_k: int
-    data_dir: str
+    data_dir: Optional[str] = None
     ocr_weight: float = 0.3  # Weight for OCR text matching (0-1)
 
 
 class DuplicatesRequest(BaseModel):
     threshold: float = 0.95
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 
 
 def get_file_metadata(path: str) -> dict:
@@ -199,10 +205,11 @@ def find_duplicates(request: DuplicatesRequest):
     Find duplicate images based on embedding similarity.
     Returns groups of similar images with metadata.
     """
+    data_dir = request.data_dir or DEFAULT_DATA_DIR
     try:
         logger.info(f"Finding duplicates with threshold {request.threshold}")
 
-        filename = os.path.join(request.data_dir, 'image_index.bin')
+        filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"groups": [], "total_duplicates": 0, "total_groups": 0}
 
@@ -241,9 +248,10 @@ def search(request: SearchRequest):
     Perform a hybrid search combining semantic similarity and OCR text matching.
     """
     try:
+        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Received search request: {request}")
         searcher = get_searcher()
-        results = searcher.search(request.query, request.data_dir, request.top_k, request.ocr_weight)
+        results = searcher.search(request.query, data_dir, request.top_k, request.ocr_weight)
 
         # Filter and enrich results with file metadata
         if results and "results" in results:
@@ -268,13 +276,13 @@ def search(request: SearchRequest):
 class TextSearchRequest(BaseModel):
     query: str
     top_k: int = 20
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 
 
 class SimilarRequest(BaseModel):
     image_path: str
     top_k: int = 20
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 
 
 @app.post("/text-search")
@@ -284,10 +292,11 @@ def text_search(request: TextSearchRequest):
     Useful for finding images with specific text content.
     """
     try:
+        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Received text search request: {request.query}")
         start_time = time.time()
 
-        filename = os.path.join(request.data_dir, 'image_index.bin')
+        filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0}}
 
@@ -360,9 +369,10 @@ def find_similar_images(request: SimilarRequest):
     Find images similar to a given image using CLIP embeddings.
     """
     try:
+        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Finding images similar to: {request.image_path}")
         searcher = get_searcher()
-        results = searcher.find_similar(request.image_path, request.data_dir, request.top_k)
+        results = searcher.find_similar(request.image_path, data_dir, request.top_k)
 
         if "error" in results:
             raise HTTPException(status_code=400, detail=results["error"])
@@ -452,11 +462,12 @@ def unload_model():
 
 
 @app.get("/recent")
-def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_recent(top_k: int = 8, data_dir: Optional[str] = None):
     """
     Get recent images sorted by modification date (newest first).
     Includes both indexed images and pending images (detected but not yet indexed).
     """
+    data_dir = data_dir or DEFAULT_DATA_DIR
     global pending_images
 
     try:
@@ -519,10 +530,11 @@ def get_recent(top_k: int = 8, data_dir: str = "/Users/ausaf/Library/Application
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/index-count")
-def get_index_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_index_count(data_dir: Optional[str] = None):
     """
     Get total count of indexed images.
     """
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
@@ -540,10 +552,11 @@ def get_index_count(data_dir: str = "/Users/ausaf/Library/Application Support/se
         return {"count": 0}
 
 @app.get("/indexed-paths")
-def get_indexed_paths(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_indexed_paths(data_dir: Optional[str] = None):
     """
     Get all indexed image paths for face scanning.
     """
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
@@ -597,7 +610,7 @@ class WatchedDirectoryRequest(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
     directories: List[WatchedDirectoryRequest]
     fast_indexing: bool = True
     max_dimension: int = 384
@@ -606,7 +619,7 @@ class SyncRequest(BaseModel):
 
 class IndexFilesRequest(BaseModel):
     """Request to index specific files (used by image watcher)."""
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
     files: List[str]
     fast_indexing: bool = True
     max_dimension: int = 384
@@ -673,6 +686,7 @@ def index_files(request: IndexFilesRequest):
     (avoiding loading a separate model instance).
     """
     global indexing_status
+    data_dir = request.data_dir or DEFAULT_DATA_DIR
 
     if indexing_status["is_indexing"]:
         return {"status": "already_indexing", "message": "Indexing already in progress"}
@@ -693,7 +707,7 @@ def index_files(request: IndexFilesRequest):
         try:
             logger.info(f"Indexing {len(valid_files)} files via /index endpoint...")
             index_images_with_clip(
-                request.data_dir,
+                data_dir,
                 incremental=True,
                 new_files=valid_files,
                 fast_indexing=request.fast_indexing,
@@ -785,11 +799,12 @@ def cleanup_deleted_images(data_dir: str) -> dict:
 
 
 @app.post("/cleanup")
-def cleanup_index(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def cleanup_index(data_dir: Optional[str] = None):
     """
     Remove deleted images from the index.
     Call this to free up space and improve search performance.
     """
+    data_dir = data_dir or DEFAULT_DATA_DIR
     result = cleanup_deleted_images(data_dir)
     return result
 
@@ -813,6 +828,7 @@ def sync_directories(request: SyncRequest):
     Also cleans up deleted images from the index.
     """
     global sync_status
+    data_dir = request.data_dir or DEFAULT_DATA_DIR
 
     if sync_status["is_syncing"]:
         return {"status": "already_syncing", "message": "Sync already in progress"}
@@ -820,13 +836,13 @@ def sync_directories(request: SyncRequest):
     try:
         # Step 1: Clean up deleted images first
         logger.info("🧹 Cleaning up deleted images...")
-        cleanup_result = cleanup_deleted_images(request.data_dir)
+        cleanup_result = cleanup_deleted_images(data_dir)
         cleaned_count = cleanup_result.get("removed", 0)
         if cleaned_count > 0:
             logger.info(f"🗑️ Removed {cleaned_count} deleted images from index")
 
         # Step 2: Load existing indexed paths (after cleanup)
-        filename = os.path.join(request.data_dir, 'image_index.bin')
+        filename = os.path.join(data_dir, 'image_index.bin')
         existing_paths = set()
         if os.path.exists(filename):
             with open(filename, 'rb') as f:
@@ -880,7 +896,7 @@ def sync_directories(request: SyncRequest):
             try:
                 logger.info(f"🔄 Startup sync: indexing {len(new_files)} new images...")
                 index_images_with_clip(
-                    request.data_dir,
+                    data_dir,
                     incremental=True,
                     new_files=new_files,
                     fast_indexing=request.fast_indexing,
@@ -922,7 +938,7 @@ def get_sync_status():
 from face_recognition_service import get_face_service
 
 class FaceScanRequest(BaseModel):
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
     incremental: bool = True  # Only scan new images
     limit: int = 0  # 0 = no limit, otherwise scan only this many images
 
@@ -934,13 +950,14 @@ def start_face_scan(request: FaceScanRequest):
     Runs in background and returns immediately.
     """
     try:
-        face_service = get_face_service(request.data_dir)
+        data_dir = request.data_dir or DEFAULT_DATA_DIR
+        face_service = get_face_service(data_dir)
 
         if face_service.is_scanning:
             return {"status": "already_scanning", "message": "Face scan already in progress"}
 
         # Get indexed image paths
-        filename = os.path.join(request.data_dir, 'image_index.bin')
+        filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"status": "error", "message": "No images indexed yet"}
 
@@ -974,8 +991,9 @@ def start_face_scan(request: FaceScanRequest):
 
 
 @app.get("/face-scan-status")
-def get_face_scan_status(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_face_scan_status(data_dir: Optional[str] = None):
     """Get current face scan status."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.get_scan_status()
@@ -985,8 +1003,9 @@ def get_face_scan_status(data_dir: str = "/Users/ausaf/Library/Application Suppo
 
 
 @app.get("/face-clusters")
-def get_face_clusters(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_face_clusters(data_dir: Optional[str] = None):
     """Get all face clusters (people)."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         clusters = face_service.get_clusters()
@@ -1004,9 +1023,10 @@ def get_face_clusters(data_dir: str = "/Users/ausaf/Library/Application Support/
 def rename_face_cluster(
     cluster_id: str,
     name: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Rename a face cluster with a custom name."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.rename_cluster(cluster_id, name)
@@ -1045,9 +1065,10 @@ def save_pinned_clusters(data_dir: str, pinned: List[str]):
 @app.post("/face-pin")
 def pin_face_cluster(
     cluster_id: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Pin a face cluster to show it first."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         if cluster_id not in pinned:
@@ -1062,9 +1083,10 @@ def pin_face_cluster(
 @app.post("/face-unpin")
 def unpin_face_cluster(
     cluster_id: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Unpin a face cluster."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         if cluster_id in pinned:
@@ -1078,9 +1100,10 @@ def unpin_face_cluster(
 
 @app.get("/face-pinned")
 def get_pinned_clusters(
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Get list of pinned cluster IDs."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         return {"pinned": pinned}
@@ -1120,9 +1143,10 @@ def save_hidden_clusters(data_dir: str, hidden: List[str]):
 @app.post("/face-hide")
 def hide_face_cluster(
     cluster_id: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Hide a face cluster from the main view."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         if cluster_id not in hidden:
@@ -1137,9 +1161,10 @@ def hide_face_cluster(
 @app.post("/face-unhide")
 def unhide_face_cluster(
     cluster_id: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Unhide a face cluster."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         if cluster_id in hidden:
@@ -1153,9 +1178,10 @@ def unhide_face_cluster(
 
 @app.get("/face-hidden")
 def get_hidden_clusters(
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Get list of hidden cluster IDs."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         return {"hidden": hidden, "count": len(hidden)}
@@ -1193,9 +1219,10 @@ def save_groups_data(data_dir: str, data: dict):
 
 @app.get("/face-groups")
 def get_face_groups(
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Get all groups and their assignments."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         return data
@@ -1207,9 +1234,10 @@ def get_face_groups(
 @app.post("/face-group-create")
 def create_face_group(
     name: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Create a new group."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if name not in data["groups"]:
@@ -1225,9 +1253,10 @@ def create_face_group(
 def assign_face_group(
     cluster_id: str,
     group: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Assign a cluster to a group."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if cluster_id not in data["assignments"]:
@@ -1245,9 +1274,10 @@ def assign_face_group(
 def remove_face_group(
     cluster_id: str,
     group: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Remove a cluster from a group."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if cluster_id in data["assignments"] and group in data["assignments"][cluster_id]:
@@ -1264,9 +1294,10 @@ def remove_face_group(
 @app.delete("/face-group-delete")
 def delete_face_group(
     name: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Delete a group and remove all assignments."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if name in data["groups"]:
@@ -1288,9 +1319,10 @@ def delete_face_group(
 def merge_face_clusters(
     source_cluster_id: str,
     target_cluster_id: str,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Merge source cluster into target cluster."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.merge_clusters(source_cluster_id, target_cluster_id)
@@ -1320,9 +1352,10 @@ def verify_face(
     face_id: str,
     cluster_id: str,
     is_correct: bool,
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy"
+    data_dir: Optional[str] = None
 ):
     """Mark a face as verified or remove it from the cluster."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.verify_face(face_id, cluster_id, is_correct)
@@ -1334,7 +1367,7 @@ def verify_face(
 
 @app.post("/face-recluster")
 def recluster_faces(
-    data_dir: str = "/Users/ausaf/Library/Application Support/searchy",
+    data_dir: Optional[str] = None,
     similarity_threshold: float = 0.60
 ):
     """
@@ -1344,6 +1377,7 @@ def recluster_faces(
     - Respects negative constraints from rejections
     - Tries to place orphaned faces
     """
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.recluster_with_constraints(similarity_threshold)
@@ -1354,8 +1388,9 @@ def recluster_faces(
 
 
 @app.get("/face-orphans")
-def get_orphaned_faces(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_orphaned_faces(data_dir: Optional[str] = None):
     """Get list of orphaned faces that couldn't be assigned to any cluster."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         orphans = face_service.get_orphaned_faces()
@@ -1366,8 +1401,9 @@ def get_orphaned_faces(data_dir: str = "/Users/ausaf/Library/Application Support
 
 
 @app.get("/face-new-count")
-def get_new_face_count(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def get_new_face_count(data_dir: Optional[str] = None):
     """Get count of images not yet scanned for faces."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
 
@@ -1393,8 +1429,9 @@ def get_new_face_count(data_dir: str = "/Users/ausaf/Library/Application Support
 
 
 @app.post("/face-clear")
-def clear_face_data(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def clear_face_data(data_dir: Optional[str] = None):
     """Clear all face data."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.clear_all()
@@ -1404,8 +1441,9 @@ def clear_face_data(data_dir: str = "/Users/ausaf/Library/Application Support/se
 
 
 @app.post("/face-stop")
-def stop_face_scan(data_dir: str = "/Users/ausaf/Library/Application Support/searchy"):
+def stop_face_scan(data_dir: Optional[str] = None):
     """Stop the current face scan."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         face_service.stop_scan = True
@@ -1416,8 +1454,9 @@ def stop_face_scan(data_dir: str = "/Users/ausaf/Library/Application Support/sea
 
 
 @app.post("/face-recluster")
-def recluster_faces(data_dir: str = "/Users/ausaf/Library/Application Support/searchy", threshold: float = 0.55):
+def recluster_faces(data_dir: Optional[str] = None, threshold: float = 0.55):
     """Re-cluster faces with a new threshold without rescanning."""
+    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         clusters = face_service.cluster_faces(similarity_threshold=threshold)

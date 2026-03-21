@@ -484,7 +484,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate CLIP embeddings for images")
     parser.add_argument("image_dirs", nargs='+', help="Directory(s) containing images to index")
-    parser.add_argument("--output-dir", default="/Users/ausaf/Library/Application Support/searchy",
+    parser.add_argument("--output-dir", default=os.path.join(os.path.expanduser("~/Library/Application Support"), "searchy"),
                         help="Directory to save the index")
     parser.add_argument("--fast", action="store_true", default=True,
                         help="Enable fast indexing (resize images)")
