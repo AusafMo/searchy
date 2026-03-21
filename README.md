@@ -4,6 +4,8 @@
 
 <p align="center"><b>On-device processing</b> · <b>Spotlight-style interface</b> · <b>GPU accelerated</b> · <b>Face recognition</b></p>
 
+<p align="center"><a href="https://ausafmo.com/searchy.html">ausafmo.com/searchy</a></p>
+
 <p align="center"><b>Main App</b></p>
 
 https://github.com/user-attachments/assets/214c1421-0893-4fac-9b18-dd4074eeb68f
