@@ -5,6 +5,12 @@ import UniformTypeIdentifiers
 import Vision
 import ImageCaptureCore
 
+// MARK: - Global Constants
+let kAppSupportPath: String = {
+    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    return appSupport.appendingPathComponent("searchy").path
+}()
+
 // MARK: - Color Extension for Hex Support
 extension Color {
     init(hex: String) {
@@ -5985,7 +5991,7 @@ class SearchManager: ObservableObject {
         let body: [String: Any] = [
             "query": query,
             "top_k": numberOfResults,
-            "data_dir": "/Users/ausaf/Library/Application Support/searchy",
+            "data_dir": kAppSupportPath,
             "similarity_threshold": SearchPreferences.shared.similarityThreshold
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
@@ -6029,7 +6035,7 @@ class SearchManager: ObservableObject {
                 var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
                 components.queryItems = [
                     URLQueryItem(name: "top_k", value: "50"),
-                    URLQueryItem(name: "data_dir", value: "/Users/ausaf/Library/Application Support/searchy")
+                    URLQueryItem(name: "data_dir", value: kAppSupportPath)
                 ]
 
                 guard let finalURL = components.url else {
@@ -6094,7 +6100,7 @@ class SearchManager: ObservableObject {
         let body: [String: Any] = [
             "image_path": imagePath,
             "top_k": numberOfResults,
-            "data_dir": "/Users/ausaf/Library/Application Support/searchy"
+            "data_dir": kAppSupportPath
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
@@ -6386,7 +6392,7 @@ class DuplicatesManager: ObservableObject {
 
                 let body: [String: Any] = [
                     "threshold": self.threshold,
-                    "data_dir": "/Users/ausaf/Library/Application Support/searchy"
+                    "data_dir": kAppSupportPath
                 ]
                 request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
@@ -6735,7 +6741,10 @@ class FaceManager: ObservableObject {
     }
 
     let baseURL = "http://localhost:7860"
-    let dataDir = "/Users/ausaf/Library/Application Support/searchy"
+    let dataDir: String = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("searchy").path
+    }()
     private var statusPollTimer: Timer?
 
     private init() {
