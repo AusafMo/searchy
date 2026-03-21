@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		9AF0D6212CFBA5350018FB8A /* run_search.sh in Resources */ = {isa = PBXBuildFile; fileRef = 9AF0D6202CFBA5350018FB8A /* run_search.sh */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,7 +31,6 @@
 		9AF0D5E12CFB9A060018FB8A /* searchy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = searchy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5F22CFB9A070018FB8A /* searchyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5FC2CFB9A070018FB8A /* searchyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		9AF0D6202CFBA5350018FB8A /* run_search.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = run_search.sh; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,7 +86,6 @@
 		9AF0D5D82CFB9A060018FB8A = {
 			isa = PBXGroup;
 			children = (
-				9AF0D6202CFBA5350018FB8A /* run_search.sh */,
 				9AF0D5E32CFB9A060018FB8A /* searchy */,
 				9AF0D5F52CFB9A070018FB8A /* searchyTests */,
 				9AF0D5FF2CFB9A070018FB8A /* searchyUITests */,
@@ -232,7 +229,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9AF0D6212CFBA5350018FB8A /* run_search.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -443,8 +439,8 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -491,8 +487,8 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -513,8 +509,8 @@
 				DEVELOPMENT_TEAM = 762RKLPT85;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -536,8 +532,8 @@
 				DEVELOPMENT_TEAM = 762RKLPT85;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -558,8 +554,8 @@
 				DEVELOPMENT_TEAM = 762RKLPT85;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchyUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -580,8 +576,8 @@
 				DEVELOPMENT_TEAM = 762RKLPT85;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ausaf.searchyUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
