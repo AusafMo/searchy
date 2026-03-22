@@ -442,13 +442,10 @@ def find_similar_images(request: SimilarRequest):
 @app.get("/status")
 def get_status():
     global _model_loading_status
-    # Sync status with actual model state
-    if model_manager.is_loaded and _model_loading_status["state"] == "unloaded":
+    # Sync status with actual model state (only promote, never demote)
+    if model_manager.is_loaded and _model_loading_status["state"] in ("unloaded", "pending"):
         _model_loading_status["state"] = "ready"
         _model_loading_status["message"] = "Model reloaded"
-    elif not model_manager.is_loaded and _model_loading_status["state"] == "ready":
-        _model_loading_status["state"] = "unloaded"
-        _model_loading_status["message"] = "Model unloaded (TTL)"
 
     elapsed = 0
     if _model_loading_status["started_at"] and _model_loading_status["state"] == "loading":
