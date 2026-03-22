@@ -22,6 +22,7 @@ Usage:
 import os
 import sys
 import json
+import time
 import torch
 import numpy as np
 import threading
@@ -111,6 +112,8 @@ class ModelManager:
         self._current_model_name = None
         self._config_path = None
         self._model_lock = threading.Lock()  # Prevent concurrent model changes
+        self._last_used_at = None  # Timestamp of last model usage
+        self._ttl_minutes = 0  # 0 = never unload
         self._initialized = True
 
     def set_config_path(self, path: str):
@@ -128,8 +131,8 @@ class ModelManager:
             try:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                    # Don't load the model yet, just store the preference
                     self._preferred_model = config.get("model_name", DEFAULT_MODEL)
+                    self._ttl_minutes = config.get("ttl_minutes", 0)
             except Exception as e:
                 print(f"Warning: Could not load model config: {e}", file=sys.stderr)
                 self._preferred_model = DEFAULT_MODEL
@@ -146,7 +149,8 @@ class ModelManager:
             os.makedirs(self._config_path, exist_ok=True)
             with open(config_file, 'w') as f:
                 json.dump({
-                    "model_name": self._current_model_name
+                    "model_name": self._current_model_name,
+                    "ttl_minutes": self._ttl_minutes
                 }, f, indent=2)
         except Exception as e:
             print(f"Warning: Could not save model config: {e}", file=sys.stderr)
@@ -233,20 +237,58 @@ class ModelManager:
 
     def unload_model(self):
         """Unload the current model to free memory."""
-        if self._model is not None:
-            del self._model
-            del self._processor
-            self._model = None
-            self._processor = None
-            self._current_model_name = None
+        with self._model_lock:
+            if self._model is not None:
+                del self._model
+                del self._processor
+                self._model = None
+                self._processor = None
+                self._current_model_name = None
 
-            # Clear GPU cache
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            print("Model unloaded", file=sys.stderr)
+                # Clear GPU cache
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+                print("🧹 Model unloaded — GPU/RAM freed, disk cache retained", file=sys.stderr)
+
+    def _touch(self):
+        """Update last-used timestamp."""
+        self._last_used_at = time.time()
+
+    @property
+    def ttl_minutes(self) -> int:
+        return self._ttl_minutes
+
+    @ttl_minutes.setter
+    def ttl_minutes(self, value: int):
+        self._ttl_minutes = value
+        self._save_config()
+
+    @property
+    def last_used_at(self) -> Optional[float]:
+        return self._last_used_at
+
+    def check_ttl(self) -> bool:
+        """Check if model should be unloaded due to TTL expiry.
+        Returns True if model was unloaded.
+        Negative ttl_minutes values are treated as seconds (for testing)."""
+        if self._ttl_minutes == 0 or self._model is None or self._last_used_at is None:
+            return False
+        idle_seconds = time.time() - self._last_used_at
+        if self._ttl_minutes < 0:
+            ttl_seconds = abs(self._ttl_minutes)
+        else:
+            ttl_seconds = self._ttl_minutes * 60
+        if idle_seconds >= ttl_seconds:
+            print(f"Model idle for {idle_seconds:.0f}s (TTL: {ttl_seconds}s), unloading...", file=sys.stderr)
+            self.unload_model()
+            return True
+        return False
 
     def ensure_loaded(self):
         """Ensure a model is loaded, loading the default if necessary."""
+        self._touch()
         if self._model is None:
             self.load_model()
 

@@ -6,6 +6,7 @@ import pickle
 import time
 from datetime import datetime
 from typing import Optional, List
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,14 +21,18 @@ from threading import Thread
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Default data directory - dynamically get user's Application Support folder
-DEFAULT_DATA_DIR = os.path.join(
-    os.path.expanduser("~/Library/Application Support"),
-    "searchy"
-)
+DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~/Library/Application Support"), "searchy")
 
 
-app = FastAPI()
+# Defined early, references _load_model_background and _ttl_checker below
+@asynccontextmanager
+async def lifespan(app):
+    Thread(target=_load_model_background, daemon=True).start()
+    Thread(target=_ttl_checker, daemon=True).start()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Enable CORS for local clients only (security: restrict to localhost)
 app.add_middleware(
@@ -72,17 +77,57 @@ def get_searcher():
         _searcher = CLIPSearcher()
     return _searcher
 
+# Model loading state
+_model_loading_status = {
+    "state": "pending",  # pending, loading, ready, error
+    "message": "",
+    "started_at": None,
+    "elapsed_seconds": 0
+}
+
+def _load_model_background():
+    """Load CLIP model in background thread after server starts."""
+    global _model_loading_status
+    _model_loading_status["state"] = "loading"
+    _model_loading_status["message"] = "Loading CLIP model..."
+    _model_loading_status["started_at"] = time.time()
+    try:
+        model_manager.set_config_path(DEFAULT_DATA_DIR)
+        model_manager.ensure_loaded()
+        elapsed = time.time() - _model_loading_status["started_at"]
+        _model_loading_status["state"] = "ready"
+        _model_loading_status["message"] = f"Model loaded in {elapsed:.1f}s"
+        _model_loading_status["elapsed_seconds"] = elapsed
+        logger.info(f"CLIP model loaded in {elapsed:.1f}s")
+    except Exception as e:
+        elapsed = time.time() - _model_loading_status["started_at"]
+        _model_loading_status["state"] = "error"
+        _model_loading_status["message"] = str(e)
+        _model_loading_status["elapsed_seconds"] = elapsed
+        logger.error(f"Failed to load CLIP model: {e}")
+
+def _ttl_checker():
+    """Background thread that periodically checks if the model should be unloaded."""
+    global _model_loading_status
+    while True:
+        time.sleep(30)  # Check every 30 seconds
+        if model_manager.check_ttl():
+            _model_loading_status["state"] = "unloaded"
+            _model_loading_status["message"] = f"Model unloaded after {model_manager.ttl_minutes}min idle"
+            _model_loading_status["elapsed_seconds"] = 0
+
+
 
 class SearchRequest(BaseModel):
     query: str
     top_k: int
-    data_dir: Optional[str] = None
+    data_dir: str
     ocr_weight: float = 0.3  # Weight for OCR text matching (0-1)
 
 
 class DuplicatesRequest(BaseModel):
     threshold: float = 0.95
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 
 
 def get_file_metadata(path: str) -> dict:
@@ -205,11 +250,10 @@ def find_duplicates(request: DuplicatesRequest):
     Find duplicate images based on embedding similarity.
     Returns groups of similar images with metadata.
     """
-    data_dir = request.data_dir or DEFAULT_DATA_DIR
     try:
         logger.info(f"Finding duplicates with threshold {request.threshold}")
 
-        filename = os.path.join(data_dir, 'image_index.bin')
+        filename = os.path.join(request.data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"groups": [], "total_duplicates": 0, "total_groups": 0}
 
@@ -248,10 +292,9 @@ def search(request: SearchRequest):
     Perform a hybrid search combining semantic similarity and OCR text matching.
     """
     try:
-        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Received search request: {request}")
         searcher = get_searcher()
-        results = searcher.search(request.query, data_dir, request.top_k, request.ocr_weight)
+        results = searcher.search(request.query, request.data_dir, request.top_k, request.ocr_weight)
 
         # Filter and enrich results with file metadata
         if results and "results" in results:
@@ -276,13 +319,13 @@ def search(request: SearchRequest):
 class TextSearchRequest(BaseModel):
     query: str
     top_k: int = 20
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 
 
 class SimilarRequest(BaseModel):
     image_path: str
     top_k: int = 20
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 
 
 @app.post("/text-search")
@@ -292,11 +335,10 @@ def text_search(request: TextSearchRequest):
     Useful for finding images with specific text content.
     """
     try:
-        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Received text search request: {request.query}")
         start_time = time.time()
 
-        filename = os.path.join(data_dir, 'image_index.bin')
+        filename = os.path.join(request.data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"results": [], "stats": {"total_time": "0.00s", "images_searched": 0}}
 
@@ -369,10 +411,9 @@ def find_similar_images(request: SimilarRequest):
     Find images similar to a given image using CLIP embeddings.
     """
     try:
-        data_dir = request.data_dir or DEFAULT_DATA_DIR
         logger.info(f"Finding images similar to: {request.image_path}")
         searcher = get_searcher()
-        results = searcher.find_similar(request.image_path, data_dir, request.top_k)
+        results = searcher.find_similar(request.image_path, request.data_dir, request.top_k)
 
         if "error" in results:
             raise HTTPException(status_code=400, detail=results["error"])
@@ -400,7 +441,33 @@ def find_similar_images(request: SimilarRequest):
 
 @app.get("/status")
 def get_status():
-    return {"status": "Server is running"}
+    global _model_loading_status
+    # Sync status with actual model state
+    if model_manager.is_loaded and _model_loading_status["state"] == "unloaded":
+        _model_loading_status["state"] = "ready"
+        _model_loading_status["message"] = "Model reloaded"
+    elif not model_manager.is_loaded and _model_loading_status["state"] == "ready":
+        _model_loading_status["state"] = "unloaded"
+        _model_loading_status["message"] = "Model unloaded (TTL)"
+
+    elapsed = 0
+    if _model_loading_status["started_at"] and _model_loading_status["state"] == "loading":
+        elapsed = time.time() - _model_loading_status["started_at"]
+    else:
+        elapsed = _model_loading_status["elapsed_seconds"]
+    idle_seconds = 0
+    if model_manager.last_used_at and model_manager.is_loaded:
+        idle_seconds = round(time.time() - model_manager.last_used_at, 1)
+    return {
+        "status": "Server is running",
+        "model": {
+            "state": _model_loading_status["state"],
+            "message": _model_loading_status["message"],
+            "elapsed_seconds": round(elapsed, 1),
+            "ttl_minutes": model_manager.ttl_minutes,
+            "idle_seconds": idle_seconds
+        }
+    }
 
 
 # ============== Model Configuration Endpoints ==============
@@ -458,16 +525,41 @@ def change_model(request: ModelChangeRequest):
 def unload_model():
     """Unload the current model to free GPU memory."""
     model_manager.unload_model()
+    _model_loading_status["state"] = "unloaded"
+    _model_loading_status["message"] = "Model manually unloaded"
+    _model_loading_status["elapsed_seconds"] = 0
     return {"status": "unloaded"}
 
 
+class TTLRequest(BaseModel):
+    ttl_minutes: int  # 0 = never unload
+
+
+@app.get("/model/ttl")
+def get_model_ttl():
+    """Get current model TTL setting."""
+    idle_seconds = 0
+    if model_manager.last_used_at and model_manager.is_loaded:
+        idle_seconds = round(time.time() - model_manager.last_used_at, 1)
+    return {
+        "ttl_minutes": model_manager.ttl_minutes,
+        "idle_seconds": idle_seconds
+    }
+
+
+@app.post("/model/ttl")
+def set_model_ttl(request: TTLRequest):
+    """Set model TTL (minutes of idle before unloading). 0 = never."""
+    model_manager.ttl_minutes = request.ttl_minutes
+    return {"ttl_minutes": model_manager.ttl_minutes}
+
+
 @app.get("/recent")
-def get_recent(top_k: int = 8, data_dir: Optional[str] = None):
+def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
     """
     Get recent images sorted by modification date (newest first).
     Includes both indexed images and pending images (detected but not yet indexed).
     """
-    data_dir = data_dir or DEFAULT_DATA_DIR
     global pending_images
 
     try:
@@ -530,11 +622,10 @@ def get_recent(top_k: int = 8, data_dir: Optional[str] = None):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/index-count")
-def get_index_count(data_dir: Optional[str] = None):
+def get_index_count(data_dir: str = DEFAULT_DATA_DIR):
     """
     Get total count of indexed images.
     """
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
@@ -552,11 +643,10 @@ def get_index_count(data_dir: Optional[str] = None):
         return {"count": 0}
 
 @app.get("/indexed-paths")
-def get_indexed_paths(data_dir: Optional[str] = None):
+def get_indexed_paths(data_dir: str = DEFAULT_DATA_DIR):
     """
     Get all indexed image paths for face scanning.
     """
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         filename = os.path.join(data_dir, 'image_index.bin')
         if not os.path.exists(filename):
@@ -610,7 +700,7 @@ class WatchedDirectoryRequest(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
     directories: List[WatchedDirectoryRequest]
     fast_indexing: bool = True
     max_dimension: int = 384
@@ -619,7 +709,7 @@ class SyncRequest(BaseModel):
 
 class IndexFilesRequest(BaseModel):
     """Request to index specific files (used by image watcher)."""
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
     files: List[str]
     fast_indexing: bool = True
     max_dimension: int = 384
@@ -686,7 +776,6 @@ def index_files(request: IndexFilesRequest):
     (avoiding loading a separate model instance).
     """
     global indexing_status
-    data_dir = request.data_dir or DEFAULT_DATA_DIR
 
     if indexing_status["is_indexing"]:
         return {"status": "already_indexing", "message": "Indexing already in progress"}
@@ -707,7 +796,7 @@ def index_files(request: IndexFilesRequest):
         try:
             logger.info(f"Indexing {len(valid_files)} files via /index endpoint...")
             index_images_with_clip(
-                data_dir,
+                request.data_dir,
                 incremental=True,
                 new_files=valid_files,
                 fast_indexing=request.fast_indexing,
@@ -799,12 +888,11 @@ def cleanup_deleted_images(data_dir: str) -> dict:
 
 
 @app.post("/cleanup")
-def cleanup_index(data_dir: Optional[str] = None):
+def cleanup_index(data_dir: str = DEFAULT_DATA_DIR):
     """
     Remove deleted images from the index.
     Call this to free up space and improve search performance.
     """
-    data_dir = data_dir or DEFAULT_DATA_DIR
     result = cleanup_deleted_images(data_dir)
     return result
 
@@ -828,7 +916,6 @@ def sync_directories(request: SyncRequest):
     Also cleans up deleted images from the index.
     """
     global sync_status
-    data_dir = request.data_dir or DEFAULT_DATA_DIR
 
     if sync_status["is_syncing"]:
         return {"status": "already_syncing", "message": "Sync already in progress"}
@@ -836,13 +923,13 @@ def sync_directories(request: SyncRequest):
     try:
         # Step 1: Clean up deleted images first
         logger.info("🧹 Cleaning up deleted images...")
-        cleanup_result = cleanup_deleted_images(data_dir)
+        cleanup_result = cleanup_deleted_images(request.data_dir)
         cleaned_count = cleanup_result.get("removed", 0)
         if cleaned_count > 0:
             logger.info(f"🗑️ Removed {cleaned_count} deleted images from index")
 
         # Step 2: Load existing indexed paths (after cleanup)
-        filename = os.path.join(data_dir, 'image_index.bin')
+        filename = os.path.join(request.data_dir, 'image_index.bin')
         existing_paths = set()
         if os.path.exists(filename):
             with open(filename, 'rb') as f:
@@ -896,7 +983,7 @@ def sync_directories(request: SyncRequest):
             try:
                 logger.info(f"🔄 Startup sync: indexing {len(new_files)} new images...")
                 index_images_with_clip(
-                    data_dir,
+                    request.data_dir,
                     incremental=True,
                     new_files=new_files,
                     fast_indexing=request.fast_indexing,
@@ -938,7 +1025,7 @@ def get_sync_status():
 from face_recognition_service import get_face_service
 
 class FaceScanRequest(BaseModel):
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
     incremental: bool = True  # Only scan new images
     limit: int = 0  # 0 = no limit, otherwise scan only this many images
 
@@ -950,14 +1037,13 @@ def start_face_scan(request: FaceScanRequest):
     Runs in background and returns immediately.
     """
     try:
-        data_dir = request.data_dir or DEFAULT_DATA_DIR
-        face_service = get_face_service(data_dir)
+        face_service = get_face_service(request.data_dir)
 
         if face_service.is_scanning:
             return {"status": "already_scanning", "message": "Face scan already in progress"}
 
         # Get indexed image paths
-        filename = os.path.join(data_dir, 'image_index.bin')
+        filename = os.path.join(request.data_dir, 'image_index.bin')
         if not os.path.exists(filename):
             return {"status": "error", "message": "No images indexed yet"}
 
@@ -991,9 +1077,8 @@ def start_face_scan(request: FaceScanRequest):
 
 
 @app.get("/face-scan-status")
-def get_face_scan_status(data_dir: Optional[str] = None):
+def get_face_scan_status(data_dir: str = DEFAULT_DATA_DIR):
     """Get current face scan status."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.get_scan_status()
@@ -1003,9 +1088,8 @@ def get_face_scan_status(data_dir: Optional[str] = None):
 
 
 @app.get("/face-clusters")
-def get_face_clusters(data_dir: Optional[str] = None):
+def get_face_clusters(data_dir: str = DEFAULT_DATA_DIR):
     """Get all face clusters (people)."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         clusters = face_service.get_clusters()
@@ -1023,10 +1107,9 @@ def get_face_clusters(data_dir: Optional[str] = None):
 def rename_face_cluster(
     cluster_id: str,
     name: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Rename a face cluster with a custom name."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.rename_cluster(cluster_id, name)
@@ -1065,10 +1148,9 @@ def save_pinned_clusters(data_dir: str, pinned: List[str]):
 @app.post("/face-pin")
 def pin_face_cluster(
     cluster_id: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Pin a face cluster to show it first."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         if cluster_id not in pinned:
@@ -1083,10 +1165,9 @@ def pin_face_cluster(
 @app.post("/face-unpin")
 def unpin_face_cluster(
     cluster_id: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Unpin a face cluster."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         if cluster_id in pinned:
@@ -1100,10 +1181,9 @@ def unpin_face_cluster(
 
 @app.get("/face-pinned")
 def get_pinned_clusters(
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Get list of pinned cluster IDs."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         pinned = load_pinned_clusters(data_dir)
         return {"pinned": pinned}
@@ -1143,10 +1223,9 @@ def save_hidden_clusters(data_dir: str, hidden: List[str]):
 @app.post("/face-hide")
 def hide_face_cluster(
     cluster_id: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Hide a face cluster from the main view."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         if cluster_id not in hidden:
@@ -1161,10 +1240,9 @@ def hide_face_cluster(
 @app.post("/face-unhide")
 def unhide_face_cluster(
     cluster_id: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Unhide a face cluster."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         if cluster_id in hidden:
@@ -1178,10 +1256,9 @@ def unhide_face_cluster(
 
 @app.get("/face-hidden")
 def get_hidden_clusters(
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Get list of hidden cluster IDs."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         hidden = load_hidden_clusters(data_dir)
         return {"hidden": hidden, "count": len(hidden)}
@@ -1219,10 +1296,9 @@ def save_groups_data(data_dir: str, data: dict):
 
 @app.get("/face-groups")
 def get_face_groups(
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Get all groups and their assignments."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         return data
@@ -1234,10 +1310,9 @@ def get_face_groups(
 @app.post("/face-group-create")
 def create_face_group(
     name: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Create a new group."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if name not in data["groups"]:
@@ -1253,10 +1328,9 @@ def create_face_group(
 def assign_face_group(
     cluster_id: str,
     group: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Assign a cluster to a group."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if cluster_id not in data["assignments"]:
@@ -1274,10 +1348,9 @@ def assign_face_group(
 def remove_face_group(
     cluster_id: str,
     group: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Remove a cluster from a group."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if cluster_id in data["assignments"] and group in data["assignments"][cluster_id]:
@@ -1294,10 +1367,9 @@ def remove_face_group(
 @app.delete("/face-group-delete")
 def delete_face_group(
     name: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Delete a group and remove all assignments."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         data = load_groups_data(data_dir)
         if name in data["groups"]:
@@ -1319,10 +1391,9 @@ def delete_face_group(
 def merge_face_clusters(
     source_cluster_id: str,
     target_cluster_id: str,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Merge source cluster into target cluster."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.merge_clusters(source_cluster_id, target_cluster_id)
@@ -1352,10 +1423,9 @@ def verify_face(
     face_id: str,
     cluster_id: str,
     is_correct: bool,
-    data_dir: Optional[str] = None
+    data_dir: str = DEFAULT_DATA_DIR
 ):
     """Mark a face as verified or remove it from the cluster."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.verify_face(face_id, cluster_id, is_correct)
@@ -1367,7 +1437,7 @@ def verify_face(
 
 @app.post("/face-recluster")
 def recluster_faces(
-    data_dir: Optional[str] = None,
+    data_dir: str = DEFAULT_DATA_DIR,
     similarity_threshold: float = 0.60
 ):
     """
@@ -1377,7 +1447,6 @@ def recluster_faces(
     - Respects negative constraints from rejections
     - Tries to place orphaned faces
     """
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         result = face_service.recluster_with_constraints(similarity_threshold)
@@ -1388,9 +1457,8 @@ def recluster_faces(
 
 
 @app.get("/face-orphans")
-def get_orphaned_faces(data_dir: Optional[str] = None):
+def get_orphaned_faces(data_dir: str = DEFAULT_DATA_DIR):
     """Get list of orphaned faces that couldn't be assigned to any cluster."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         orphans = face_service.get_orphaned_faces()
@@ -1401,9 +1469,8 @@ def get_orphaned_faces(data_dir: Optional[str] = None):
 
 
 @app.get("/face-new-count")
-def get_new_face_count(data_dir: Optional[str] = None):
+def get_new_face_count(data_dir: str = DEFAULT_DATA_DIR):
     """Get count of images not yet scanned for faces."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
 
@@ -1429,9 +1496,8 @@ def get_new_face_count(data_dir: Optional[str] = None):
 
 
 @app.post("/face-clear")
-def clear_face_data(data_dir: Optional[str] = None):
+def clear_face_data(data_dir: str = DEFAULT_DATA_DIR):
     """Clear all face data."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         return face_service.clear_all()
@@ -1441,9 +1507,8 @@ def clear_face_data(data_dir: Optional[str] = None):
 
 
 @app.post("/face-stop")
-def stop_face_scan(data_dir: Optional[str] = None):
+def stop_face_scan(data_dir: str = DEFAULT_DATA_DIR):
     """Stop the current face scan."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         face_service.stop_scan = True
@@ -1454,9 +1519,8 @@ def stop_face_scan(data_dir: Optional[str] = None):
 
 
 @app.post("/face-recluster")
-def recluster_faces(data_dir: Optional[str] = None, threshold: float = 0.55):
+def recluster_faces(data_dir: str = DEFAULT_DATA_DIR, threshold: float = 0.55):
     """Re-cluster faces with a new threshold without rescanning."""
-    data_dir = data_dir or DEFAULT_DATA_DIR
     try:
         face_service = get_face_service(data_dir)
         clusters = face_service.cluster_faces(similarity_threshold=threshold)

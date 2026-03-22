@@ -908,10 +908,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        Task {
-            await stopFastAPIServer()
-            await stopImageWatcher()
+        // Kill server synchronously
+        if let proc = serverProcess, proc.isRunning {
+            proc.terminate()
+            proc.waitUntilExit()
         }
+        serverProcess = nil
+
+        // Kill all watchers synchronously
+        for proc in watcherProcesses {
+            if proc.isRunning {
+                proc.terminate()
+                proc.waitUntilExit()
+            }
+        }
+        watcherProcesses.removeAll()
 
         if let hotKey = eventHotKey?.ref {
             UnregisterEventHotKey(hotKey)

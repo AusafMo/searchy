@@ -2032,6 +2032,7 @@ struct SettingsView: View {
     @State private var isShowingBaseDirectoryPicker = false
     @State private var isShowingAddDirectorySheet = false
     @State private var isReindexing = false
+    @State private var modelTTL: Int = 0  // 0 = never
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
 
@@ -2243,7 +2244,7 @@ struct SettingsView: View {
                                     .textFieldStyle(.roundedBorder)
                                     .frame(width: 100)
                             }
-                            
+
                             // Base directory
                             VStack(alignment: .leading, spacing: 8) {
                                 Label("Base Directory", systemImage: "folder")
@@ -2255,6 +2256,29 @@ struct SettingsView: View {
                                     }
                                     .buttonStyle(.bordered)
                                 }
+                            }
+                        }
+
+                        SettingsGroup(title: "Memory Management") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label("Model TTL", systemImage: "timer")
+                                    Spacer()
+                                    Picker("", selection: $modelTTL) {
+                                        Text("Never").tag(0)
+                                        Text("10 sec").tag(-10)
+                                        Text("5 min").tag(5)
+                                        Text("15 min").tag(15)
+                                        Text("30 min").tag(30)
+                                    }
+                                    .frame(width: 120)
+                                    .onChange(of: modelTTL) { _, newValue in
+                                        saveModelTTL(newValue)
+                                    }
+                                }
+                                Text("Unload CLIP model from memory after idle period. Model files stay cached on disk — no re-download needed.")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.tertiaryText)
                             }
                         }
                     }
@@ -2285,6 +2309,33 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
+
+                    Button(action: {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NSApplication.shared.terminate(nil)
+                        }
+                    }) {
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Image(systemName: "power")
+                                .font(.system(size: 14))
+                            Text("Quit Searchy")
+                                .font(DesignSystem.Typography.callout.weight(.medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.error)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(DesignSystem.Colors.error.opacity(0.1))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .stroke(DesignSystem.Colors.error.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(DesignSystem.Spacing.xl)
             }
@@ -2298,6 +2349,32 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $isShowingAddDirectorySheet) {
             AddDirectorySheet()
+        }
+        .onAppear { fetchModelTTL() }
+    }
+
+    private func fetchModelTTL() {
+        Task {
+            let delegate = await AppDelegate.shared
+            guard let serverURL = await delegate.serverURL else { return }
+            let url = serverURL.appendingPathComponent("model/ttl")
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ttl = json["ttl_minutes"] as? Int else { return }
+            await MainActor.run { self.modelTTL = ttl }
+        }
+    }
+
+    private func saveModelTTL(_ minutes: Int) {
+        Task {
+            let delegate = await AppDelegate.shared
+            guard let serverURL = await delegate.serverURL else { return }
+            let url = serverURL.appendingPathComponent("model/ttl")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["ttl_minutes": minutes])
+            _ = try? await URLSession.shared.data(for: request)
         }
     }
 
@@ -7410,6 +7487,10 @@ struct ContentView: View {
     @State private var previewTimer: Timer? = nil
     @State private var showPreviewPanel = false
     @State private var previewPanelWidth: CGFloat = 300
+    @State private var modelState: String = "pending"
+    @State private var modelMessage: String = ""
+    @State private var modelElapsed: Double = 0
+    @State private var modelPollTimer: Timer? = nil
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -7452,6 +7533,7 @@ struct ContentView: View {
             loadRecentImages()
             loadIndexStats()
             setupPasteMonitor()
+            startModelStatusPolling()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -7460,6 +7542,8 @@ struct ContentView: View {
         .onDisappear {
             searchManager.cancelSearch()
             removePasteMonitor()
+            modelPollTimer?.invalidate()
+            modelPollTimer = nil
         }
     }
 
@@ -7486,6 +7570,45 @@ struct ContentView: View {
 
             // Friendly icon buttons
             HStack(spacing: DesignSystem.Spacing.sm) {
+                // Model loading indicator
+                if modelState == "loading" {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Loading model \(String(format: "%.0fs", modelElapsed))")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                } else if modelState == "ready" && modelElapsed > 0 {
+                    Text("Model ready \(String(format: "%.1fs", modelElapsed))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.green.opacity(0.1))
+                        .clipShape(Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                                withAnimation { self.modelElapsed = 0 }
+                            }
+                        }
+                } else if modelState == "unloaded" {
+                    Text("Model unloaded")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+
                 // Indexing indicator (only when active)
                 if isIndexing {
                     HStack(spacing: 6) {
@@ -11097,6 +11220,62 @@ struct ContentView: View {
                     fileSize: fileSize,
                     lastModified: lastModified
                 )
+            }
+        }
+    }
+
+    private func startSlowModelPolling() {
+        // Poll every 10s to detect TTL unload or reload
+        modelPollTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            Task {
+                let delegate = await AppDelegate.shared
+                guard let serverURL = await delegate.serverURL else { return }
+                let url = serverURL.appendingPathComponent("status")
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let model = json["model"] as? [String: Any],
+                      let state = model["state"] as? String else { return }
+                let message = model["message"] as? String ?? ""
+                let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                await MainActor.run {
+                    let oldState = self.modelState
+                    self.modelState = state
+                    self.modelMessage = message
+                    self.modelElapsed = elapsed
+                    // If model started loading again (after unload + new query), switch to fast polling
+                    if state == "loading" && oldState != "loading" {
+                        self.modelPollTimer?.invalidate()
+                        self.modelPollTimer = nil
+                        self.startModelStatusPolling()
+                    }
+                }
+            }
+        }
+    }
+
+    private func startModelStatusPolling() {
+        modelPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task {
+                let delegate = await AppDelegate.shared
+                guard let serverURL = await delegate.serverURL else { return }
+                let url = serverURL.appendingPathComponent("status")
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let model = json["model"] as? [String: Any],
+                      let state = model["state"] as? String else { return }
+                let message = model["message"] as? String ?? ""
+                let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                await MainActor.run {
+                    self.modelState = state
+                    self.modelMessage = message
+                    self.modelElapsed = elapsed
+                    if state == "ready" || state == "error" {
+                        // Slow down polling once model is stable
+                        self.modelPollTimer?.invalidate()
+                        self.modelPollTimer = nil
+                        self.startSlowModelPolling()
+                    }
+                }
             }
         }
     }
