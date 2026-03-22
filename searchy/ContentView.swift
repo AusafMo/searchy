@@ -2285,6 +2285,33 @@ struct SettingsView: View {
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
+
+                    Button(action: {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NSApplication.shared.terminate(nil)
+                        }
+                    }) {
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Image(systemName: "power")
+                                .font(.system(size: 14))
+                            Text("Quit Searchy")
+                                .font(DesignSystem.Typography.callout.weight(.medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.error)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .fill(DesignSystem.Colors.error.opacity(0.1))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                                .stroke(DesignSystem.Colors.error.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 .padding(DesignSystem.Spacing.xl)
             }
@@ -7410,6 +7437,10 @@ struct ContentView: View {
     @State private var previewTimer: Timer? = nil
     @State private var showPreviewPanel = false
     @State private var previewPanelWidth: CGFloat = 300
+    @State private var modelState: String = "pending"
+    @State private var modelMessage: String = ""
+    @State private var modelElapsed: Double = 0
+    @State private var modelPollTimer: Timer? = nil
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -7452,6 +7483,7 @@ struct ContentView: View {
             loadRecentImages()
             loadIndexStats()
             setupPasteMonitor()
+            startModelStatusPolling()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -7460,6 +7492,8 @@ struct ContentView: View {
         .onDisappear {
             searchManager.cancelSearch()
             removePasteMonitor()
+            modelPollTimer?.invalidate()
+            modelPollTimer = nil
         }
     }
 
@@ -7486,6 +7520,36 @@ struct ContentView: View {
 
             // Friendly icon buttons
             HStack(spacing: DesignSystem.Spacing.sm) {
+                // Model loading indicator
+                if modelState == "loading" {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                        Text("Loading model \(String(format: "%.0fs", modelElapsed))")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                } else if modelState == "ready" && modelElapsed > 0 {
+                    Text("Model ready \(String(format: "%.1fs", modelElapsed))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.green.opacity(0.1))
+                        .clipShape(Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                                withAnimation { self.modelElapsed = 0 }
+                            }
+                        }
+                }
+
                 // Indexing indicator (only when active)
                 if isIndexing {
                     HStack(spacing: 6) {
@@ -11097,6 +11161,31 @@ struct ContentView: View {
                     fileSize: fileSize,
                     lastModified: lastModified
                 )
+            }
+        }
+    }
+
+    private func startModelStatusPolling() {
+        modelPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task {
+                let delegate = await AppDelegate.shared
+                guard let serverURL = await delegate.serverURL else { return }
+                let url = serverURL.appendingPathComponent("status")
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let model = json["model"] as? [String: Any],
+                      let state = model["state"] as? String else { return }
+                let message = model["message"] as? String ?? ""
+                let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                await MainActor.run {
+                    self.modelState = state
+                    self.modelMessage = message
+                    self.modelElapsed = elapsed
+                    if state == "ready" || state == "error" {
+                        self.modelPollTimer?.invalidate()
+                        self.modelPollTimer = nil
+                    }
+                }
             }
         }
     }

@@ -72,6 +72,41 @@ def get_searcher():
         _searcher = CLIPSearcher()
     return _searcher
 
+# Model loading state
+_model_loading_status = {
+    "state": "pending",  # pending, loading, ready, error
+    "message": "",
+    "started_at": None,
+    "elapsed_seconds": 0
+}
+
+def _load_model_background():
+    """Load CLIP model in background thread after server starts."""
+    global _model_loading_status
+    _model_loading_status["state"] = "loading"
+    _model_loading_status["message"] = "Loading CLIP model..."
+    _model_loading_status["started_at"] = time.time()
+    try:
+        model_manager.set_config_path(DEFAULT_DATA_DIR)
+        model_manager.ensure_loaded()
+        elapsed = time.time() - _model_loading_status["started_at"]
+        _model_loading_status["state"] = "ready"
+        _model_loading_status["message"] = f"Model loaded in {elapsed:.1f}s"
+        _model_loading_status["elapsed_seconds"] = elapsed
+        logger.info(f"CLIP model loaded in {elapsed:.1f}s")
+    except Exception as e:
+        elapsed = time.time() - _model_loading_status["started_at"]
+        _model_loading_status["state"] = "error"
+        _model_loading_status["message"] = str(e)
+        _model_loading_status["elapsed_seconds"] = elapsed
+        logger.error(f"Failed to load CLIP model: {e}")
+
+@app.on_event("startup")
+def startup_load_model():
+    """Kick off model loading in a background thread on server start."""
+    thread = Thread(target=_load_model_background, daemon=True)
+    thread.start()
+
 
 class SearchRequest(BaseModel):
     query: str
@@ -400,7 +435,19 @@ def find_similar_images(request: SimilarRequest):
 
 @app.get("/status")
 def get_status():
-    return {"status": "Server is running"}
+    elapsed = 0
+    if _model_loading_status["started_at"] and _model_loading_status["state"] == "loading":
+        elapsed = time.time() - _model_loading_status["started_at"]
+    else:
+        elapsed = _model_loading_status["elapsed_seconds"]
+    return {
+        "status": "Server is running",
+        "model": {
+            "state": _model_loading_status["state"],
+            "message": _model_loading_status["message"],
+            "elapsed_seconds": round(elapsed, 1)
+        }
+    }
 
 
 # ============== Model Configuration Endpoints ==============
