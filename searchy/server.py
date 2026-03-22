@@ -140,7 +140,7 @@ def get_file_metadata(path: str) -> dict:
                 "date": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
                 "type": os.path.splitext(path)[1].lower().lstrip('.')
             }
-    except:
+    except Exception:
         pass
     return {"size": 0, "date": None, "type": ""}
 
@@ -578,7 +578,7 @@ def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
                             creation_time = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
                             all_images.append((path, creation_time, False))  # Not pending
                             indexed_paths.add(path)
-                        except:
+                        except Exception:
                             continue
 
         # Add pending images (not yet indexed)
@@ -1019,7 +1019,7 @@ def get_sync_status():
 
 # ============== Face Recognition Endpoints ==============
 
-from face_recognition_service import get_face_service
+from face_recognition_service import get_face_service  # noqa: E402
 
 class FaceScanRequest(BaseModel):
     data_dir: str = DEFAULT_DATA_DIR
@@ -1129,7 +1129,7 @@ def load_pinned_clusters(data_dir: str) -> List[str]:
             with open(filepath, 'r') as f:
                 data = json.load(f)
                 return data.get('pinned', [])
-        except:
+        except Exception:
             pass
     return []
 
@@ -1204,7 +1204,7 @@ def load_hidden_clusters(data_dir: str) -> List[str]:
             with open(filepath, 'r') as f:
                 data = json.load(f)
                 return data.get('hidden', [])
-        except:
+        except Exception:
             pass
     return []
 
@@ -1515,21 +1515,6 @@ def stop_face_scan(data_dir: str = DEFAULT_DATA_DIR):
         return {"error": str(e)}
 
 
-@app.post("/face-recluster")
-def recluster_faces(data_dir: str = DEFAULT_DATA_DIR, threshold: float = 0.55):
-    """Re-cluster faces with a new threshold without rescanning."""
-    try:
-        face_service = get_face_service(data_dir)
-        clusters = face_service.cluster_faces(similarity_threshold=threshold)
-        return {
-            "status": "success",
-            "threshold": threshold,
-            "total_clusters": len(clusters),
-            "total_faces": len(face_service.faces)
-        }
-    except Exception as e:
-        logger.error(f"Error re-clustering faces: {e}")
-        return {"error": str(e)}
 
 
 # ============== Volume Management Endpoints ==============

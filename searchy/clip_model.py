@@ -26,7 +26,7 @@ import time
 import torch
 import numpy as np
 import threading
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from PIL import Image
 
 # Lazy imports to avoid loading transformers until needed
@@ -162,13 +162,13 @@ class ModelManager:
 
         if torch.backends.mps.is_available():
             self._device = torch.device("mps")
-            print(f"🚀 Using Apple Silicon GPU (MPS)", file=sys.stderr)
+            print("🚀 Using Apple Silicon GPU (MPS)", file=sys.stderr)
         elif torch.cuda.is_available():
             self._device = torch.device("cuda")
-            print(f"🚀 Using CUDA GPU", file=sys.stderr)
+            print("🚀 Using CUDA GPU", file=sys.stderr)
         else:
             self._device = torch.device("cpu")
-            print(f"💻 Using CPU (no GPU acceleration)", file=sys.stderr)
+            print("💻 Using CPU (no GPU acceleration)", file=sys.stderr)
 
         return self._device
 
