@@ -14,8 +14,6 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from PIL import Image
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +37,12 @@ def unload_models():
     try:
         import keras
         keras.backend.clear_session()
-    except:
+    except Exception:
         pass
     try:
         import gc
         gc.collect()
-    except:
+    except Exception:
         pass
     logger.info("Models unloaded")
 

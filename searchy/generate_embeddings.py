@@ -19,7 +19,7 @@ import time
 from PIL import Image
 
 # Import centralized model manager
-from clip_model import model_manager, get_device
+from clip_model import model_manager
 
 # OCR support using macOS Vision framework
 try:
@@ -168,7 +168,6 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
 
     # Ensure model is loaded (uses singleton)
     model_manager.ensure_loaded()
-    device = get_device()
 
     # Filter out hidden, system, and package files (handle None)
     if new_files is None:
@@ -298,7 +297,6 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
 
         print("Loading CLIP model...", file=sys.stderr)
         model_manager.ensure_loaded()
-        device = get_device()
 
         print(f"Scanning for images in {len(image_dirs)} folder(s)...", file=sys.stderr)
         image_paths = []
@@ -327,7 +325,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                             print(f"Skipping already indexed: {file}", file=sys.stderr)
 
         if not image_paths:
-            print(f"No new images found in specified folders", file=sys.stderr)
+            print("No new images found in specified folders", file=sys.stderr)
             return
 
         total_images = len(image_paths)

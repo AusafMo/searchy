@@ -194,7 +194,7 @@ class ImageEventHandler(FileSystemEventHandler):
                         with open(file_path, 'rb') as f:
                             f.read(1)  # Just read 1 byte to verify
                         files_to_index.append(file_path)
-                    except Exception as e:
+                    except Exception:
                         print(f"File not ready yet, will retry: {os.path.basename(file_path)}", file=sys.stderr)
                         continue
                 else:
