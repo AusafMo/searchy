@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Archive
+        run: make archive
+
+      - name: Export
+        run: make export
+
+      - name: Create DMG
+        run: make dmg
+
+      - name: Get SHA256
+        id: sha
+        run: echo "sha=$(shasum -a 256 build/Searchy.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          gh release create "$TAG_NAME" \
+            build/Searchy.dmg \
+            --title "Searchy $VERSION" \
+            --notes "## Searchy $VERSION
+
+          ### Install
+          \`\`\`
+          brew install --cask ausafmo/searchy/searchy
+          \`\`\`
+
+          ### DMG SHA256
+          \`\`\`
+          $SHA
+          \`\`\`"
+
+      - name: Print summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **SHA256:** \`$SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Update Homebrew cask with the SHA above." >> "$GITHUB_STEP_SUMMARY"
