@@ -2032,6 +2032,7 @@ struct SettingsView: View {
     @State private var isShowingBaseDirectoryPicker = false
     @State private var isShowingAddDirectorySheet = false
     @State private var isReindexing = false
+    @State private var modelTTL: Int = 0  // 0 = never
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
 
@@ -2243,7 +2244,7 @@ struct SettingsView: View {
                                     .textFieldStyle(.roundedBorder)
                                     .frame(width: 100)
                             }
-                            
+
                             // Base directory
                             VStack(alignment: .leading, spacing: 8) {
                                 Label("Base Directory", systemImage: "folder")
@@ -2255,6 +2256,29 @@ struct SettingsView: View {
                                     }
                                     .buttonStyle(.bordered)
                                 }
+                            }
+                        }
+
+                        SettingsGroup(title: "Memory Management") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label("Model TTL", systemImage: "timer")
+                                    Spacer()
+                                    Picker("", selection: $modelTTL) {
+                                        Text("Never").tag(0)
+                                        Text("10 sec").tag(-10)
+                                        Text("5 min").tag(5)
+                                        Text("15 min").tag(15)
+                                        Text("30 min").tag(30)
+                                    }
+                                    .frame(width: 120)
+                                    .onChange(of: modelTTL) { _, newValue in
+                                        saveModelTTL(newValue)
+                                    }
+                                }
+                                Text("Unload CLIP model from memory after idle period. Model files stay cached on disk — no re-download needed.")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(DesignSystem.Colors.tertiaryText)
                             }
                         }
                     }
@@ -2325,6 +2349,32 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $isShowingAddDirectorySheet) {
             AddDirectorySheet()
+        }
+        .onAppear { fetchModelTTL() }
+    }
+
+    private func fetchModelTTL() {
+        Task {
+            let delegate = await AppDelegate.shared
+            guard let serverURL = await delegate.serverURL else { return }
+            let url = serverURL.appendingPathComponent("model/ttl")
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ttl = json["ttl_minutes"] as? Int else { return }
+            await MainActor.run { self.modelTTL = ttl }
+        }
+    }
+
+    private func saveModelTTL(_ minutes: Int) {
+        Task {
+            let delegate = await AppDelegate.shared
+            guard let serverURL = await delegate.serverURL else { return }
+            let url = serverURL.appendingPathComponent("model/ttl")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["ttl_minutes": minutes])
+            _ = try? await URLSession.shared.data(for: request)
         }
     }
 
@@ -7548,6 +7598,15 @@ struct ContentView: View {
                                 withAnimation { self.modelElapsed = 0 }
                             }
                         }
+                } else if modelState == "unloaded" {
+                    Text("Model unloaded")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
 
                 // Indexing indicator (only when active)
@@ -11165,6 +11224,35 @@ struct ContentView: View {
         }
     }
 
+    private func startSlowModelPolling() {
+        // Poll every 10s to detect TTL unload or reload
+        modelPollTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            Task {
+                let delegate = await AppDelegate.shared
+                guard let serverURL = await delegate.serverURL else { return }
+                let url = serverURL.appendingPathComponent("status")
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let model = json["model"] as? [String: Any],
+                      let state = model["state"] as? String else { return }
+                let message = model["message"] as? String ?? ""
+                let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                await MainActor.run {
+                    let oldState = self.modelState
+                    self.modelState = state
+                    self.modelMessage = message
+                    self.modelElapsed = elapsed
+                    // If model started loading again (after unload + new query), switch to fast polling
+                    if state == "loading" && oldState != "loading" {
+                        self.modelPollTimer?.invalidate()
+                        self.modelPollTimer = nil
+                        self.startModelStatusPolling()
+                    }
+                }
+            }
+        }
+    }
+
     private func startModelStatusPolling() {
         modelPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             Task {
@@ -11182,8 +11270,10 @@ struct ContentView: View {
                     self.modelMessage = message
                     self.modelElapsed = elapsed
                     if state == "ready" || state == "error" {
+                        // Slow down polling once model is stable
                         self.modelPollTimer?.invalidate()
                         self.modelPollTimer = nil
+                        self.startSlowModelPolling()
                     }
                 }
             }
