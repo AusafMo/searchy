@@ -7491,6 +7491,8 @@ struct ContentView: View {
     @State private var modelMessage: String = ""
     @State private var modelElapsed: Double = 0
     @State private var modelPollTimer: Timer? = nil
+    @State private var updateAvailable: String? = nil  // nil = no update, else new version string
+    @State private var showUpdateBanner = false
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -7502,6 +7504,42 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 // Friendly header
                 modernHeader
+
+                // Update banner
+                if showUpdateBanner, let newVersion = updateAvailable {
+                    HStack(spacing: DesignSystem.Spacing.sm) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 13))
+                        Text("Searchy v\(newVersion) available")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("—")
+                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                        Text("brew upgrade --cask searchy")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("brew upgrade --cask searchy", forType: .string)
+                        }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help("Copy command")
+                        Spacer()
+                        Button(action: { withAnimation { showUpdateBanner = false } }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .foregroundColor(DesignSystem.Colors.accent)
+                    .padding(.horizontal, DesignSystem.Spacing.lg)
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+                    .background(DesignSystem.Colors.accent.opacity(0.08))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
                 // Tab Picker
                 tabPicker
@@ -7534,6 +7572,7 @@ struct ContentView: View {
             loadIndexStats()
             setupPasteMonitor()
             startModelStatusPolling()
+            checkForUpdates()
             // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
@@ -11220,6 +11259,24 @@ struct ContentView: View {
                     fileSize: fileSize,
                     lastModified: lastModified
                 )
+            }
+        }
+    }
+
+    private func checkForUpdates() {
+        Task {
+            guard let url = URL(string: "https://api.github.com/repos/AusafMo/searchy/releases/latest") else { return }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else { return }
+            // Strip "v" prefix: "v4.0" -> "4.0"
+            let remoteVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
+            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            if remoteVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+                await MainActor.run {
+                    self.updateAvailable = remoteVersion
+                    withAnimation { self.showUpdateBanner = true }
+                }
             }
         }
     }
