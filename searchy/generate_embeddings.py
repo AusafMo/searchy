@@ -14,12 +14,13 @@ import numpy as np
 import sys
 import json
 import argparse
-import re
 import time
 from PIL import Image
 
 # Import centralized model manager
 from clip_model import model_manager
+from constants import SKIP_DIRS, IMAGE_EXTENSIONS
+from utils import matches_filter, is_user_image
 
 # OCR support using macOS Vision framework
 try:
@@ -94,45 +95,6 @@ def resize_image_for_fast_indexing(image, max_dimension=384):
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-def matches_filter(filename, filter_type, filter_value):
-    """Check if filename matches the filter criteria"""
-    if not filter_value or filter_type == "all":
-        return True
-
-    filename_lower = filename.lower()
-    filter_lower = filter_value.lower()
-
-    if filter_type == "starts-with":
-        return filename_lower.startswith(filter_lower)
-    elif filter_type == "ends-with":
-        return filename_lower.endswith(filter_lower)
-    elif filter_type == "contains":
-        return filter_lower in filename_lower
-    elif filter_type == "regex":
-        try:
-            return bool(re.search(filter_value, filename, re.IGNORECASE))
-        except re.error:
-            return False
-    return True
-
-
-# Directories to skip (system, packages, caches, etc.)
-SKIP_DIRS = {
-    'site-packages', 'node_modules', 'vendor', '__pycache__',
-    'env', 'venv', '.venv', 'virtualenv',
-    'Library', 'Caches', 'cache', '.cache',
-    'build', 'dist', 'target', '.git', '.svn',
-    'DerivedData', 'xcuserdata', 'Pods',
-    '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
-}
-
-
-def is_user_image(path):
-    """Check if path is a user image (not system/package file)."""
-    if os.path.basename(path).startswith('.'):
-        return False
-    parts = path.split(os.sep)
-    return not any(part in SKIP_DIRS for part in parts)
 
 
 def index_images_with_clip(output_dir, incremental=False, new_files=None,
@@ -312,7 +274,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                     if file.startswith('.'):
                         continue
 
-                    if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
+                    if os.path.splitext(file.lower())[1] in IMAGE_EXTENSIONS:
                         # Apply filter if specified
                         if filter_type and filter_value:
                             if not matches_filter(file, filter_type, filter_value):
