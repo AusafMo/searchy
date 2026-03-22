@@ -1,9 +1,9 @@
 # Searchy - Information Security & Privacy Audit Report
 
 **Application:** Searchy (macOS Semantic Image Search)
-**Audit Date:** January 2026
-**Version:** v1.2
-**Status:** Updated with remediation + threat model analysis
+**Audit Date:** March 2026
+**Version:** v1.3
+**Status:** Updated with model TTL, update checker, and resource cleanup audit
 
 ---
 
@@ -16,9 +16,19 @@ This security audit evaluates the Searchy application's data handling, privacy p
 | Severity | Total | Resolved | Remaining | Won't Fix | Needs Investigation |
 |----------|-------|----------|-----------|-----------|---------------------|
 | Critical | 2 | 1 | 1 | 0 | 0 |
-| High | 6 | 1 | 2 | 3 | 0 |
-| Medium | 10 | 1 | 3 | 3 | 3 |
-| Low | 6 | 1 | 2 | 2 | 1 |
+| High | 7 | 1 | 3 | 3 | 0 |
+| Medium | 12 | 1 | 4 | 3 | 4 |
+| Low | 7 | 2 | 2 | 2 | 1 |
+
+### Changes in v1.3
+- **SEC-026 ADDED:** External network call for update check (GitHub API)
+- **SEC-027 ADDED:** TTL input validation missing
+- **SEC-028 ADDED:** Race condition in TTL timestamp access
+- **SEC-029 ADDED:** Status endpoint information leakage (idle timing)
+- **SEC-014 PARTIALLY RESOLVED:** Auto-cleanup of deleted images now implemented via `/cleanup` and startup sync
+- **Hardcoded paths removed:** All `data_dir` defaults now use `DEFAULT_DATA_DIR`
+- **Process cleanup improved:** Synchronous termination on app quit
+- **Deprecated API migrated:** `on_event("startup")` → FastAPI `lifespan`
 
 ### Changes in v1.2
 - **SEC-004 RESOLVED:** CORS now restricted to localhost origins
@@ -40,9 +50,10 @@ This security audit evaluates the Searchy application's data handling, privacy p
 | Image embeddings (512-1024 dim vectors) | `index.pkl` | None | Persistent |
 | Face embeddings | `face_index.pkl` | None | Persistent |
 | OCR extracted text | `index.pkl` | None | Persistent |
-| Model preferences | `model_config.json` | None | Persistent |
+| Model preferences & TTL | `model_config.json` | None | Persistent |
 | Watched directories | UserDefaults | System | Persistent |
 | Recent searches | Memory only | N/A | Session |
+| Model usage timestamps | Memory only | N/A | Session |
 
 ### 1.2 Sensitive Data Identified
 
@@ -141,6 +152,32 @@ uvicorn.run(app, host="127.0.0.1", port=port)
 - A malicious model file could compromise the system on load
 - This is by design in transformers (models can have custom code)
 - Recommendation: Only load models from trusted sources, consider `trust_remote_code=False`
+
+**[MEDIUM] SEC-026: External Network Call for Update Check**
+- App makes unauthenticated HTTPS call to `api.github.com/repos/AusafMo/searchy/releases/latest` on every launch
+- No certificate pinning, default URLSession timeout
+- Reveals to GitHub that a Searchy instance is running (IP address, timing)
+- Response parsed without Content-Type validation
+- **Mitigations already in place:** HTTPS (encrypted in transit), read-only API call, no user data sent
+- Recommendation: Add request timeout, validate response format, consider caching to reduce call frequency
+
+**[MEDIUM] SEC-027: TTL Endpoint Input Validation**
+- `/model/ttl` POST endpoint accepts any integer without bounds checking
+- Negative values have undocumented behavior (interpreted as seconds for testing)
+- Very large values accepted without limit
+- Recommendation: Validate TTL is one of allowed values (0, 5, 15, 30), reject others
+
+**[HIGH] SEC-028: Race Condition in TTL Timestamp**
+- `_last_used_at` timestamp read/written from multiple threads without lock
+- TTL checker thread reads timestamp while search threads write it
+- Model could theoretically be unloaded between `_touch()` and actual model use
+- **Mitigations already in place:** `unload_model()` acquires `_model_lock`, `ensure_loaded()` touches before loading
+- Recommendation: Use `threading.Lock` for `_last_used_at` access, or accept as low practical risk
+
+**[MEDIUM] SEC-029: Status Endpoint Information Leakage**
+- `/status` returns `idle_seconds` and `ttl_minutes` — reveals model usage timing
+- Combined with model state, allows fingerprinting of user activity patterns
+- Recommendation: Only expose timing info to authenticated clients (low priority given localhost-only binding)
 
 ---
 
@@ -330,6 +367,8 @@ These areas were identified but not fully audited. They require further investig
 | Tampered pickle file | Medium | ⚠️ Open - pickle allows code execution (SEC-003) |
 | API path traversal | Medium | 🔍 Needs investigation (SEC-020) |
 | Process argument exposure | Low | ⚠️ Open - paths visible in ps (SEC-025) |
+| GitHub API MITM | Medium | ⚠️ Open - no cert pinning on update check (SEC-026) |
+| TTL manipulation | Medium | ⚠️ Open - no input validation (SEC-027) |
 
 ### Path 2: Attacker Already on System (Limited Mitigation Value)
 
@@ -391,6 +430,7 @@ Index encryption would provide value in these specific scenarios:
 | SEC-003 | Pickle code execution | Replace with JSON/SQLite - eliminates persistence attack vector |
 | SEC-021 | Transformers code execution | Use `trust_remote_code=False`, verify model sources |
 | SEC-017 | No biometric consent | Add opt-in for face recognition - legal compliance (BIPA) |
+| SEC-028 | TTL race condition | Add lock for `_last_used_at` or accept as low practical risk |
 
 **Medium Priority:**
 
@@ -399,7 +439,10 @@ Index encryption would provide value in these specific scenarios:
 | SEC-007 | Model downloads | Add checksum verification for HuggingFace models |
 | SEC-011 | DeepFace models | Pre-bundle or verify checksums |
 | SEC-013 | No exclusion patterns | Add `.noindex` support |
-| SEC-014 | No data expiration | Auto-cleanup orphaned entries |
+| SEC-014 | No data expiration | Partially resolved — startup sync now cleans deleted images |
+| SEC-026 | Update check network call | Add timeout, cache results, validate response |
+| SEC-027 | TTL input validation | Restrict to allowed values (0, 5, 15, 30) |
+| SEC-029 | Status info leakage | Low priority given localhost binding |
 
 **Low Priority:**
 
@@ -440,6 +483,7 @@ Index encryption would provide value in these specific scenarios:
 | v1.0 | Jan 2026 | Initial audit |
 | v1.1 | Jan 2026 | Fixed SEC-004 (CORS), SEC-012 (deps) |
 | v1.2 | Jan 2026 | Fixed SEC-019 (127.0.0.1 binding), added threat model analysis, documented "Won't Fix" rationale, added SEC-020 to SEC-025 for additional attack surface |
+| v1.3 | Mar 2026 | Audited model TTL feature, update checker, resource cleanup. Added SEC-026 to SEC-029. Partially resolved SEC-014. |
 
 ---
 

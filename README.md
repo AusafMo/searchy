@@ -245,7 +245,7 @@ Fully local. No cloud, no telemetry, no external requests after initial model do
 - Server binds to 127.0.0.1 only
 - Dependencies pinned
 
-📄 **[Full Security Audit](security-audit/AUDIT_v1.2.md)**
+📄 **[Full Security Audit](security-audit/AUDIT_v1.3.md)**
 
 ---
 
