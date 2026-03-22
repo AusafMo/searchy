@@ -312,15 +312,15 @@ These areas were identified but not fully audited. They require further investig
 
 ### 7.1 Swift Application Security
 
-**[MEDIUM - NEEDS INVESTIGATION] SEC-022: Swift App Security Audit Incomplete**
+**[MEDIUM - PARTIALLY RESOLVED] SEC-022: Swift App Security Audit Incomplete**
 - Primary audit focused on Python backend
 - Swift/SwiftUI frontend not fully reviewed for:
   - Secure storage of watched directories (UserDefaults vs Keychain)
   - Memory handling of sensitive data (search queries, paths)
   - IPC security between Swift app and Python server
-  - Hardcoded paths or credentials
-  - Proper certificate pinning if any HTTPS calls
-- Recommendation: Conduct dedicated Swift security review
+  - ~~Hardcoded paths or credentials~~ — **Resolved v1.3:** all hardcoded paths replaced with dynamic `DEFAULT_DATA_DIR` and `os.path.expanduser`
+  - ~~Proper certificate pinning if any HTTPS calls~~ — **Identified v1.3:** update checker calls GitHub API without cert pinning (see SEC-026)
+- Recommendation: Conduct dedicated Swift security review for remaining items
 
 ### 7.2 Information Leakage
 
