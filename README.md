@@ -22,14 +22,18 @@ https://github.com/user-attachments/assets/d9753770-6b62-40f5-be5a-e625a81e5a1d
 
 ## Installation
 
-### Download (Recommended)
+### Homebrew (Recommended)
 
-1. Download `Searchy.dmg` from [Releases](https://github.com/AusafMo/searchy/releases)
+```bash
+brew install --cask ausafmo/searchy/searchy
+```
+
+### Manual Download
+
+1. Download `Searchy-v4.0.dmg` from [Releases](https://github.com/AusafMo/searchy/releases)
 2. Drag to Applications
 3. Right-click → Open (first time only, macOS security)
 4. Click **Start Setup** — Python & CLIP models install automatically (3-5 min)
-
-That's it. No manual Python installation required.
 
 ### Build from Source
 
@@ -73,6 +77,8 @@ Esc          Close window
 | **Auto-Indexing** | Watch directories with filters, incremental indexing |
 | **External Volumes** | Index and search images on external drives |
 | **Model Selection** | Multiple CLIP models, switch without re-indexing |
+| **Model TTL** | Auto-unload CLIP model after idle period to free RAM/GPU, reloads from disk cache on next search |
+| **Update Checker** | Notifies when a new version is available via Homebrew |
 | **Privacy** | Fully local, no cloud, no telemetry, GPU accelerated via Metal |
 
 ---
@@ -128,6 +134,8 @@ The FastAPI server runs on `localhost:7860` (or next available port).
 | `/recent` | GET | Recent images |
 | `/face-scan` | POST | Start face detection |
 | `/face-clusters` | GET | Get face groups |
+| `/status` | GET | Server + model loading state |
+| `/model/ttl` | GET/POST | Get/set model TTL |
 
 ### Custom Backend
 
@@ -207,6 +215,9 @@ python generate_embeddings.py /path/to/images --batch-size 64 --fast
 - [x] Similar image search
 - [x] External volume indexing
 - [x] OCR text extraction & hybrid search
+- [x] Model TTL & memory management
+- [x] Homebrew tap distribution
+- [x] In-app update notifications
 - [ ] Alternative/smaller models
 - [ ] Albums, tags, smart collections
 - [ ] Timeline and map views
