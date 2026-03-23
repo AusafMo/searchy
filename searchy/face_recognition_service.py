@@ -13,6 +13,8 @@ import numpy as np
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from PIL import Image
+
+from atomic_write import atomic_pickle_dump
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -175,8 +177,7 @@ class FaceRecognitionService:
     def _save_faces(self):
         """Save faces to disk."""
         try:
-            with open(self.faces_file, 'wb') as f:
-                pickle.dump([f.to_dict() for f in self.faces], f)
+            atomic_pickle_dump([f.to_dict() for f in self.faces], self.faces_file)
             logger.info(f"Saved {len(self.faces)} faces to disk")
         except Exception as e:
             logger.error(f"Error saving faces: {e}")
@@ -195,8 +196,7 @@ class FaceRecognitionService:
     def _save_scanned_paths(self):
         """Save scanned paths to disk."""
         try:
-            with open(self.scanned_paths_file, 'wb') as f:
-                pickle.dump(self.scanned_paths, f)
+            atomic_pickle_dump(self.scanned_paths, self.scanned_paths_file)
         except Exception as e:
             logger.error(f"Error saving scanned paths: {e}")
 
@@ -253,8 +253,7 @@ class FaceRecognitionService:
     def _save_orphaned_faces(self):
         """Save orphaned faces to disk."""
         try:
-            with open(self.orphaned_faces_file, 'wb') as f:
-                pickle.dump([f.to_dict() for f in self.orphaned_faces], f)
+            atomic_pickle_dump([f.to_dict() for f in self.orphaned_faces], self.orphaned_faces_file)
         except Exception as e:
             logger.error(f"Error saving orphaned faces: {e}")
 

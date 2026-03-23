@@ -2,6 +2,7 @@ import os
 import re
 import argparse
 import logging
+import logging.handlers
 import pickle
 import time
 from datetime import datetime
@@ -13,15 +14,34 @@ from pydantic import BaseModel
 from similarity_search import CLIPSearcher
 from generate_embeddings import index_images_with_clip
 from clip_model import model_manager, AVAILABLE_MODELS
+from atomic_write import atomic_pickle_dump
 import uvicorn
 import numpy as np
 from threading import Thread
 
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~/Library/Application Support"), "searchy")
+
+# Set up logging: console + rotating file in app support dir
+log_dir = os.path.join(DEFAULT_DATA_DIR, "logs")
+os.makedirs(log_dir, exist_ok=True)
+
+log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+
+# File handler: 5MB max, keep 3 rotated files
+file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(log_dir, "server.log"),
+    maxBytes=5 * 1024 * 1024,
+    backupCount=3,
+)
+file_handler.setFormatter(log_formatter)
+
+logging.basicConfig(level=logging.INFO, handlers=[console_handler, file_handler])
+logger = logging.getLogger(__name__)
 
 
 # Defined early, references _load_model_background and _ttl_checker below
@@ -873,8 +893,7 @@ def cleanup_deleted_images(data_dir: str) -> dict:
             'ocr_texts': new_ocr_texts
         }
 
-        with open(filename, 'wb') as f:
-            pickle.dump(cleaned_data, f)
+        atomic_pickle_dump(cleaned_data, filename)
 
         logger.info(f"✅ Cleanup complete: removed {removed_count} deleted images, {len(new_paths)} remaining")
         return {"removed": removed_count, "remaining": len(new_paths), "status": "cleaned"}

@@ -6,10 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-
-/* End PBXBuildFile section */
-
 /* Begin PBXContainerItemProxy section */
 		9AF0D5F32CFB9A070018FB8A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -32,7 +28,6 @@
 		9AF0D5E12CFB9A060018FB8A /* searchy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = searchy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5F22CFB9A070018FB8A /* searchyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9AF0D5FC2CFB9A070018FB8A /* searchyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = searchyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
