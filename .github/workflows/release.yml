@@ -36,7 +36,19 @@ jobs:
           cp -R build/Searchy.xcarchive/Products/Applications/searchy.app build/export/
 
       - name: Create DMG
-        run: make dmg
+        run: |
+          mkdir -p build/dmg
+          cp -R build/export/searchy.app build/dmg/
+          create-dmg \
+            --volname "Searchy" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 100 \
+            --icon "searchy.app" 180 190 \
+            --hide-extension "searchy.app" \
+            --app-drop-link 480 190 \
+            build/Searchy.dmg \
+            build/dmg
 
       - name: Get SHA256
         id: sha
