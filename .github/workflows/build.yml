@@ -25,12 +25,13 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Lint Python
+      - name: Set up Python venv
         run: |
-          python3 -m pip install ruff
-          python3 -m ruff check searchy/*.py
+          python3 -m venv .venv
+          .venv/bin/pip install ruff pytest
+
+      - name: Lint Python
+        run: .venv/bin/ruff check searchy/*.py
 
       - name: Test Python
-        run: |
-          python3 -m pip install pytest
-          python3 -m pytest searchy/tests/ -x -q
+        run: .venv/bin/pytest searchy/tests/ -x -q
