@@ -27,10 +27,10 @@ jobs:
 
       - name: Lint Python
         run: |
-          pip install ruff
-          ruff check searchy/*.py
+          python3 -m pip install ruff
+          python3 -m ruff check searchy/*.py
 
       - name: Test Python
         run: |
-          pip install pytest
+          python3 -m pip install pytest
           python3 -m pytest searchy/tests/ -x -q
