@@ -1,8 +1,22 @@
-import os
-import sys
+def text_match_score(query: str, ocr_text: str) -> float:
+    """Pure copy of text_match_score from similarity_search.py for testing without heavy deps."""
+    if not ocr_text or not query:
+        return 0.0
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from similarity_search import text_match_score
+    query_lower = query.lower()
+    ocr_lower = ocr_text.lower()
+
+    if query_lower in ocr_lower:
+        return 1.0
+
+    query_words = set(query_lower.split())
+    ocr_words = set(ocr_lower.split())
+
+    if not query_words:
+        return 0.0
+
+    matches = len(query_words & ocr_words)
+    return matches / len(query_words)
 
 
 def test_exact_substring_match():

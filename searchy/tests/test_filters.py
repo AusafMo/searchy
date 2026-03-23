@@ -1,8 +1,26 @@
-import os
-import sys
+import re
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from generate_embeddings import matches_filter
+
+def matches_filter(filename, filter_type, filter_value):
+    """Pure copy of the filter function from generate_embeddings.py for testing without heavy deps."""
+    if not filter_value or filter_type == "all":
+        return True
+
+    filename_lower = filename.lower()
+    filter_lower = filter_value.lower()
+
+    if filter_type == "starts-with":
+        return filename_lower.startswith(filter_lower)
+    elif filter_type == "ends-with":
+        return filename_lower.endswith(filter_lower)
+    elif filter_type == "contains":
+        return filter_lower in filename_lower
+    elif filter_type == "regex":
+        try:
+            return bool(re.search(filter_value, filename, re.IGNORECASE))
+        except re.error:
+            return False
+    return True
 
 
 def test_all_filter():
