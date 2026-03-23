@@ -28,6 +28,14 @@ https://github.com/user-attachments/assets/d9753770-6b62-40f5-be5a-e625a81e5a1d
 brew install --cask ausafmo/searchy/searchy
 ```
 
+### Uninstall
+
+```bash
+brew uninstall --cask searchy
+# Remove app data (~2GB: venv, model weights, indexes)
+rm -rf ~/Library/Application\ Support/searchy
+```
+
 ### Manual Download
 
 1. Download `Searchy-v4.0.dmg` from [Releases](https://github.com/AusafMo/searchy/releases)

@@ -5,12 +5,13 @@ import os
 import sys
 import json
 
+from atomic_write import atomic_pickle_dump
+
 def save_embeddings(embeddings, image_paths, data_dir):
     try:
         filename = os.path.join(data_dir, 'image_index.bin')
         data = {'embeddings': embeddings, 'image_paths': image_paths}
-        with open(filename, 'wb') as f:
-            pickle.dump(data, f)
+        atomic_pickle_dump(data, filename)
         return True
     except Exception as e:
         print(json.dumps({"error": str(e)}))

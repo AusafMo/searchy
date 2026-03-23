@@ -18,6 +18,8 @@ import re
 import time
 from PIL import Image
 
+from atomic_write import atomic_pickle_dump
+
 # Import centralized model manager
 from clip_model import model_manager
 
@@ -262,8 +264,7 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
         'ocr_texts': all_ocr_texts
     }
 
-    with open(output_file, 'wb') as f:
-        pickle.dump(data, f)
+    atomic_pickle_dump(data, output_file)
 
     # Count images with OCR text
     ocr_count = sum(1 for t in ocr_texts if t.strip())
@@ -343,8 +344,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                 'image_paths': [],
                 'ocr_texts': []
             }
-            with open(output_file, 'wb') as f:
-                pickle.dump(empty_data, f)
+            atomic_pickle_dump(empty_data, output_file)
             print("Created initial empty index file", file=sys.stderr)
 
         embeddings = []
@@ -405,8 +405,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                     'image_paths': current_all_paths,
                     'ocr_texts': current_all_ocr_texts
                 }
-                with open(output_file, 'wb') as f:
-                    pickle.dump(temp_data, f)
+                atomic_pickle_dump(temp_data, output_file)
 
                 print(json.dumps({
                     "type": "progress",
@@ -451,8 +450,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
             'ocr_texts': all_ocr_texts
         }
 
-        with open(output_file, 'wb') as f:
-            pickle.dump(data, f)
+        atomic_pickle_dump(data, output_file)
 
         total_time = time.time() - start_time
         images_per_sec = len(valid_paths) / total_time if total_time > 0 else 0

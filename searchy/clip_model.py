@@ -29,6 +29,15 @@ import threading
 from typing import Optional, List
 from PIL import Image
 
+
+def _extract_features(output):
+    """Extract tensor from model output, handling both transformers 4.x (tensor) and 5.x (BaseModelOutputWithPooling)."""
+    if isinstance(output, torch.Tensor):
+        return output
+    # transformers 5.x returns BaseModelOutputWithPooling
+    return output.pooler_output
+
+
 # Lazy imports to avoid loading transformers until needed
 _CLIPModel = None
 _CLIPProcessor = None
@@ -326,7 +335,7 @@ class ModelManager:
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             with torch.no_grad():
-                text_features = self._model.get_text_features(**inputs)
+                text_features = _extract_features(self._model.get_text_features(**inputs))
                 # Normalize
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
@@ -353,7 +362,7 @@ class ModelManager:
             inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
             with torch.no_grad():
-                image_features = self._model.get_image_features(**inputs)
+                image_features = _extract_features(self._model.get_image_features(**inputs))
                 # Normalize
                 image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
@@ -386,7 +395,7 @@ class ModelManager:
                 inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
                 with torch.no_grad():
-                    image_features = self._model.get_image_features(**inputs)
+                    image_features = _extract_features(self._model.get_image_features(**inputs))
                     # Normalize
                     image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 

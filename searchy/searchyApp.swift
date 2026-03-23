@@ -36,7 +36,7 @@ class SetupManager: ObservableObject {
             // Verify torch is installed
             let checkTask = Process()
             checkTask.executableURL = URL(fileURLWithPath: pythonPath)
-            checkTask.arguments = ["-c", "import torch; import transformers; print('ok')"]
+            checkTask.arguments = ["-c", "import torch; import transformers; import PIL; import deepface; import Vision; print('ok')"]
 
             let pipe = Pipe()
             checkTask.standardOutput = pipe
@@ -65,11 +65,12 @@ class SetupManager: ObservableObject {
     }
 
     func runSetup() async {
+        // Total: 3 setup steps + 14 packages + 1 verify = 18
         await MainActor.run {
             isSettingUp = true
             setupError = nil
             currentStep = 0
-            totalSteps = 5
+            totalSteps = 18
         }
 
         do {
@@ -95,12 +96,11 @@ class SetupManager: ObservableObject {
             await updateProgress("Creating virtual environment...", step: 3)
             try await createVirtualEnvironment(using: pythonPath)
 
-            // Step 4: Install dependencies
-            await updateProgress("Installing dependencies (this may take a few minutes)...", step: 4)
+            // Steps 4-17: Install dependencies (14 packages)
             try await installDependencies()
 
-            // Step 5: Verify installation
-            await updateProgress("Verifying installation...", step: 5)
+            // Step 18: Verify installation
+            await updateProgress("Verifying installation...", step: 18)
             try await verifyInstallation()
 
             // Done!
@@ -130,14 +130,34 @@ class SetupManager: ObservableObject {
 
     private func createDirectories() throws {
         try FileManager.default.createDirectory(atPath: appSupportDir, withIntermediateDirectories: true)
+        let logDir = "\(appSupportDir)/logs"
+        try FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
         print("✅ Created directory: \(appSupportDir)")
+    }
+
+    private func appendToSetupLog(_ text: String) {
+        let logPath = "\(appSupportDir)/logs/setup.log"
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            if let data = text.data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: text.data(using: .utf8))
+        }
     }
 
     private func findSystemPython() -> String? {
         // Check common Python locations
         let pythonPaths = [
-            "/opt/homebrew/bin/python3",      // Homebrew on Apple Silicon
-            "/usr/local/bin/python3",          // Homebrew on Intel
+            // Prefer specific versions known to work with TensorFlow
+            "/opt/homebrew/bin/python3.12",    // Homebrew on Apple Silicon (versioned)
+            "/opt/homebrew/bin/python3.11",
+            "/usr/local/bin/python3.12",       // Homebrew on Intel (versioned)
+            "/usr/local/bin/python3.11",
+            "/opt/homebrew/bin/python3",       // Homebrew on Apple Silicon (generic)
+            "/usr/local/bin/python3",          // Homebrew on Intel (generic)
             "\(appSupportDir)/python/bin/python3",  // Our installed Python
             "/usr/bin/python3",                // System Python
             "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"  // Python.org
@@ -148,7 +168,7 @@ class SetupManager: ObservableObject {
                 // Verify it's a working Python 3.9+
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: path)
-                task.arguments = ["-c", "import sys; print(sys.version_info >= (3, 9))"]
+                task.arguments = ["-c", "import sys; print((3, 9) <= sys.version_info < (3, 13))"]
 
                 let pipe = Pipe()
                 task.standardOutput = pipe
@@ -304,53 +324,63 @@ class SetupManager: ObservableObject {
         try upgradePip.run()
         upgradePip.waitUntilExit()
 
-        // Install from requirements.txt if available, otherwise use fallback list
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: pipPath)
+        // Install packages one by one for granular progress
+        let packages = [
+            "torch",
+            "transformers",
+            "pillow",
+            "numpy",
+            "tqdm",
+            "watchdog",
+            "fastapi",
+            "uvicorn",
+            "scikit-learn",
+            "pyobjc-core",
+            "pyobjc-framework-Quartz",
+            "pyobjc-framework-Vision",
+            "deepface",
+            "tf-keras"
+        ]
 
-        if let requirementsPath = Bundle.main.path(forResource: "requirements", ofType: "txt") {
-            print("📦 Installing from requirements.txt...")
-            task.arguments = ["install", "-r", requirementsPath]
-        } else {
-            // Fallback: install all required packages directly
-            print("📦 Installing packages directly...")
-            let packages = [
-                "torch",
-                "transformers",
-                "pillow",
-                "numpy",
-                "tqdm",
-                "watchdog",
-                "fastapi",
-                "uvicorn",
-                "scikit-learn",
-                "pyobjc-core",
-                "pyobjc-framework-Quartz",
-                "pyobjc-framework-Vision",
-                "deepface",
-                "tf-keras"
-            ]
-            task.arguments = ["install"] + packages
-        }
+        let totalPackages = packages.count
 
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
-
-        // Stream output for progress
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
-                print("pip: \(line)")
+        for (index, package) in packages.enumerated() {
+            let displayIndex = index + 1
+            await MainActor.run {
+                setupProgress = "Installing \(package) (\(displayIndex) of \(totalPackages))..."
+                currentStep = 3 + displayIndex  // Steps 4 through 17
             }
-        }
+            print("📦 [\(displayIndex)/\(totalPackages)] Installing \(package)...")
+            appendToSetupLog("[\(displayIndex)/\(totalPackages)] Installing \(package)...\n")
 
-        try task.run()
-        task.waitUntilExit()
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: pipPath)
+            task.arguments = ["install", package]
 
-        pipe.fileHandleForReading.readabilityHandler = nil
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
 
-        if task.terminationStatus != 0 {
-            throw SetupError.dependencyInstallFailed
+            var pipOutput = ""
+            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                if let line = String(data: handle.availableData, encoding: .utf8), !line.isEmpty {
+                    pipOutput += line
+                    self?.appendToSetupLog(line)
+                }
+            }
+
+            try task.run()
+            task.waitUntilExit()
+
+            pipe.fileHandleForReading.readabilityHandler = nil
+
+            if task.terminationStatus != 0 {
+                print("❌ Failed to install \(package)")
+                appendToSetupLog("FAILED: \(package)\n\(pipOutput)\n")
+                throw SetupError.dependencyInstallFailed(pipOutput)
+            }
+
+            print("✅ Installed \(package)")
         }
 
         print("✅ All dependencies installed")
@@ -360,7 +390,7 @@ class SetupManager: ObservableObject {
         case pythonNotFound
         case pythonDownloadFailed
         case venvCreationFailed(String)
-        case dependencyInstallFailed
+        case dependencyInstallFailed(String)
         case verificationFailed
 
         var errorDescription: String? {
@@ -371,8 +401,9 @@ class SetupManager: ObservableObject {
                 return "Failed to download Python. Please check your internet connection and try again."
             case .venvCreationFailed(let output):
                 return "Failed to create virtual environment: \(output)"
-            case .dependencyInstallFailed:
-                return "Failed to install dependencies. Please check your internet connection and try again."
+            case .dependencyInstallFailed(let output):
+                let lastLines = output.components(separatedBy: "\n").suffix(5).joined(separator: "\n")
+                return "Failed to install dependencies.\n\n\(lastLines)"
             case .verificationFailed:
                 return "Installation verification failed. Please try again or report this issue."
             }
@@ -385,140 +416,160 @@ struct SetupView: View {
     @ObservedObject var setupManager = SetupManager.shared
     @Environment(\.colorScheme) var colorScheme
 
+    private var accentGreen: Color {
+        Color(red: 0.376, green: 0.5, blue: 0.308)
+    }
+
     var body: some View {
-        VStack(spacing: 30) {
-            // Icon
-            Image(systemName: "sparkles")
-                .font(.system(size: 60))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.purple, .blue],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .padding(.top, 40)
+        VStack(spacing: 0) {
+            Spacer().frame(height: 48)
 
-            // Title
-            Text("Welcome to Searchy")
-                .font(.system(size: 28, weight: .bold))
+            // App name — simple, no icon
+            Text("searchy")
+                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                .tracking(-0.5)
 
-            Text("Semantic image search for your Mac")
-                .font(.system(size: 16))
+            Text("on-device image search")
+                .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.secondary)
+                .padding(.top, 4)
 
             Spacer()
 
             if setupManager.isSettingUp {
-                // Progress view
-                VStack(spacing: 20) {
-                    ProgressView(value: Double(setupManager.currentStep), total: Double(setupManager.totalSteps))
-                        .progressViewStyle(LinearProgressViewStyle())
-                        .frame(width: 300)
-
+                // Installing state
+                VStack(spacing: 16) {
+                    // Package name as the hero element
                     Text(setupManager.setupProgress)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary.opacity(0.7))
 
-                    if setupManager.currentStep == 4 {
-                        Text("This may take 2-5 minutes on first run...")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                    // Progress bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
+                                .frame(height: 6)
+
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(accentGreen)
+                                .frame(
+                                    width: geo.size.width * (Double(setupManager.currentStep) / Double(max(setupManager.totalSteps, 1))),
+                                    height: 6
+                                )
+                                .animation(.easeInOut(duration: 0.3), value: setupManager.currentStep)
+                        }
+                    }
+                    .frame(width: 320, height: 6)
+
+                    // Step counter
+                    Text("\(setupManager.currentStep) / \(setupManager.totalSteps)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+
+                    if setupManager.currentStep >= 4 && setupManager.currentStep <= 17 {
+                        Text("first run — this takes a few minutes")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .padding(.top, 4)
                     }
                 }
-                .padding()
+                .padding(.horizontal, 40)
 
             } else if let error = setupManager.setupError {
-                // Error view
-                VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(.orange)
+                // Error state
+                VStack(spacing: 14) {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundColor(.red.opacity(0.7))
 
-                    Text("Setup Failed")
-                        .font(.headline)
+                    Text("setup failed")
+                        .font(.system(size: 14, weight: .medium))
 
-                    Text(error)
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-
-                    Button("Try Again") {
-                        Task {
-                            await setupManager.runSetup()
-                        }
+                    ScrollView {
+                        Text(error)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-
-            } else {
-                // Initial setup prompt
-                VStack(spacing: 16) {
-                    Text("First-time setup required")
-                        .font(.headline)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        SetupStepRow(number: 1, text: "Install Python (if needed)")
-                        SetupStepRow(number: 2, text: "Create isolated environment")
-                        SetupStepRow(number: 3, text: "Download CLIP models (~2GB)")
-                    }
-                    .padding()
+                    .frame(maxWidth: 340, maxHeight: 100)
+                    .padding(10)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
                     )
 
-                    Text("Requires internet connection")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-
                     Button(action: {
-                        Task {
-                            await setupManager.runSetup()
-                        }
+                        Task { await setupManager.runSetup() }
                     }) {
-                        HStack {
-                            Image(systemName: "arrow.down.circle.fill")
-                            Text("Start Setup")
-                        }
-                        .frame(width: 200)
+                        Text("retry")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 100, height: 28)
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.purple)
+                    .tint(accentGreen)
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 40)
+
+            } else {
+                // Initial state
+                VStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SetupStepRow(icon: "checkmark.circle", text: "python + virtual environment")
+                        SetupStepRow(icon: "arrow.down.circle", text: "CLIP model + dependencies (~2 GB)")
+                        SetupStepRow(icon: "lock.circle", text: "everything stays on your mac")
+                    }
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.025))
+                    )
+
+                    Button(action: {
+                        Task { await setupManager.runSetup() }
+                    }) {
+                        Text("set up")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 140, height: 32)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accentGreen)
+
+                    Text("requires internet")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.6))
                 }
             }
 
             Spacer()
 
             // Footer
-            Text("All processing happens on-device. No data leaves your Mac.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .padding(.bottom, 20)
+            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary.opacity(0.4))
+                .padding(.bottom, 16)
         }
-        .frame(width: 450, height: 500)
-        .background(colorScheme == .dark ? Color(NSColor.windowBackgroundColor) : Color.white)
+        .frame(width: 420, height: 460)
+        .background(colorScheme == .dark ? Color(NSColor.windowBackgroundColor) : Color(NSColor.windowBackgroundColor))
     }
 }
 
 struct SetupStepRow: View {
-    let number: Int
+    let icon: String
     let text: String
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("\(number)")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.purple.opacity(0.8)))
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+                .frame(width: 18)
 
             Text(text)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
     }
@@ -1140,13 +1191,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
-        
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] fileHandle in
-            if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
+
+        // Persist Python server output to log file
+        let logDir = "\(SetupManager.shared.appSupportPath)/logs"
+        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+        let logPath = "\(logDir)/server_stdout.log"
+        FileManager.default.createFile(atPath: logPath, contents: nil)
+        let logHandle = FileHandle(forWritingAtPath: logPath)
+        logHandle?.seekToEndOfFile()
+
+        pipe.fileHandleForReading.readabilityHandler = { fileHandle in
+            let data = fileHandle.availableData
+            if let output = String(data: data, encoding: .utf8), !output.isEmpty {
                 print("FastAPI Output: \(output)")
             }
+            logHandle?.write(data)
         }
-        
+
         do {
             try process.run()
             serverProcess = process
