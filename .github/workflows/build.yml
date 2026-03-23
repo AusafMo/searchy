@@ -29,3 +29,8 @@ jobs:
         run: |
           pip install ruff
           ruff check searchy/*.py
+
+      - name: Test Python
+        run: |
+          pip install pytest
+          python3 -m pytest searchy/tests/ -x -q
