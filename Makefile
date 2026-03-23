@@ -92,6 +92,21 @@ lint: ## Run linters (ruff for Python)
 	ruff check searchy/*.py
 	@echo "✓ Lint passed"
 
+# ─── Test ─────────────────────────────────────────────────
+test: ## Run Python unit tests
+	@test -f .venv/bin/pytest || (python3 -m venv .venv && .venv/bin/pip install -q pytest)
+	.venv/bin/pytest searchy/tests/ -x -q
+
+# ─── Check (all pre-push checks) ─────────────────────────
+check: lint test ## Run lint + tests
+
+# ─── Git hooks ────────────────────────────────────────────
+hooks: ## Install git pre-push hook
+	@mkdir -p .git/hooks
+	@ln -sf ../../scripts/pre-push-checks.sh .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "✓ Pre-push hook installed"
+
 # ─── Run (dev) ────────────────────────────────────────────
 run: build ## Build debug and open app
 	@open "$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Debug \
