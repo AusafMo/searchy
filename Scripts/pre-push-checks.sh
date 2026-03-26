@@ -20,19 +20,19 @@ echo "═══ Pre-push checks ═══"
 
 # 1. Syntax check
 echo -n "• py_compile... "
-for f in searchy/*.py; do
+for f in searchy/backend/*.py; do
     $PYTHON -m py_compile "$f" || FAILED=1
 done
 [ $FAILED -eq 0 ] && echo "ok" || echo "FAIL"
 
 # 2. Ruff lint
 echo -n "• ruff... "
-"$VENV/bin/ruff" check searchy/*.py --quiet || FAILED=1
+"$VENV/bin/ruff" check searchy/backend/*.py --quiet || FAILED=1
 [ $FAILED -eq 0 ] && echo "ok" || echo "FAIL"
 
 # 3. Tests
 echo -n "• pytest... "
-$PYTHON -m pytest searchy/tests/ -x -q || FAILED=1
+$PYTHON -m pytest searchy/backend/tests/ -x -q || FAILED=1
 
 # 4. Swift build (skip with SKIP_SWIFT=1)
 if [ "${SKIP_SWIFT:-0}" != "1" ]; then

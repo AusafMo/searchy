@@ -10,7 +10,6 @@ import os
 import sys
 import time
 import json
-import re
 import argparse
 import urllib.request
 import urllib.error
@@ -18,33 +17,14 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# Supported image extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic'}
+from constants import (
+    IMAGE_EXTENSIONS, DEFAULT_BATCH_SIZE, DEFAULT_MAX_DIMENSION,
+    WATCHER_DEBOUNCE_DELAY, WATCHER_NOTIFY_TIMEOUT, WATCHER_INDEX_TIMEOUT,
+)
+from utils import matches_filter
 
 # Default server URL (can be overridden via --server-url)
 DEFAULT_SERVER_URL = "http://127.0.0.1:7860"
-
-
-def matches_filter(filename, filter_type, filter_value):
-    """Check if filename matches the filter criteria"""
-    if not filter_value or filter_type == "all":
-        return True
-
-    filename_lower = filename.lower()
-    filter_lower = filter_value.lower()
-
-    if filter_type == "starts-with":
-        return filename_lower.startswith(filter_lower)
-    elif filter_type == "ends-with":
-        return filename_lower.endswith(filter_lower)
-    elif filter_type == "contains":
-        return filter_lower in filename_lower
-    elif filter_type == "regex":
-        try:
-            return bool(re.search(filter_value, filename, re.IGNORECASE))
-        except re.error:
-            return False
-    return True
 
 
 def call_server_notify(server_url, file_path):
@@ -65,7 +45,7 @@ def call_server_notify(server_url, file_path):
             method='POST'
         )
 
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=WATCHER_NOTIFY_TIMEOUT) as response:
             result = json.loads(response.read().decode('utf-8'))
             return result
 
@@ -76,7 +56,8 @@ def call_server_notify(server_url, file_path):
 
 
 def call_server_index(server_url, data_dir, files, fast_indexing=True,
-                      max_dimension=384, batch_size=64):
+                      max_dimension=DEFAULT_MAX_DIMENSION,
+                      batch_size=DEFAULT_BATCH_SIZE):
     """Call the server's /index endpoint to index files."""
     url = f"{server_url}/index"
 
@@ -97,7 +78,7 @@ def call_server_index(server_url, data_dir, files, fast_indexing=True,
             method='POST'
         )
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=WATCHER_INDEX_TIMEOUT) as response:
             result = json.loads(response.read().decode('utf-8'))
             return result
 
@@ -112,7 +93,8 @@ def call_server_index(server_url, data_dir, files, fast_indexing=True,
 class ImageEventHandler(FileSystemEventHandler):
     def __init__(self, data_dir, server_url=DEFAULT_SERVER_URL,
                  filter_type=None, filter_value=None,
-                 fast_indexing=True, max_dimension=384, batch_size=64):
+                 fast_indexing=True, max_dimension=DEFAULT_MAX_DIMENSION,
+                 batch_size=DEFAULT_BATCH_SIZE):
         self.data_dir = data_dir
         self.server_url = server_url
         self.filter_type = filter_type
@@ -122,7 +104,7 @@ class ImageEventHandler(FileSystemEventHandler):
         self.batch_size = batch_size
         self.pending_files = set()
         self.last_index_time = time.time()
-        self.debounce_delay = 0.5  # Wait 0.5 seconds before indexing (reduced for faster response)
+        self.debounce_delay = WATCHER_DEBOUNCE_DELAY
 
     def on_created(self, event):
         """Called when a file or directory is created"""
@@ -231,7 +213,8 @@ class ImageEventHandler(FileSystemEventHandler):
 
 def watch_directory(watch_path, data_dir, server_url=DEFAULT_SERVER_URL,
                     filter_type=None, filter_value=None,
-                    fast_indexing=True, max_dimension=384, batch_size=64):
+                    fast_indexing=True, max_dimension=DEFAULT_MAX_DIMENSION,
+                    batch_size=DEFAULT_BATCH_SIZE):
     """Watch directory for new images and auto-index them via server."""
 
     print(f"Watching for new images in: {watch_path}", file=sys.stderr)
@@ -280,9 +263,9 @@ if __name__ == "__main__":
                         help="Enable fast indexing (resize images)")
     parser.add_argument("--no-fast", action="store_false", dest="fast",
                         help="Disable fast indexing")
-    parser.add_argument("--max-dimension", type=int, default=384,
+    parser.add_argument("--max-dimension", type=int, default=DEFAULT_MAX_DIMENSION,
                         help="Maximum image dimension for fast indexing")
-    parser.add_argument("--batch-size", type=int, default=64,
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
                         help="Batch size for processing")
 
     args = parser.parse_args()

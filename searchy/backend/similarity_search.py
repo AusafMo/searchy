@@ -14,6 +14,7 @@ from PIL import Image
 
 # Import centralized model manager
 from clip_model import model_manager, get_device
+from constants import DEFAULT_TOP_K, DEFAULT_OCR_WEIGHT, OCR_TEXT_PREVIEW_LENGTH
 
 
 def text_match_score(query: str, ocr_text: str) -> float:
@@ -68,7 +69,7 @@ class CLIPSearcher:
             print(f"Error generating embedding for {image_path}: {e}", file=sys.stderr)
             return None
 
-    def find_similar(self, image_path, data_dir, top_k=20):
+    def find_similar(self, image_path, data_dir, top_k=DEFAULT_TOP_K):
         """Find images similar to the given image."""
         try:
             start_time = time.time()
@@ -123,7 +124,7 @@ class CLIPSearcher:
             print(f"Error in find_similar: {e}", file=sys.stderr)
             return {"error": str(e)}
 
-    def search(self, query, data_dir, top_k=5, ocr_weight=0.3):
+    def search(self, query, data_dir, top_k=DEFAULT_TOP_K, ocr_weight=DEFAULT_OCR_WEIGHT):
         try:
             start_time = time.time()
 
@@ -197,7 +198,7 @@ class CLIPSearcher:
                 }
                 # Include OCR text if found
                 if ocr_texts[idx]:
-                    result["ocr_text"] = ocr_texts[idx][:200]  # Truncate for response
+                    result["ocr_text"] = ocr_texts[idx][:OCR_TEXT_PREVIEW_LENGTH]
                 results.append(result)
 
             total_time = time.time() - start_time

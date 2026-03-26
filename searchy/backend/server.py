@@ -1,5 +1,4 @@
 import os
-import re
 import argparse
 import logging
 import logging.handlers
@@ -15,12 +14,12 @@ from similarity_search import CLIPSearcher
 from generate_embeddings import index_images_with_clip
 from clip_model import model_manager, AVAILABLE_MODELS
 from atomic_write import atomic_pickle_dump
+from constants import DEFAULT_DATA_DIR, SKIP_DIRS, IMAGE_EXTENSIONS, TTL_CHECK_INTERVAL, OCR_TEXT_PREVIEW_LENGTH, LARGE_BATCH_SIZE, DEFAULT_TOP_K, DEFAULT_OCR_WEIGHT, DEFAULT_SIMILARITY_THRESHOLD
+from utils import matches_filter, is_user_image
 import uvicorn
 import numpy as np
 from threading import Thread
 
-
-DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~/Library/Application Support"), "searchy")
 
 # Set up logging: console + rotating file in app support dir
 log_dir = os.path.join(DEFAULT_DATA_DIR, "logs")
@@ -69,25 +68,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Directories to skip (system, packages, caches, etc.)
-SKIP_DIRS = {
-    'site-packages', 'node_modules', 'vendor', '__pycache__',
-    'env', 'venv', '.venv', 'virtualenv',
-    'Library', 'Caches', 'cache', '.cache',
-    'build', 'dist', 'target', '.git', '.svn',
-    'DerivedData', 'xcuserdata', 'Pods',
-    '__MACOSX', '.Trash', '.Spotlight-V100', '.fseventsd'
-}
-
-def is_user_image(path: str) -> bool:
-    """Check if path is a user image (not system/package file)."""
-    if not os.path.exists(path):
-        return False
-    if os.path.basename(path).startswith('.'):
-        return False
-    parts = path.split(os.sep)
-    return not any(part in SKIP_DIRS for part in parts)
-
 # Lazy initialization of searcher
 _searcher = None
 
@@ -130,7 +110,7 @@ def _ttl_checker():
     """Background thread that periodically checks if the model should be unloaded."""
     global _model_loading_status
     while True:
-        time.sleep(30)  # Check every 30 seconds
+        time.sleep(TTL_CHECK_INTERVAL)
         if model_manager.check_ttl():
             _model_loading_status["state"] = "unloaded"
             _model_loading_status["message"] = f"Model unloaded after {model_manager.ttl_minutes}min idle"
@@ -142,11 +122,11 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int
     data_dir: str
-    ocr_weight: float = 0.3  # Weight for OCR text matching (0-1)
+    ocr_weight: float = DEFAULT_OCR_WEIGHT
 
 
 class DuplicatesRequest(BaseModel):
-    threshold: float = 0.95
+    threshold: float = DEFAULT_SIMILARITY_THRESHOLD
     data_dir: str = DEFAULT_DATA_DIR
 
 
@@ -192,7 +172,7 @@ def find_duplicate_groups(embeddings: np.ndarray, image_paths: List[str], thresh
             parent[px] = py
 
     # Find similar pairs (process in batches for memory efficiency)
-    batch_size = 500  # Process 500 images at a time
+    batch_size = LARGE_BATCH_SIZE
     for i in range(0, n, batch_size):
         end_i = min(i + batch_size, n)
         # Compare this batch against all images from i onwards
@@ -338,13 +318,13 @@ def search(request: SearchRequest):
 
 class TextSearchRequest(BaseModel):
     query: str
-    top_k: int = 20
+    top_k: int = DEFAULT_TOP_K
     data_dir: str = DEFAULT_DATA_DIR
 
 
 class SimilarRequest(BaseModel):
     image_path: str
-    top_k: int = 20
+    top_k: int = DEFAULT_TOP_K
     data_dir: str = DEFAULT_DATA_DIR
 
 
@@ -398,7 +378,7 @@ def text_search(request: TextSearchRequest):
                 results.append({
                     "path": path,
                     "similarity": score,
-                    "ocr_text": ocr_text[:300],  # Include found text
+                    "ocr_text": ocr_text[:OCR_TEXT_PREVIEW_LENGTH],
                     "size": metadata["size"],
                     "date": metadata["date"],
                     "type": metadata["type"]
@@ -684,31 +664,6 @@ def get_indexed_paths(data_dir: str = DEFAULT_DATA_DIR):
 
 
 # ============== Startup Sync Endpoints ==============
-
-# Image extensions supported
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic'}
-
-def matches_filter(filename: str, filter_type: str, filter_value: str) -> bool:
-    """Check if filename matches the filter criteria."""
-    if not filter_value or filter_type == "all":
-        return True
-
-    filename_lower = filename.lower()
-    filter_lower = filter_value.lower()
-
-    if filter_type == "starts-with":
-        return filename_lower.startswith(filter_lower)
-    elif filter_type == "ends-with":
-        return filename_lower.endswith(filter_lower)
-    elif filter_type == "contains":
-        return filter_lower in filename_lower
-    elif filter_type == "regex":
-        try:
-            return bool(re.search(filter_value, filename, re.IGNORECASE))
-        except re.error:
-            return False
-    return True
-
 
 class WatchedDirectoryRequest(BaseModel):
     path: str
@@ -1552,9 +1507,9 @@ class VolumeIndexRequest(BaseModel):
 class MultiVolumeSearchRequest(BaseModel):
     """Search across multiple volume indexes."""
     query: str
-    top_k: int = 20
+    top_k: int = DEFAULT_TOP_K
     index_paths: List[str]  # List of index file paths to search
-    ocr_weight: float = 0.3
+    ocr_weight: float = DEFAULT_OCR_WEIGHT
 
 
 @app.post("/volume/index")

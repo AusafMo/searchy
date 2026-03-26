@@ -1401,11 +1401,7 @@ class DirectoryManager: ObservableObject {
            let directories = try? JSONDecoder().decode([WatchedDirectory].self, from: data) {
             self.watchedDirectories = directories
         } else {
-            // Default directories
-            self.watchedDirectories = [
-                WatchedDirectory(path: NSString(string: "~/Downloads").expandingTildeInPath),
-                WatchedDirectory(path: NSString(string: "~/Desktop").expandingTildeInPath, filter: "Screenshot", filterType: .startsWith)
-            ]
+            self.watchedDirectories = []
         }
     }
 
