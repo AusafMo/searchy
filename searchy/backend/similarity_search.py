@@ -4,8 +4,6 @@ Similarity Search using centralized CLIP model.
 Uses the shared ModelManager for all embedding operations.
 """
 
-import os
-import pickle
 import numpy as np
 import sys
 import json
@@ -15,6 +13,7 @@ from PIL import Image
 # Import centralized model manager
 from clip_model import model_manager, get_device
 from constants import DEFAULT_TOP_K, DEFAULT_OCR_WEIGHT, OCR_TEXT_PREVIEW_LENGTH
+from utils import load_image_index
 
 
 def text_match_score(query: str, ocr_text: str) -> float:
@@ -80,12 +79,9 @@ class CLIPSearcher:
                 return {"error": f"Could not process image: {image_path}"}
 
             # Load index
-            filename = os.path.join(data_dir, 'image_index.bin')
-            if not os.path.exists(filename):
+            data = load_image_index(data_dir)
+            if data is None:
                 return {"error": "No images indexed yet. Please index a folder first."}
-
-            with open(filename, 'rb') as f:
-                data = pickle.load(f)
 
             embeddings = data['embeddings']
             image_paths = data['image_paths']
@@ -128,17 +124,9 @@ class CLIPSearcher:
         try:
             start_time = time.time()
 
-            filename = os.path.join(data_dir, 'image_index.bin')
-            if not os.path.exists(filename):
+            data = load_image_index(data_dir)
+            if data is None:
                 error_response = {"error": "No images indexed yet. Please index a folder first."}
-                print(json.dumps(error_response))
-                return error_response
-
-            with open(filename, 'rb') as f:
-                data = pickle.load(f)
-
-            if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
-                error_response = {"error": "Invalid index format. Please re-index."}
                 print(json.dumps(error_response))
                 return error_response
 

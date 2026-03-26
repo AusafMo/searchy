@@ -13,15 +13,14 @@ import json
 import argparse
 import urllib.request
 import urllib.error
-from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from constants import (
-    IMAGE_EXTENSIONS, DEFAULT_BATCH_SIZE, DEFAULT_MAX_DIMENSION,
+    DEFAULT_BATCH_SIZE, DEFAULT_MAX_DIMENSION,
     WATCHER_DEBOUNCE_DELAY, WATCHER_NOTIFY_TIMEOUT, WATCHER_INDEX_TIMEOUT,
 )
-from utils import matches_filter
+from utils import matches_filter, is_image_file
 
 # Default server URL (can be overridden via --server-url)
 DEFAULT_SERVER_URL = "http://127.0.0.1:7860"
@@ -134,18 +133,13 @@ class ImageEventHandler(FileSystemEventHandler):
             self.pending_files.add(dest_path)
             self.last_index_time = time.time()
 
-    def _is_image(self, file_path):
-        """Check if file is an image by extension"""
+    def _is_valid_image(self, file_path):
+        """Check if file is an image AND matches the filter"""
         filename = os.path.basename(file_path)
         # Skip macOS metadata files (AppleDouble resource forks)
         if filename.startswith('._'):
             return False
-        ext = Path(file_path).suffix.lower()
-        return ext in IMAGE_EXTENSIONS
-
-    def _is_valid_image(self, file_path):
-        """Check if file is an image AND matches the filter"""
-        if not self._is_image(file_path):
+        if not is_image_file(filename):
             return False
 
         filename = os.path.basename(file_path)

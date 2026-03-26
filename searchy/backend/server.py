@@ -15,7 +15,7 @@ from generate_embeddings import index_images_with_clip
 from clip_model import model_manager, AVAILABLE_MODELS
 from atomic_write import atomic_pickle_dump
 from constants import DEFAULT_DATA_DIR, SKIP_DIRS, IMAGE_EXTENSIONS, TTL_CHECK_INTERVAL, OCR_TEXT_PREVIEW_LENGTH, LARGE_BATCH_SIZE, DEFAULT_TOP_K, DEFAULT_OCR_WEIGHT, DEFAULT_SIMILARITY_THRESHOLD
-from utils import matches_filter, is_user_image
+from utils import matches_filter, is_user_image, load_image_index
 import uvicorn
 import numpy as np
 from threading import Thread
@@ -253,14 +253,8 @@ def find_duplicates(request: DuplicatesRequest):
     try:
         logger.info(f"Finding duplicates with threshold {request.threshold}")
 
-        filename = os.path.join(request.data_dir, 'image_index.bin')
-        if not os.path.exists(filename):
-            return {"groups": [], "total_duplicates": 0, "total_groups": 0}
-
-        with open(filename, 'rb') as f:
-            data = pickle.load(f)
-
-        if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
+        data = load_image_index(request.data_dir)
+        if data is None:
             return {"groups": [], "total_duplicates": 0, "total_groups": 0}
 
         embeddings = data['embeddings']
@@ -565,21 +559,17 @@ def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
 
         # Get indexed image paths (if index exists)
         indexed_paths = set()
-        filename = os.path.join(data_dir, 'image_index.bin')
-        if os.path.exists(filename):
-            with open(filename, 'rb') as f:
-                data = pickle.load(f)
-
-            if isinstance(data, dict) and 'image_paths' in data:
-                for path in data['image_paths']:
-                    if is_user_image(path):
-                        try:
-                            stat_info = os.stat(path)
-                            creation_time = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
-                            all_images.append((path, creation_time, False))  # Not pending
-                            indexed_paths.add(path)
-                        except Exception:
-                            continue
+        data = load_image_index(data_dir)
+        if data is not None:
+            for path in data['image_paths']:
+                if is_user_image(path):
+                    try:
+                        stat_info = os.stat(path)
+                        creation_time = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
+                        all_images.append((path, creation_time, False))  # Not pending
+                        indexed_paths.add(path)
+                    except Exception:
+                        continue
 
         # Add pending images (not yet indexed)
         for path, detection_time in list(pending_images.items()):
@@ -807,18 +797,12 @@ def cleanup_deleted_images(data_dir: str) -> dict:
     Remove deleted images from the index.
     Returns stats about what was cleaned up.
     """
-    filename = os.path.join(data_dir, 'image_index.bin')
+    data = load_image_index(data_dir)
 
-    if not os.path.exists(filename):
+    if data is None:
         return {"removed": 0, "remaining": 0, "status": "no_index"}
 
     try:
-        with open(filename, 'rb') as f:
-            data = pickle.load(f)
-
-        if not isinstance(data, dict) or 'image_paths' not in data:
-            return {"removed": 0, "remaining": 0, "status": "invalid_index"}
-
         embeddings = data['embeddings']
         image_paths = data['image_paths']
         ocr_texts = data.get('ocr_texts', [''] * len(image_paths))
@@ -848,7 +832,7 @@ def cleanup_deleted_images(data_dir: str) -> dict:
             'ocr_texts': new_ocr_texts
         }
 
-        atomic_pickle_dump(cleaned_data, filename)
+        atomic_pickle_dump(cleaned_data, os.path.join(data_dir, 'image_index.bin'))
 
         logger.info(f"✅ Cleanup complete: removed {removed_count} deleted images, {len(new_paths)} remaining")
         return {"removed": removed_count, "remaining": len(new_paths), "status": "cleaned"}

@@ -44,3 +44,14 @@ OCR_TEXT_PREVIEW_LENGTH = 300
 WATCHER_DEBOUNCE_DELAY = 0.5  # Seconds
 WATCHER_NOTIFY_TIMEOUT = 5    # Seconds
 WATCHER_INDEX_TIMEOUT = 30    # Seconds
+
+# ─── Face Recognition ────────────────────────────────────
+FACE_CLUSTER_THRESHOLD = 0.65        # Cosine similarity for clustering (OpenCV+ArcFace)
+FACE_REASSIGN_THRESHOLD = 0.60       # Cosine similarity for re-assignment / best-match
+FACE_CONFIDENCE_MIN = 0.9            # Minimum detection confidence
+FACE_AREA_RATIO_MAX = 0.8            # Skip if face covers more than this fraction of image
+FACE_MIN_SIZE = 40                   # Minimum face bbox dimension (px)
+FACE_IMAGE_MAX_DIM = 1920            # Resize large images before detection
+FACE_EMBEDDING_SIZE = 112            # ArcFace input size (px)
+FACE_BRIGHTNESS_MIN = 30             # Skip dark faces below this mean brightness
+FACE_BRIGHTNESS_STD_MIN = 20         # Skip low-contrast faces below this std

@@ -21,8 +21,8 @@ from atomic_write import atomic_pickle_dump
 
 # Import centralized model manager
 from clip_model import model_manager
-from constants import SKIP_DIRS, IMAGE_EXTENSIONS
-from utils import matches_filter, is_user_image
+from constants import SKIP_DIRS
+from utils import matches_filter, is_user_image, is_image_file
 
 # OCR support using macOS Vision framework
 try:
@@ -275,7 +275,7 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                     if file.startswith('.'):
                         continue
 
-                    if os.path.splitext(file.lower())[1] in IMAGE_EXTENSIONS:
+                    if is_image_file(file):
                         # Apply filter if specified
                         if filter_type and filter_value:
                             if not matches_filter(file, filter_type, filter_value):
