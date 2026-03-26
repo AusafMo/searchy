@@ -15,6 +15,13 @@ from datetime import datetime
 from PIL import Image
 
 from atomic_write import atomic_pickle_dump
+from constants import (
+    FACE_CLUSTER_THRESHOLD, FACE_REASSIGN_THRESHOLD, FACE_CONFIDENCE_MIN,
+    FACE_AREA_RATIO_MAX, FACE_MIN_SIZE, FACE_IMAGE_MAX_DIM,
+    FACE_EMBEDDING_SIZE, FACE_BRIGHTNESS_MIN, FACE_BRIGHTNESS_STD_MIN,
+    LARGE_BATCH_SIZE,
+)
+from utils import UnionFind
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -396,7 +403,7 @@ class FaceRecognitionService:
             return result
 
     def _find_best_cluster_for_face(self, face: FaceData, exclude_cluster_ids: List[str] = None,
-                                     similarity_threshold: float = 0.60) -> Optional[str]:
+                                     similarity_threshold: float = FACE_REASSIGN_THRESHOLD) -> Optional[str]:
         """
         Find the best matching cluster for a face, respecting negative constraints.
         Returns cluster_id or None if no suitable cluster found.
@@ -522,7 +529,7 @@ class FaceRecognitionService:
                 return []
 
             # Skip very large images (resize first)
-            max_dim = 1920
+            max_dim = FACE_IMAGE_MAX_DIM
             if img.width > max_dim or img.height > max_dim:
                 ratio = min(max_dim / img.width, max_dim / img.height)
                 new_size = (int(img.width * ratio), int(img.height * ratio))
@@ -560,16 +567,16 @@ class FaceRecognitionService:
 
                 # Skip low confidence
                 confidence = face_data.get("confidence", 0)
-                if confidence < 0.9:
+                if confidence < FACE_CONFIDENCE_MIN:
                     continue
 
                 # Skip very small faces
-                if bbox["w"] < 40 or bbox["h"] < 40:
+                if bbox["w"] < FACE_MIN_SIZE or bbox["h"] < FACE_MIN_SIZE:
                     continue
 
                 # Skip if face covers too much of image
                 face_area_ratio = (bbox["w"] * bbox["h"]) / (img_w * img_h)
-                if face_area_ratio > 0.8:
+                if face_area_ratio > FACE_AREA_RATIO_MAX:
                     continue
 
                 # Skip dark/low-contrast faces
@@ -578,7 +585,7 @@ class FaceRecognitionService:
                 if face_region.size > 0:
                     mean_brightness = np.mean(face_region)
                     std_brightness = np.std(face_region)
-                    if mean_brightness < 30 or std_brightness < 20:
+                    if mean_brightness < FACE_BRIGHTNESS_MIN or std_brightness < FACE_BRIGHTNESS_STD_MIN:
                         continue
 
                 face_id = self._generate_face_id(image_path, bbox)
@@ -660,7 +667,7 @@ class FaceRecognitionService:
                         img = img.convert('RGB')
 
                     # Resize to ArcFace input size (112x112)
-                    img = img.resize((112, 112), Image.Resampling.LANCZOS)
+                    img = img.resize((FACE_EMBEDDING_SIZE, FACE_EMBEDDING_SIZE), Image.Resampling.LANCZOS)
                     face_images.append(np.array(img))
                     valid_detections.append(detection)
 
@@ -810,11 +817,8 @@ class FaceRecognitionService:
             self.scan_status = f"Error: {str(e)}"
             return {"error": str(e)}
 
-    def cluster_faces(self, similarity_threshold: float = 0.65) -> List[FaceCluster]:
-        """
-        Cluster faces using Union-Find based on embedding similarity.
-        0.65 works well for OpenCV+ArcFace combo.
-        """
+    def cluster_faces(self, similarity_threshold: float = FACE_CLUSTER_THRESHOLD) -> List[FaceCluster]:
+        """Cluster faces using Union-Find based on embedding similarity."""
         if not self.faces:
             self.clusters = []
             return []
@@ -827,24 +831,12 @@ class FaceRecognitionService:
         norms[norms == 0] = 1  # Avoid division by zero
         embeddings_normalized = embeddings / norms
 
-        # Union-Find
-        parent = list(range(n))
-
-        def find(x):
-            if parent[x] != x:
-                parent[x] = find(parent[x])
-            return parent[x]
-
-        def union(x, y):
-            px, py = find(x), find(y)
-            if px != py:
-                parent[px] = py
+        uf = UnionFind(n)
 
         # Compare faces (O(n^2) but necessary for clustering)
         # Process in batches for large datasets
-        batch_size = 500
-        for i in range(0, n, batch_size):
-            end_i = min(i + batch_size, n)
+        for i in range(0, n, LARGE_BATCH_SIZE):
+            end_i = min(i + LARGE_BATCH_SIZE, n)
             batch = embeddings_normalized[i:end_i]
 
             # Compare against all faces from i onwards
@@ -856,12 +848,12 @@ class FaceRecognitionService:
                 for rj, sim in enumerate(row):
                     global_j = i + rj
                     if global_j > global_i and sim >= similarity_threshold:
-                        union(global_i, global_j)
+                        uf.union(global_i, global_j)
 
         # Group faces by cluster
         clusters_dict = {}
         for idx in range(n):
-            root = find(idx)
+            root = uf.find(idx)
             if root not in clusters_dict:
                 clusters_dict[root] = []
             clusters_dict[root].append(self.faces[idx])
@@ -889,7 +881,7 @@ class FaceRecognitionService:
         logger.info(f"Clustered {n} faces into {len(self.clusters)} people")
         return self.clusters
 
-    def recluster_with_constraints(self, similarity_threshold: float = 0.60) -> Dict:
+    def recluster_with_constraints(self, similarity_threshold: float = FACE_REASSIGN_THRESHOLD) -> Dict:
         """
         Smart re-clustering that:
         1. Keeps verified faces as fixed anchors in their clusters

@@ -89,7 +89,7 @@ setup: ## Set up Python venv with dependencies
 # ─── Lint ─────────────────────────────────────────────────
 lint: ## Run linters (ruff for Python)
 	@command -v ruff >/dev/null 2>&1 || (echo "Installing ruff..." && pip install ruff)
-	ruff check searchy/backend/*.py
+	ruff check searchy/backend/*.py searchy/backend/routes/*.py
 	@echo "✓ Lint passed"
 
 # ─── Test ─────────────────────────────────────────────────
