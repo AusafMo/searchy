@@ -83,19 +83,19 @@ release: dmg sha ## Full release: archive → export → DMG → SHA
 setup: ## Set up Python venv with dependencies
 	python3 -m venv .venv
 	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install -r searchy/requirements.txt
+	.venv/bin/pip install -r searchy/backend/requirements.txt
 	@echo "✓ Python env ready. Activate with: source .venv/bin/activate"
 
 # ─── Lint ─────────────────────────────────────────────────
 lint: ## Run linters (ruff for Python)
 	@command -v ruff >/dev/null 2>&1 || (echo "Installing ruff..." && pip install ruff)
-	ruff check searchy/*.py
+	ruff check searchy/backend/*.py
 	@echo "✓ Lint passed"
 
 # ─── Test ─────────────────────────────────────────────────
 test: ## Run Python unit tests
 	@test -f .venv/bin/pytest || (python3 -m venv .venv && .venv/bin/pip install -q pytest)
-	.venv/bin/pytest searchy/tests/ -x -q
+	.venv/bin/pytest searchy/backend/tests/ -x -q
 
 # ─── Check (all pre-push checks) ─────────────────────────
 check: lint test ## Run lint + tests

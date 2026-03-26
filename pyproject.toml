@@ -6,4 +6,4 @@ line-length = 120
 select = ["F", "E9", "W6"]
 
 [tool.pytest.ini_options]
-testpaths = ["searchy/tests"]
+testpaths = ["searchy/backend/tests"]
