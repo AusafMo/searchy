@@ -20,14 +20,14 @@ echo "═══ Pre-push checks ═══"
 
 # 1. Syntax check
 echo -n "• py_compile... "
-for f in searchy/backend/*.py; do
+for f in searchy/backend/*.py searchy/backend/routes/*.py; do
     $PYTHON -m py_compile "$f" || FAILED=1
 done
 [ $FAILED -eq 0 ] && echo "ok" || echo "FAIL"
 
 # 2. Ruff lint
 echo -n "• ruff... "
-"$VENV/bin/ruff" check searchy/backend/*.py --quiet || FAILED=1
+"$VENV/bin/ruff" check searchy/backend/*.py searchy/backend/routes/*.py --quiet || FAILED=1
 [ $FAILED -eq 0 ] && echo "ok" || echo "FAIL"
 
 # 3. Tests

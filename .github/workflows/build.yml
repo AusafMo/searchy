@@ -31,7 +31,7 @@ jobs:
           .venv/bin/pip install ruff pytest
 
       - name: Lint Python
-        run: .venv/bin/ruff check searchy/backend/*.py
+        run: .venv/bin/ruff check searchy/backend/*.py searchy/backend/routes/*.py
 
       - name: Test Python
         run: .venv/bin/pytest searchy/backend/tests/ -x -q
