@@ -227,7 +227,13 @@ python generate_embeddings.py /path/to/images --batch-size 64 --fast
 - [x] Homebrew tap distribution
 - [x] In-app update notifications
 - [ ] Alternative/smaller models
-- [ ] Albums, tags, smart collections
+- [ ] **Curation & Organization**
+  - [ ] Tags with AI auto-propagation (tag a few, CLIP tags the rest)
+  - [ ] Albums/collections (nested, items in multiple albums)
+  - [ ] Smart folders (rule-based auto-collections: tag + face + color + date)
+  - [ ] Star ratings (1–5) with filter support
+  - [ ] Color palette extraction & color-based search
+  - [ ] Annotations/notes per image
 - [ ] Timeline and map views
 - [ ] Metadata panel (EXIF, IPTC, XMP)
 
