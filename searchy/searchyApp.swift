@@ -168,7 +168,7 @@ class SetupManager: ObservableObject {
                 // Verify it's a working Python 3.9+
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: path)
-                task.arguments = ["-c", "import sys; print((3, 9) <= sys.version_info < (3, 13))"]
+                task.arguments = ["-c", "import sys; print((3, 9) <= sys.version_info < (3, 14))"]
 
                 let pipe = Pipe()
                 task.standardOutput = pipe
@@ -295,6 +295,12 @@ class SetupManager: ObservableObject {
     }
 
     private func createVirtualEnvironment(using pythonPath: String) async throws {
+        // Remove any existing venv to avoid Python version conflicts
+        // (e.g., old 3.14 venv getting overlaid with 3.12 packages)
+        if FileManager.default.fileExists(atPath: venvPath) {
+            try? FileManager.default.removeItem(atPath: venvPath)
+        }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: pythonPath)
         task.arguments = ["-m", "venv", venvPath]
