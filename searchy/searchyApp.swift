@@ -928,10 +928,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc private func showAbout() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.2"
         NSApplication.shared.orderFrontStandardAboutPanel(options: [
             NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
-            NSApplication.AboutPanelOptionKey.applicationVersion: "3.0",
-            NSApplication.AboutPanelOptionKey.version: "3.0"
+            NSApplication.AboutPanelOptionKey.applicationVersion: version,
+            NSApplication.AboutPanelOptionKey.version: version
         ])
     }
 
@@ -1401,10 +1402,11 @@ struct SearchApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Searchy") {
+                    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.2"
                     NSApplication.shared.orderFrontStandardAboutPanel(options: [
                         NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
-                        NSApplication.AboutPanelOptionKey.applicationVersion: "3.0",
-                        NSApplication.AboutPanelOptionKey.version: "3.0"
+                        NSApplication.AboutPanelOptionKey.applicationVersion: version,
+                        NSApplication.AboutPanelOptionKey.version: version
                     ])
                 }
             }
