@@ -265,15 +265,15 @@ struct AIModelSettingsSection: View {
                 if modelSettings.requiresReindex {
                     HStack(spacing: DesignSystem.Spacing.sm) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(DesignSystem.Colors.warning)
                         Text("Re-indexing required! The new model has different embedding dimensions.")
                             .font(DesignSystem.Typography.caption)
-                            .foregroundColor(.orange)
+                            .foregroundColor(DesignSystem.Colors.warning)
                     }
                     .padding(DesignSystem.Spacing.sm)
                     .background(
                         RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
-                            .fill(Color.orange.opacity(0.1))
+                            .fill(DesignSystem.Colors.warning.opacity(0.1))
                     )
                 }
 
@@ -610,7 +610,7 @@ struct SettingsView: View {
     var body: some View {
         ZStack {
             // Clean solid background
-            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
+            DesignSystem.Colors.palette.paper
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -648,9 +648,7 @@ struct SettingsView: View {
                 }
                 .padding(DesignSystem.Spacing.xl)
                 .background(
-                    colorScheme == .dark ?
-                        Color(hex: "111111") :
-                        Color(hex: "FAFAFA")
+                    DesignSystem.Colors.tertiaryBackground
                 )
 
                 ScrollView {
@@ -1160,7 +1158,7 @@ struct SetupStatRow: View {
             Spacer()
 
             Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundColor(DesignSystem.Colors.primaryText)
         }
         .padding(.horizontal, DesignSystem.Spacing.sm)

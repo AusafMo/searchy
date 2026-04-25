@@ -432,7 +432,7 @@ struct SetupView: View {
 
             // App name — simple, no icon
             Text("searchy")
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                .font(.system(size: 32, weight: .semibold, design: .serif))
                 .tracking(-0.5)
 
             Text("on-device image search")

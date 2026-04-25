@@ -176,7 +176,7 @@ struct MasonryImageCard: View {
 
     private var similarityBadge: some View {
         Text("\(Int(result.similarity * 100))%")
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
             .foregroundColor(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -194,7 +194,7 @@ struct MasonryImageCard: View {
         .foregroundColor(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(Capsule().fill(Color.orange))
+        .background(Capsule().fill(DesignSystem.Colors.warning))
         .padding(6)
     }
 
@@ -277,7 +277,7 @@ struct MasonryImageCard: View {
             .foregroundColor(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Capsule().fill(Color.green))
+            .background(Capsule().fill(DesignSystem.Colors.success))
             Spacer()
         }
     }
@@ -459,11 +459,11 @@ struct PreviewPanel: View {
         .frame(width: 280)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+                .fill(DesignSystem.Colors.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1), lineWidth: 1)
+                .stroke(DesignSystem.Colors.border, lineWidth: 1)
         )
         .onAppear {
             loadFullImage()
@@ -594,12 +594,12 @@ struct ResizablePreviewPanel: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(style == .widget ?
                     AnyShapeStyle(.ultraThinMaterial.opacity(0.6)) :
-                    AnyShapeStyle(colorScheme == .dark ? Color(hex: "1a1a1a") : Color(hex: "f5f5f5"))
+                    AnyShapeStyle(DesignSystem.Colors.secondaryBackground)
                 )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(style == .widget ? Color.white.opacity(0.1) : (colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1)), lineWidth: 1)
+                .stroke(style == .widget ? Color.white.opacity(0.1) : DesignSystem.Colors.border, lineWidth: 1)
         )
         .onAppear {
             loadFullImage()
@@ -631,7 +631,7 @@ struct ResizablePreviewPanel: View {
                 .foregroundColor(.white)
                 .padding(.vertical, 6)
                 .padding(.horizontal, 12)
-                .background(Capsule().fill(Color.green))
+                .background(Capsule().fill(DesignSystem.Colors.success))
             }
 
             actionButton(icon: "doc.on.doc", title: "Copy Image", action: copyImage)
@@ -1801,7 +1801,7 @@ struct ImageCard: View {
             Image(systemName: "sparkle")
                 .font(.system(size: 9, weight: .bold))
             Text("\(Int(result.similarity * 100))%")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
         }
         .foregroundColor(.white)
         .padding(.horizontal, 8)
@@ -1824,7 +1824,7 @@ struct ImageCard: View {
         .foregroundColor(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(Capsule().fill(Color.orange))
+        .background(Capsule().fill(DesignSystem.Colors.warning))
         .padding(6)
     }
 

@@ -202,7 +202,7 @@ struct PersonCard: View {
 
     private var photoBadge: some View {
         Text("\(person.faceCount)")
-            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
             .foregroundColor(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -215,12 +215,12 @@ struct PersonCard: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 8))
             Text("\(person.unverifiedCount)")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
         }
         .foregroundColor(.white)
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
-        .background(Capsule().fill(Color.orange))
+        .background(Capsule().fill(DesignSystem.Colors.warning))
         .padding(6)
         .padding(.bottom, 28) // Above the name overlay
     }
@@ -358,7 +358,7 @@ struct FaceVerificationView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Review Faces")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Text("Reviewing \(person.name)")
                     .font(.system(size: 13))
@@ -367,7 +367,7 @@ struct FaceVerificationView: View {
             Spacer()
             HStack(spacing: 8) {
                 Text("\(verificationResults.count)/\(person.faces.count)")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(DesignSystem.Colors.secondaryText)
                 CircularProgressView(progress: progress)
                     .frame(width: 24, height: 24)
@@ -387,7 +387,7 @@ struct FaceVerificationView: View {
             Spacer()
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 64))
-                .foregroundColor(.green)
+                .foregroundColor(DesignSystem.Colors.success)
             Text("All faces reviewed!")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(DesignSystem.Colors.primaryText)
@@ -460,10 +460,10 @@ struct FaceVerificationView: View {
                 VStack {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundColor(.green)
+                        .foregroundColor(DesignSystem.Colors.success)
                     Text("Confirm")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.green)
+                        .foregroundColor(DesignSystem.Colors.success)
                 }
                 .padding(24)
                 .opacity(offset > 50 ? Double(min(1, (offset - 50) / 50)) : 0)
@@ -472,10 +472,10 @@ struct FaceVerificationView: View {
                 VStack {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundColor(.red)
+                        .foregroundColor(DesignSystem.Colors.error)
                     Text("Reject")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.red)
+                        .foregroundColor(DesignSystem.Colors.error)
                 }
                 .padding(24)
                 .opacity(offset < -50 ? Double(min(1, (-offset - 50) / 50)) : 0)
@@ -491,7 +491,7 @@ struct FaceVerificationView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 60, height: 60)
-                    .background(Circle().fill(Color.red))
+                    .background(Circle().fill(DesignSystem.Colors.error))
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -500,7 +500,7 @@ struct FaceVerificationView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 60, height: 60)
-                    .background(Circle().fill(Color.green))
+                    .background(Circle().fill(DesignSystem.Colors.success))
             }
             .buttonStyle(PlainButtonStyle())
         }
@@ -650,7 +650,7 @@ struct CircularProgressView: View {
 
             Circle()
                 .trim(from: 0, to: progress)
-                .stroke(Color.green, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(DesignSystem.Colors.success, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut, value: progress)
         }
@@ -704,7 +704,7 @@ struct PersonFaceCard: View {
                     if face.verified {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.green)
+                            .foregroundColor(DesignSystem.Colors.success)
                             .padding(6)
                             .background(Circle().fill(Color.black.opacity(0.5)))
                     }
@@ -758,7 +758,7 @@ struct PersonFaceCard: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white)
                                 .frame(width: 44, height: 44)
-                                .background(Circle().fill(Color.green))
+                                .background(Circle().fill(DesignSystem.Colors.success))
                                 .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
                         }
                         .buttonStyle(PlainButtonStyle())

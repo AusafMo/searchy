@@ -16,7 +16,7 @@ struct VolumeStatCard: View {
                 .font(.system(size: 20, weight: .medium))
                 .foregroundColor(color)
             Text(value)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
                 .foregroundColor(DesignSystem.Colors.primaryText)
             Text(title)
                 .font(DesignSystem.Typography.caption)
@@ -26,7 +26,7 @@ struct VolumeStatCard: View {
         .padding(.vertical, DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
     }
@@ -56,7 +56,7 @@ struct VolumeCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(volume.name)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 14, weight: .semibold, design: .serif))
                             .foregroundColor(DesignSystem.Colors.primaryText)
                             .lineLimit(1)
                         if !volume.isOnline {
@@ -96,7 +96,7 @@ struct VolumeCard: View {
             HStack(spacing: DesignSystem.Spacing.xl) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(volume.imageCount)")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(DesignSystem.Colors.primaryText)
                     Text("Images")
                         .font(DesignSystem.Typography.caption2)
@@ -106,11 +106,11 @@ struct VolumeCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if let lastIndexed = volume.lastIndexed {
                         Text(lastIndexed, style: .relative)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundColor(DesignSystem.Colors.primaryText)
                     } else {
                         Text("Never")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundColor(DesignSystem.Colors.tertiaryText)
                     }
                     Text("Last Indexed")
@@ -192,7 +192,7 @@ struct VolumeCard: View {
         .padding(DesignSystem.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
         .opacity(volume.isOnline ? 1.0 : 0.7)
@@ -260,7 +260,7 @@ struct VolumeOptionsPopover: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
                 Text("Volume Options")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
             }
 
@@ -369,7 +369,7 @@ struct AddVolumeSheet: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(DesignSystem.Colors.accent)
                     Text("Add Manual Path")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 16, weight: .semibold, design: .serif))
                         .foregroundColor(DesignSystem.Colors.primaryText)
                 }
                 Spacer()
@@ -484,7 +484,7 @@ struct AddVolumeSheet: View {
                 Button(action: { addVolume() }) {
                     Text("Add Volume")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
@@ -549,7 +549,7 @@ struct DeviceCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .serif))
                         .foregroundColor(DesignSystem.Colors.primaryText)
                         .lineLimit(1)
 
@@ -593,7 +593,7 @@ struct DeviceCard: View {
         .padding(DesignSystem.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
     }

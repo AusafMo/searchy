@@ -48,7 +48,7 @@ struct ResultCardSkeleton: View {
                 .padding(.vertical, 14)
         }
         .frame(height: 200)
-        .background(colorScheme == .dark ? Color(hex: "2C2C2E") : Color(hex: "FEF7EE"))
+        .background(DesignSystem.Colors.secondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),

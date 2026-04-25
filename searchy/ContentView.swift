@@ -273,9 +273,9 @@ struct ContentView: View {
                     .foregroundColor(p.ink3)
 
                 Circle()
-                    .fill(modelState == "ready" ? Color(hex: "34D399") : (modelState == "loading" ? p.accent : p.ink3))
+                    .fill(modelState == "ready" ? DesignSystem.Colors.success : (modelState == "loading" ? p.accent : p.ink3))
                     .frame(width: 6, height: 6)
-                    .shadow(color: modelState == "ready" ? Color(hex: "34D399").opacity(0.6) : .clear, radius: 3)
+                    .shadow(color: modelState == "ready" ? DesignSystem.Colors.success.opacity(0.6) : .clear, radius: 3)
 
                 Text(modelState == "ready" ? "CLIP \(modelSettings.currentModelName.components(separatedBy: "/").last ?? "ready")" : (modelState == "loading" ? "loading..." : "unloaded"))
                     .font(.system(size: 11, design: .monospaced))
@@ -323,10 +323,10 @@ struct ContentView: View {
             } else if modelState == "ready" && modelElapsed > 0 {
                 Text("Model ready \(String(format: "%.1fs", modelElapsed))")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(hex: "34D399"))
+                    .foregroundColor(DesignSystem.Colors.success)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color(hex: "34D399").opacity(0.1))
+                    .background(DesignSystem.Colors.success.opacity(0.1))
                     .clipShape(Capsule())
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     .onAppear {
@@ -651,7 +651,7 @@ struct ContentView: View {
                         Spacer()
 
                         Text("\(Int(faceManager.scanPercentage * 100))%")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
                             .foregroundColor(DesignSystem.Colors.accent)
                     }
 
@@ -719,7 +719,7 @@ struct ContentView: View {
 
                     VStack(spacing: 8) {
                         Text("Face Recognition")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(.system(size: 22, weight: .bold, design: .serif))
                             .foregroundColor(DesignSystem.Colors.primaryText)
 
                         Text(faceManager.hasScannedBefore
@@ -1064,7 +1064,7 @@ struct ContentView: View {
             // Header
             HStack {
                 Text("Merge \(selectedPeopleIds.count) People")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
                 Button(action: { showBulkMergeSheet = false }) {
@@ -1140,11 +1140,11 @@ struct ContentView: View {
                     }
                     .padding()
                 }
-                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+                .background(DesignSystem.Colors.secondaryBackground)
             }
         }
         .frame(width: 380, height: 450)
-        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+        .background(DesignSystem.Colors.secondaryBackground)
     }
 
     private var bulkMergeSelectedPeople: [Person] {
@@ -1300,7 +1300,7 @@ struct ContentView: View {
                     if isEditingPersonName {
                         TextField("Name", text: $editingPersonName)
                             .textFieldStyle(PlainTextFieldStyle())
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .font(.system(size: 20, weight: .bold, design: .serif))
                             .foregroundColor(DesignSystem.Colors.primaryText)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
@@ -1315,7 +1315,7 @@ struct ContentView: View {
                     } else {
                         HStack(spacing: 6) {
                             Text(person.name)
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .font(.system(size: 20, weight: .bold, design: .serif))
                                 .foregroundColor(DesignSystem.Colors.primaryText)
                                 .lineLimit(1)
 
@@ -1519,7 +1519,7 @@ struct ContentView: View {
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.green))
+                                    .background(Capsule().fill(DesignSystem.Colors.success))
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 .disabled(isBatchProcessing)
@@ -1626,7 +1626,7 @@ struct ContentView: View {
     private var addGroupSheet: some View {
         VStack(spacing: 16) {
             Text("Create Group")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .serif))
                 .foregroundColor(DesignSystem.Colors.primaryText)
 
             TextField("Group name", text: $newGroupName)
@@ -1679,7 +1679,7 @@ struct ContentView: View {
             // Header
             HStack {
                 Text("Merge People")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
                 Button(action: { showMergeSheet = false }) {
@@ -1780,11 +1780,11 @@ struct ContentView: View {
                     }
                     .padding()
                 }
-                .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+                .background(DesignSystem.Colors.secondaryBackground)
             }
         }
         .frame(width: 420, height: 520)
-        .background(colorScheme == .dark ? Color(hex: "1a1a1a") : Color.white)
+        .background(DesignSystem.Colors.secondaryBackground)
     }
 
     private var mergeTargetPeople: [Person] {
@@ -2021,7 +2021,7 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Favorites")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 24, weight: .bold, design: .serif))
                         .foregroundColor(DesignSystem.Colors.primaryText)
 
                     Text("\(favoritesManager.favoriteImages.count) images")
@@ -2047,7 +2047,7 @@ struct ContentView: View {
                         .foregroundColor(DesignSystem.Colors.tertiaryText)
 
                     Text("No Favorites Yet")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 24, weight: .bold, design: .serif))
                         .foregroundColor(DesignSystem.Colors.primaryText)
 
                     Text("Hover over any image and click the heart\nto add it to your favorites.")
@@ -2093,7 +2093,7 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Volumes")
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .font(.system(size: 20, weight: .bold, design: .serif))
                             .foregroundColor(DesignSystem.Colors.primaryText)
                         Text("Manage external drives, RAID arrays, and network storage")
                             .font(DesignSystem.Typography.callout)
@@ -2130,7 +2130,7 @@ struct ContentView: View {
                                 Text("Add Path")
                                     .font(.system(size: 12, weight: .medium))
                             }
-                            .foregroundColor(.white)
+                            .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(
@@ -2200,7 +2200,7 @@ struct ContentView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
                 Text("Connected Devices")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Text("(\(mobileDeviceManager.devices.count))")
                     .font(DesignSystem.Typography.caption)
@@ -2256,7 +2256,7 @@ struct ContentView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(iconColor)
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Text("(\(volumes.count))")
                     .font(DesignSystem.Typography.caption)
@@ -2277,7 +2277,7 @@ struct ContentView: View {
                 .font(.system(size: 48))
                 .foregroundColor(DesignSystem.Colors.tertiaryText)
             Text("No External Volumes Detected")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .font(.system(size: 16, weight: .semibold, design: .serif))
                 .foregroundColor(DesignSystem.Colors.primaryText)
             Text("Connect an external drive, RAID array, or add a network path manually")
                 .font(DesignSystem.Typography.callout)
@@ -2290,7 +2290,7 @@ struct ContentView: View {
                     Text("Add Manual Path")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(
@@ -2321,7 +2321,7 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Setup")
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .font(.system(size: 24, weight: .bold, design: .serif))
                             .foregroundColor(DesignSystem.Colors.primaryText)
 
                         Text("Configure your search index and CLIP model")
@@ -2360,7 +2360,7 @@ struct ContentView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
                 Text("CLIP Model")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
                 if modelSettings.isChangingModel {
@@ -2416,7 +2416,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.orange.opacity(0.08))
+                        .fill(DesignSystem.Colors.warning.opacity(0.08))
                 )
             } else {
                 VStack(alignment: .leading, spacing: 6) {
@@ -2459,7 +2459,7 @@ struct ContentView: View {
         .padding(DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
         .frame(maxWidth: .infinity)
@@ -2476,7 +2476,7 @@ struct ContentView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
                 Text("Watched Directories")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
                 Button(action: { addNewDirectory() }) {
@@ -2534,7 +2534,7 @@ struct ContentView: View {
         .padding(DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
         .frame(maxWidth: .infinity)
@@ -2548,7 +2548,7 @@ struct ContentView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(DesignSystem.Colors.accent)
                 Text("Index Stats")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.system(size: 16, weight: .semibold, design: .serif))
                     .foregroundColor(DesignSystem.Colors.primaryText)
                 Spacer()
                 Button(action: { loadIndexStats() }) {
@@ -2576,7 +2576,7 @@ struct ContentView: View {
                         icon: "externaldrive",
                         label: "Index Size",
                         value: stats.fileSize,
-                        color: .orange
+                        color: DesignSystem.Colors.warning
                     )
 
                     // Last Updated
@@ -2585,7 +2585,7 @@ struct ContentView: View {
                             icon: "clock",
                             label: "Last Updated",
                             value: formatRelativeDate(lastMod),
-                            color: .green
+                            color: DesignSystem.Colors.success
                         )
                     }
 
@@ -2594,7 +2594,7 @@ struct ContentView: View {
                         icon: "folder",
                         label: "Directories",
                         value: "\(dirManager.watchedDirectories.count)",
-                        color: .purple
+                        color: DesignSystem.Colors.accent
                     )
                 }
             } else {
@@ -2637,11 +2637,11 @@ struct ContentView: View {
                         Spacer()
                     }
                     .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(.orange)
+                    .foregroundColor(DesignSystem.Colors.warning)
                     .padding(DesignSystem.Spacing.sm)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.orange.opacity(0.08))
+                            .fill(DesignSystem.Colors.warning.opacity(0.08))
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -2651,7 +2651,7 @@ struct ContentView: View {
         .padding(DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? Color(hex: "2C2C2E") : .white)
+                .fill(DesignSystem.Colors.secondaryBackground)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
         .frame(maxWidth: .infinity)
@@ -3284,7 +3284,7 @@ struct ContentView: View {
                         Text("Scan")
                     }
                     .font(DesignSystem.Typography.callout.weight(.medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
                     .padding(.horizontal, DesignSystem.Spacing.md)
                     .padding(.vertical, DesignSystem.Spacing.sm)
                     .background(
@@ -3383,7 +3383,7 @@ struct ContentView: View {
         .padding(DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(colorScheme == .dark ? DesignSystem.Colors.darkSecondaryBackground : DesignSystem.Colors.secondaryBackground)
+                .fill(DesignSystem.Colors.secondaryBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
@@ -3569,7 +3569,7 @@ struct ContentView: View {
                     Text("Move to Trash")
                 }
                 .font(DesignSystem.Typography.callout)
-                .foregroundColor(.white)
+                .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
                 .padding(.horizontal, DesignSystem.Spacing.md)
                 .padding(.vertical, DesignSystem.Spacing.sm)
                 .background(
@@ -3582,7 +3582,7 @@ struct ContentView: View {
         .padding(DesignSystem.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(colorScheme == .dark ? DesignSystem.Colors.darkTertiaryBackground : DesignSystem.Colors.tertiaryBackground)
+                .fill(DesignSystem.Colors.tertiaryBackground)
         )
         .padding(.horizontal, DesignSystem.Spacing.xl)
         .padding(.bottom, DesignSystem.Spacing.lg)
@@ -3832,7 +3832,7 @@ struct ContentView: View {
             // Success icon
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 24))
-                .foregroundColor(.green)
+                .foregroundColor(DesignSystem.Colors.success)
 
             // Stats
             VStack(alignment: .leading, spacing: 4) {
