@@ -65,73 +65,74 @@ struct ContentView: View {
     @State private var showUpdateBanner = false
     @Environment(\.colorScheme) var colorScheme
 
+    private var p: AtelierPalette { themeManager.palette }
+
     var body: some View {
         ZStack {
-            // Clean solid background
-            (colorScheme == .dark ? Color(hex: "000000") : Color(hex: "FFFFFF"))
-                .ignoresSafeArea()
+            p.paper.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Friendly header
-                modernHeader
+            HStack(spacing: 0) {
+                // Atelier Sidebar
+                atelierSidebar
 
-                // Update banner
-                if showUpdateBanner, let newVersion = updateAvailable {
-                    HStack(spacing: DesignSystem.Spacing.sm) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 13))
-                        Text("Searchy v\(newVersion) available")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("—")
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                        Text("brew upgrade --cask searchy")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        Button(action: {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString("brew upgrade --cask searchy", forType: .string)
-                        }) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 10))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                // Main content
+                VStack(spacing: 0) {
+                    // Compact header bar
+                    atelierHeader
+
+                    // Update banner
+                    if showUpdateBanner, let newVersion = updateAvailable {
+                        HStack(spacing: DesignSystem.Spacing.sm) {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 13))
+                            Text("Searchy v\(newVersion) available")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("—")
+                                .foregroundColor(p.ink2)
+                            Text("brew upgrade --cask searchy")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            Button(action: {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString("brew upgrade --cask searchy", forType: .string)
+                            }) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(p.ink2)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .help("Copy command")
+                            Spacer()
+                            Button(action: { withAnimation { showUpdateBanner = false } }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(p.ink2)
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .help("Copy command")
-                        Spacer()
-                        Button(action: { withAnimation { showUpdateBanner = false } }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        .foregroundColor(p.accent)
+                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.vertical, DesignSystem.Spacing.sm)
+                        .background(p.accent.opacity(0.08))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .padding(.horizontal, DesignSystem.Spacing.lg)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(DesignSystem.Colors.accent.opacity(0.08))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
 
-                // Tab Picker
-                tabPicker
-                    .padding(.top, DesignSystem.Spacing.md)
-
-                // Main content area based on active tab
-                switch activeTab {
-                case .faces:
-                    facesTabContent
-                case .search:
-                    searchTabContent
-                case .volumes:
-                    volumesTabContent
-                case .duplicates:
-                    duplicatesTabContent
-                case .favorites:
-                    favoritesTabContent
-                case .setup:
-                    setupTabContent
+                    // Main content area based on active tab
+                    switch activeTab {
+                    case .faces:
+                        facesTabContent
+                    case .search:
+                        searchTabContent
+                    case .volumes:
+                        volumesTabContent
+                    case .duplicates:
+                        duplicatesTabContent
+                    case .favorites:
+                        favoritesTabContent
+                    case .setup:
+                        setupTabContent
+                    }
                 }
             }
-            .padding(.horizontal, DesignSystem.Spacing.md)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -143,7 +144,6 @@ struct ContentView: View {
             setupPasteMonitor()
             startModelStatusPolling()
             checkForUpdates()
-            // Focus the search field on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isSearchFocused = true
             }
@@ -156,153 +156,220 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Header (Friendly, Craft-style)
-    private var modernHeader: some View {
-        HStack(spacing: DesignSystem.Spacing.lg) {
-            // Friendly logo - warm, inviting
-            HStack(spacing: 10) {
-                // Photo icon instead of tech magnifying glass
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(DesignSystem.Colors.accent.opacity(0.12))
-                        .frame(width: 32, height: 32)
-                    Image(systemName: "photo.stack.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.accent)
-                }
+    // MARK: - Atelier Sidebar
+    private var atelierSidebar: some View {
+        let sidebarItems: [(id: AppTab, label: String, icon: String, count: Int?, badge: Bool)] = [
+            (.faces,      "Faces",      "person.2",            faceManager.people.count > 0 ? faceManager.people.count : nil, false),
+            (.search,     "Searchy",    "magnifyingglass",     nil, false),
+            (.volumes,    "Volumes",    "externaldrive",       nil, false),
+            (.duplicates, "Duplicates", "doc.on.doc",          duplicatesManager.groups.count > 0 ? duplicatesManager.groups.count : nil, duplicatesManager.groups.count > 0),
+            (.favorites,  "Favorites",  "heart",               favoritesManager.favorites.count > 0 ? favoritesManager.favorites.count : nil, false),
+            (.setup,      "Setup",      "slider.horizontal.3", nil, false),
+        ]
+
+        return VStack(alignment: .leading, spacing: 2) {
+            // Logo
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(p.accent)
+                    .frame(width: 22, height: 22)
+                    .overlay(
+                        Text("S")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                    )
                 Text("Searchy")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .font(.system(size: 22, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 18)
+
+            // Section header
+            Text("LIBRARY")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1)
+                .foregroundColor(p.ink3)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
+
+            // Nav items
+            ForEach(sidebarItems, id: \.id) { item in
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        activeTab = item.id
+                    }
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(activeTab == item.id ? p.accent : p.ink2)
+                            .frame(width: 16)
+
+                        Text(item.label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(activeTab == item.id ? p.ink : p.ink2)
+
+                        Spacer()
+
+                        if let count = item.count {
+                            Text("\(count)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(item.badge ? p.accent : p.ink3)
+                                .fontWeight(item.badge ? .semibold : .regular)
+                                .monospacedDigit()
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(activeTab == item.id ? p.card : Color.clear)
+                            .shadow(color: activeTab == item.id ? Color.black.opacity(0.06) : .clear, radius: 8, y: 2)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            // Recent searches
+            Text("RECENT SEARCHES")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1)
+                .foregroundColor(p.ink3)
+                .padding(.horizontal, 8)
+                .padding(.top, 20)
+                .padding(.bottom, 6)
+
+            ForEach(["sunset over mountains", "invoice 2024", "people wearing red"], id: \.self) { query in
+                Button(action: {
+                    activeTab = .search
+                    searchText = query
+                    performSearch()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 10))
+                            .foregroundColor(p.ink3)
+                        Text(query)
+                            .font(.system(size: 14, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(p.ink2)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
             }
 
             Spacer()
 
-            // Friendly icon buttons
-            HStack(spacing: DesignSystem.Spacing.sm) {
-                // Model loading indicator
-                if modelState == "loading" {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                        Text("Loading model \(String(format: "%.0fs", modelElapsed))")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(.orange)
+            // Model status footer
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 11))
+                    .foregroundColor(p.ink3)
+
+                Circle()
+                    .fill(modelState == "ready" ? Color(hex: "34D399") : (modelState == "loading" ? p.accent : p.ink3))
+                    .frame(width: 6, height: 6)
+                    .shadow(color: modelState == "ready" ? Color(hex: "34D399").opacity(0.6) : .clear, radius: 3)
+
+                Text(modelState == "ready" ? "CLIP \(modelSettings.currentModelName.components(separatedBy: "/").last ?? "ready")" : (modelState == "loading" ? "loading..." : "unloaded"))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(p.ink3)
+                    .lineLimit(1)
+            }
+            .padding(.top, 10)
+            .padding(.horizontal, 8)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(p.line)
+                    .frame(height: 1)
+            }
+        }
+        .padding(14)
+        .padding(.top, 6)
+        .frame(width: 196)
+        .background(p.sidebar)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(p.line)
+                .frame(width: 1)
+        }
+    }
+
+    // MARK: - Compact Header (replaces old modernHeader)
+    private var atelierHeader: some View {
+        HStack(spacing: DesignSystem.Spacing.sm) {
+            Spacer()
+
+            // Model loading indicator
+            if modelState == "loading" {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("Loading model \(String(format: "%.0fs", modelElapsed))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(Capsule())
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            } else if modelState == "ready" && modelElapsed > 0 {
+                Text("Model ready \(String(format: "%.1fs", modelElapsed))")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "34D399"))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.orange.opacity(0.1))
+                    .background(Color(hex: "34D399").opacity(0.1))
                     .clipShape(Capsule())
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                } else if modelState == "ready" && modelElapsed > 0 {
-                    Text("Model ready \(String(format: "%.1fs", modelElapsed))")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(.green)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.green.opacity(0.1))
-                        .clipShape(Capsule())
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                        .onAppear {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                                withAnimation { self.modelElapsed = 0 }
-                            }
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                            withAnimation { self.modelElapsed = 0 }
                         }
-                } else if modelState == "unloaded" {
-                    Text("Model unloaded")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(Capsule())
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
-
-                // Indexing indicator (only when active)
-                if isIndexing {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                        Text("\(Int(indexingPercent))%")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
                     }
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(DesignSystem.Colors.accent.opacity(0.1))
-                    .clipShape(Capsule())
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
-
-                MinimalIconButton(icon: "plus", tooltip: "Add folder") {
-                    if !isIndexing { selectAndIndexFolder() }
-                }
-                .disabled(isIndexing)
-
-                MinimalIconButton(icon: "arrow.clockwise", tooltip: "Rebuild index") {
-                    if !isIndexing { rebuildIndex() }
-                }
-                .disabled(isIndexing)
-
-                MinimalIconButton(icon: "gearshape", tooltip: "Settings") {
-                    isShowingSettings = true
-                }
-
-                // Theme switcher - compact
-                ThemeSwitcherCompact()
             }
+
+            // Indexing indicator
+            if isIndexing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                    Text("\(Int(indexingPercent))%")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(p.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(p.accent.opacity(0.1))
+                .clipShape(Capsule())
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+
+            MinimalIconButton(icon: "plus", tooltip: "Add folder") {
+                if !isIndexing { selectAndIndexFolder() }
+            }
+            .disabled(isIndexing)
+
+            MinimalIconButton(icon: "arrow.clockwise", tooltip: "Rebuild index") {
+                if !isIndexing { rebuildIndex() }
+            }
+            .disabled(isIndexing)
+
+            MinimalIconButton(icon: "gearshape", tooltip: "Settings") {
+                isShowingSettings = true
+            }
+
+            ThemeSwitcherCompact()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - Tab Picker (Minimal)
-    private var tabPicker: some View {
-        HStack(spacing: 2) {
-            ForEach(AppTab.allCases, id: \.self) { tab in
-                tabButton(for: tab)
-            }
-        }
-        .padding(3)
-        .background(
-            colorScheme == .dark ?
-                Color.white.opacity(0.04) :
-                Color.black.opacity(0.03)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 11))
-    }
-
-    private func tabButton(for tab: AppTab) -> some View {
-        let isActive = activeTab == tab
-
-        return Button(action: {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                activeTab = tab
-            }
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 13, weight: .medium))
-                Text(tab.rawValue)
-                    .font(.system(size: 13, weight: isActive ? .semibold : .medium))
-            }
-            .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-            .scaleEffect(isActive ? 1.08 : 1.0)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
-        .background(
-            ZStack {
-                if isActive {
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(DesignSystem.Colors.accent.opacity(0.12))
-                        .matchedGeometryEffect(id: "activeTab", in: tabAnimation)
-                }
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Faces Tab Content
@@ -333,17 +400,27 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("People")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 38, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
                     if faceManager.totalFacesDetected > 0 {
                         if !peopleSearchText.isEmpty {
                             Text("\(filteredPeople.count) of \(faceManager.people.count) people")
                                 .font(DesignSystem.Typography.caption)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                         } else {
-                            Text("\(faceManager.people.count) people • \(faceManager.totalFacesDetected) faces")
-                                .font(DesignSystem.Typography.caption)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.2")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(p.ink3)
+                                Text("\(faceManager.people.count) named")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(p.ink2)
+                                Text("\u{00B7}")
+                                    .foregroundColor(p.ink3)
+                                Text("\(faceManager.totalFacesDetected) faces")
+                                    .font(DesignSystem.Typography.caption)
+                                    .foregroundColor(p.ink2)
+                            }
                         }
                     }
                 }
@@ -2616,27 +2693,38 @@ struct ContentView: View {
 
     // MARK: - Search Tab Content
     private var searchTabContent: some View {
-        VStack(spacing: 20) {
-            // Show indexing progress or search bar
+        VStack(spacing: 0) {
+            // Show indexing progress or search greeting + bar
             if isIndexing {
                 indexingProgressView
+                    .padding(.horizontal, DesignSystem.Spacing.xl)
+                    .padding(.top, 12)
             } else if let report = indexingReport {
                 indexingReportView(report)
-            } else {
-                modernSearchBar
+                    .padding(.horizontal, DesignSystem.Spacing.xl)
                     .padding(.top, 12)
+            } else if searchText.isEmpty && searchManager.results.isEmpty {
+                // Atelier editorial greeting
+                atelierGreeting
             }
 
-            // Filter bar (show when there are results or recent images)
+            // Search bar (always visible when not indexing)
+            if !isIndexing && indexingReport == nil {
+                modernSearchBar
+                    .padding(.horizontal, DesignSystem.Spacing.xxl)
+                    .padding(.top, searchText.isEmpty && searchManager.results.isEmpty ? 0 : 16)
+            }
+
+            // Filter bar
             if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
                 filterBar
+                    .padding(.top, 12)
             }
 
             errorView
 
             // Results area with optional preview panel
             HStack(alignment: .top, spacing: 16) {
-                // Results
                 Group {
                     if searchManager.isSearching {
                         VStack {
@@ -2644,7 +2732,7 @@ struct ContentView: View {
                             ProgressView()
                             Text("Searching...")
                                 .font(.system(size: 13))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                                 .padding(.top, 8)
                             Spacer()
                         }
@@ -2661,7 +2749,6 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                // Preview panel (appears after 500ms hover)
                 if showPreviewPanel, let result = previewResult {
                     ResizablePreviewPanel(
                         result: result,
@@ -2677,9 +2764,45 @@ struct ContentView: View {
                     }
                 }
             }
+            .padding(.top, 12)
         }
-        .padding(.horizontal, DesignSystem.Spacing.xl)
-        .padding(.top, 8)
+        .padding(.horizontal, DesignSystem.Spacing.md)
+    }
+
+    // MARK: - Atelier Greeting
+    private var atelierGreeting: some View {
+        VStack(spacing: 6) {
+            Text("24,891 photos \u{00B7} 7 directories")
+                .font(.system(size: 11))
+                .tracking(2)
+                .textCase(.uppercase)
+                .foregroundColor(p.ink3)
+                .padding(.bottom, 8)
+
+            HStack(spacing: 0) {
+                Text("What are you ")
+                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+                Text("looking")
+                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.accent)
+                Text(" for?")
+                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+
+            Text("describe a moment, paste a screenshot, drop an image")
+                .font(.system(size: 14, weight: .regular, design: .serif))
+                .italic()
+                .foregroundColor(p.ink2)
+                .padding(.top, 2)
+        }
+        .padding(.top, 40)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Preview Hover Handling
@@ -3469,10 +3592,9 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var modernSearchBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             // Pasted image preview or search icon
             if let image = pastedImage {
-                // Show pasted image thumbnail
                 ZStack(alignment: .topTrailing) {
                     Image(nsImage: image)
                         .resizable()
@@ -3481,10 +3603,9 @@ struct ContentView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(DesignSystem.Colors.accent, lineWidth: 2)
+                                .stroke(p.accent, lineWidth: 2)
                         )
 
-                    // Clear button
                     Button(action: {
                         withAnimation(.easeOut(duration: 0.15)) {
                             pastedImage = nil
@@ -3500,8 +3621,9 @@ struct ContentView: View {
                 }
 
                 Text("Finding similar images...")
-                    .font(.system(size: 14))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .font(.system(size: 14, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink2)
 
                 Spacer()
 
@@ -3510,15 +3632,16 @@ struct ContentView: View {
                         .scaleEffect(0.65)
                 }
             } else {
-                // Normal search mode
+                // Magnifier icon
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(p.accent)
 
-                // Clean text field
-                TextField("Search by text or drop an image here...", text: $searchText)
+                // Text field
+                TextField("describe a moment, or drop an image...", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 14))
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
                     .focused($isSearchFocused)
                     .onSubmit {
                         if !searchManager.isSearching && !searchText.isEmpty {
@@ -3529,7 +3652,6 @@ struct ContentView: View {
                         }
                     }
                     .onChange(of: searchText) { oldValue, newValue in
-                        // Clear pasted image when user starts typing
                         if pastedImage != nil && !newValue.isEmpty {
                             pastedImage = nil
                         }
@@ -3545,7 +3667,6 @@ struct ContentView: View {
                         }
                     }
 
-                // Right side: clear button, loading, or filter
                 if searchManager.isSearching {
                     ProgressView()
                         .scaleEffect(0.65)
@@ -3554,27 +3675,40 @@ struct ContentView: View {
                     Button(action: { searchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .foregroundColor(p.ink3)
                     }
                     .buttonStyle(PlainButtonStyle())
                     .transition(.opacity)
                 }
 
+                // Keyboard shortcut hint
+                Text("\u{2318} K")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(p.ink3)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(p.sidebar)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(p.line, lineWidth: 1)
+                            )
+                    )
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(
-                    isSearchFocused ? DesignSystem.Colors.accent : Color.clear,
-                    lineWidth: isSearchFocused ? 1.5 : 0
+            RoundedRectangle(cornerRadius: 16)
+                .fill(p.card)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(p.line, lineWidth: 1)
                 )
         )
+        .shadow(color: isSearchFocused ? p.halo : .clear, radius: 12, y: 0)
+        .shadow(color: Color.black.opacity(0.06), radius: 20, y: 8)
         .animation(.easeOut(duration: 0.2), value: isSearchFocused)
         .contentShape(Rectangle())
         .onTapGesture { isSearchFocused = true }
@@ -3585,15 +3719,16 @@ struct ContentView: View {
         .overlay(
             Group {
                 if isDropTargeted {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(DesignSystem.Colors.accent, lineWidth: 3)
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(p.accent, lineWidth: 3)
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(DesignSystem.Colors.accent.opacity(0.1))
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(p.accent.opacity(0.1))
                         )
                 }
             }
         )
+        .frame(maxWidth: 720)
     }
 
     // MARK: - Indexing Progress View
@@ -3928,41 +4063,68 @@ struct ContentView: View {
         VStack(spacing: DesignSystem.Spacing.xl) {
             Spacer()
 
-            VStack(spacing: DesignSystem.Spacing.xl) {
-                // Clean icon
+            VStack(spacing: 28) {
+                // Stacked paper illustration
                 ZStack {
-                    Circle()
-                        .fill(DesignSystem.Colors.accent.opacity(0.08))
-                        .frame(width: 100, height: 100)
-
-                    Image(systemName: "photo.stack")
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(p.card)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                        .frame(width: 140, height: 140)
+                        .rotationEffect(.degrees(-6))
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(p.card)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                        .frame(width: 140, height: 140)
+                        .rotationEffect(.degrees(3))
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(p.card)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                        .frame(width: 140, height: 140)
+                        .overlay(
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 36, weight: .light))
+                                .foregroundColor(p.ink3)
+                        )
                 }
 
-                VStack(spacing: DesignSystem.Spacing.md) {
-                    Text("Search Your Images")
-                        .font(DesignSystem.Typography.title)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                VStack(spacing: 8) {
+                    Text("nothing matches that, yet")
+                        .font(.system(size: 32, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
 
-                    Text("Use natural language to find images in your indexed folders")
-                        .font(DesignSystem.Typography.callout)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Text("Searchy looked across your library. None passed the similarity floor.")
+                        .font(.system(size: 16, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 400)
+                        .frame(maxWidth: 440)
+                }
 
-                    // Example queries
-                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                        Text("Try searching for:")
-                            .font(DesignSystem.Typography.caption.weight(.medium))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                            .padding(.top, DesignSystem.Spacing.md)
-
-                        HStack(spacing: DesignSystem.Spacing.sm) {
-                            ExampleQueryChip(text: "sunset over mountains")
-                            ExampleQueryChip(text: "cat sleeping")
-                            ExampleQueryChip(text: "coffee cup")
-                        }
+                // Suggestions
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.accent)
+                        Text("try a softer, more general phrase")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
+                    }
+                    HStack(spacing: 10) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.accent)
+                        Text("shift the slider toward vision mode")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
+                    }
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.up.doc")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.accent)
+                        Text("drag in a reference image to find visually similar")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
                     }
                 }
             }
@@ -3980,10 +4142,11 @@ struct ContentView: View {
                     Spacer()
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 36, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .foregroundColor(p.ink3)
                     Text("No photos yet")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 14, weight: .medium, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
                     Spacer()
                 }
             } else if filteredRecentImages.isEmpty {
@@ -3991,14 +4154,47 @@ struct ContentView: View {
                     Spacer()
                     Image(systemName: "line.3.horizontal.decrease.circle")
                         .font(.system(size: 36, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .foregroundColor(p.ink3)
                     Text("No photos match filters")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 14, weight: .medium, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
                     Spacer()
                 }
             } else {
                 ScrollView {
+                    // Suggestion chips (Atelier style)
+                    if searchText.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(["sunset over mountains", "invoice 2024", "screenshots", "people wearing red"], id: \.self) { suggestion in
+                                Button(action: {
+                                    searchText = suggestion
+                                    performSearch()
+                                }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: suggestionIcon(for: suggestion))
+                                            .font(.system(size: 11))
+                                            .foregroundColor(p.ink3)
+                                        Text(suggestion)
+                                            .font(.system(size: 14, weight: .regular, design: .serif))
+                                            .italic()
+                                            .foregroundColor(p.ink2)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule()
+                                            .fill(p.card)
+                                            .overlay(Capsule().stroke(p.line, lineWidth: 1))
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, DesignSystem.Spacing.xl)
+                        .padding(.bottom, 16)
+                    }
+
                     MasonryGrid(items: filteredRecentImages, columns: 4, spacing: 12) { result in
                         MasonryImageCard(
                             result: result,
@@ -4013,6 +4209,14 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func suggestionIcon(for text: String) -> String {
+        if text.contains("sunset") || text.contains("sun") { return "sun.max" }
+        if text.contains("people") || text.contains("person") { return "person.2" }
+        if text.contains("screenshot") { return "rectangle.on.rectangle" }
+        if text.contains("invoice") || text.contains("doc") { return "doc.text" }
+        return "sparkles"
     }
 
     // MARK: - Error View

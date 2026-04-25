@@ -867,11 +867,11 @@ struct SpotlightSearchView: View {
                     } else {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(Color.black.opacity(0.6))
+                            .foregroundColor(DesignSystem.Colors.accent)
 
                         TextField("Search images...", text: $searchText)
                             .textFieldStyle(PlainTextFieldStyle())
-                            .font(DesignSystem.Typography.title)
+                            .font(.system(size: 20, weight: .regular, design: .serif))
                             .foregroundColor(.white)
                             .focused($isSearchFocused)
                             .onSubmit {

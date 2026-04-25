@@ -28,30 +28,190 @@ extension Color {
     }
 }
 
+// MARK: - Atelier Palette
+struct AtelierPalette {
+    let name: String
+    let note: String
+    let accent: Color
+    let accent2: Color
+    let paper: Color       // Main background
+    let sidebar: Color     // Sidebar background
+    let card: Color        // Card / elevated surface
+    let ink: Color         // Primary text
+    let ink2: Color        // Secondary text
+    let ink3: Color        // Tertiary text
+    let line: Color        // Borders / dividers
+    let halo: Color        // Accent glow / focus ring
+
+    // Whether this palette is dark-mode
+    var isDark: Bool {
+        switch ThemeManager.shared.currentTheme {
+        case .noir, .onyx: return true
+        default: return false
+        }
+    }
+}
+
 // MARK: - Theme System
 enum AppTheme: String, CaseIterable {
-    case electric = "Electric"
-    case warm = "Warm"
-    case mono = "Mono"
-    case midnight = "Midnight"
+    case terracotta = "Terracotta"
+    case sage = "Sage"
+    case ink = "Ink & Ochre"
+    case bordeaux = "Bordeaux"
+    case cobalt = "Cobalt"
+    case noir = "Noir"
+    case onyx = "Onyx"
 
     var icon: String {
         switch self {
-        case .electric: return "bolt.fill"
-        case .warm: return "sun.max.fill"
-        case .mono: return "circle.lefthalf.filled"
-        case .midnight: return "moon.stars.fill"
+        case .terracotta: return "sun.max.fill"
+        case .sage: return "leaf.fill"
+        case .ink: return "pencil.line"
+        case .bordeaux: return "book.fill"
+        case .cobalt: return "drop.fill"
+        case .noir: return "moon.stars.fill"
+        case .onyx: return "circle.fill"
         }
     }
 
     var description: String {
         switch self {
-        case .electric: return "Vibrant gradients, neon accents"
-        case .warm: return "Amber tones, cozy feel"
-        case .mono: return "Grayscale + one pop color"
-        case .midnight: return "Dark-first, subtle glows"
+        case .terracotta: return "Warm orange on bone paper"
+        case .sage: return "Botanical green, oat paper"
+        case .ink: return "Editorial near-black with mustard"
+        case .bordeaux: return "Deep wine on cream"
+        case .cobalt: return "Deep blue against linen"
+        case .noir: return "Inverted dark, serif in charge"
+        case .onyx: return "True black, one green ember"
         }
     }
+
+    var palette: AtelierPalette {
+        switch self {
+        case .terracotta: return .terracotta
+        case .sage: return .sage
+        case .ink: return .ink
+        case .bordeaux: return .bordeaux
+        case .cobalt: return .cobalt
+        case .noir: return .noir
+        case .onyx: return .onyx
+        }
+    }
+
+    var isDark: Bool {
+        switch self {
+        case .noir, .onyx: return true
+        default: return false
+        }
+    }
+}
+
+// MARK: - Atelier Palette Definitions
+extension AtelierPalette {
+    static let terracotta = AtelierPalette(
+        name: "Terracotta",
+        note: "Warm orange on bone paper. The original calm.",
+        accent: Color(hex: "C2410C"),
+        accent2: Color(hex: "F59E0B"),
+        paper: Color(hex: "FAF7F1"),
+        sidebar: Color(hex: "F4EFE6"),
+        card: Color(hex: "FFFFFF"),
+        ink: Color(hex: "1A1814"),
+        ink2: Color(hex: "6B6760"),
+        ink3: Color(hex: "A39E94"),
+        line: Color(hex: "1A1814").opacity(0.08),
+        halo: Color(hex: "C2410C").opacity(0.07)
+    )
+
+    static let sage = AtelierPalette(
+        name: "Sage",
+        note: "Botanical green, oat paper. Slow, considered.",
+        accent: Color(hex: "3F6B49"),
+        accent2: Color(hex: "A7B89C"),
+        paper: Color(hex: "F5F2E8"),
+        sidebar: Color(hex: "EBE7DA"),
+        card: Color(hex: "FBFAF5"),
+        ink: Color(hex: "1F2620"),
+        ink2: Color(hex: "5C6359"),
+        ink3: Color(hex: "9AA095"),
+        line: Color(hex: "1F2620").opacity(0.08),
+        halo: Color(hex: "3F6B49").opacity(0.07)
+    )
+
+    static let ink = AtelierPalette(
+        name: "Ink & Ochre",
+        note: "Editorial near-black with one pop of mustard.",
+        accent: Color(hex: "B8860B"),
+        accent2: Color(hex: "1F1B16"),
+        paper: Color(hex: "F2EFE7"),
+        sidebar: Color(hex: "E8E4D9"),
+        card: Color(hex: "FBFAF5"),
+        ink: Color(hex: "15110D"),
+        ink2: Color(hex: "54504A"),
+        ink3: Color(hex: "8E8A82"),
+        line: Color(hex: "15110D").opacity(0.10),
+        halo: Color(hex: "B8860B").opacity(0.10)
+    )
+
+    static let bordeaux = AtelierPalette(
+        name: "Bordeaux",
+        note: "Deep wine on cream. Library / monograph energy.",
+        accent: Color(hex: "7E1D1F"),
+        accent2: Color(hex: "D49A56"),
+        paper: Color(hex: "FBF6EC"),
+        sidebar: Color(hex: "F2EBDB"),
+        card: Color(hex: "FFFCF5"),
+        ink: Color(hex: "1B100E"),
+        ink2: Color(hex: "6B5651"),
+        ink3: Color(hex: "A89A92"),
+        line: Color(hex: "1B100E").opacity(0.08),
+        halo: Color(hex: "7E1D1F").opacity(0.07)
+    )
+
+    static let cobalt = AtelierPalette(
+        name: "Cobalt",
+        note: "A single deep blue against linen. Quiet, technical.",
+        accent: Color(hex: "1E3A8A"),
+        accent2: Color(hex: "60A5FA"),
+        paper: Color(hex: "F4F2EC"),
+        sidebar: Color(hex: "E9E6DC"),
+        card: Color(hex: "FBFAF5"),
+        ink: Color(hex: "0F1530"),
+        ink2: Color(hex: "4F5673"),
+        ink3: Color(hex: "8E94A6"),
+        line: Color(hex: "0F1530").opacity(0.08),
+        halo: Color(hex: "1E3A8A").opacity(0.08)
+    )
+
+    static let noir = AtelierPalette(
+        name: "Noir",
+        note: "Atelier inverted. Dark mode, serif still in charge.",
+        accent: Color(hex: "E0B05A"),
+        accent2: Color(hex: "D9CFC0"),
+        paper: Color(hex: "161310"),
+        sidebar: Color(hex: "0F0D0B"),
+        card: Color(hex: "1F1B17"),
+        ink: Color(hex: "F2EBDD"),
+        ink2: Color(hex: "A8A095"),
+        ink3: Color(hex: "6B665C"),
+        line: Color(hex: "FFF7E8").opacity(0.08),
+        halo: Color(hex: "E0B05A").opacity(0.10)
+    )
+
+    static let onyx = AtelierPalette(
+        name: "Onyx",
+        note: "True black. The serif holds the room. One green ember.",
+        accent: Color(hex: "7BC97D"),
+        accent2: Color(hex: "E8E4D9"),
+        paper: Color(hex: "000000"),
+        sidebar: Color(hex: "070706"),
+        card: Color(hex: "0E0E0C"),
+        ink: Color(hex: "F5F1E8"),
+        ink2: Color(hex: "9C988E"),
+        ink3: Color(hex: "5A574F"),
+        line: Color(hex: "F5F1E8").opacity(0.07),
+        halo: Color(hex: "7BC97D").opacity(0.10)
+    )
 }
 
 // MARK: - Appearance Mode
@@ -84,6 +244,7 @@ class ThemeManager: ObservableObject {
     @Published var currentTheme: AppTheme {
         didSet {
             UserDefaults.standard.set(currentTheme.rawValue, forKey: "appTheme")
+            applyAppearance()
         }
     }
 
@@ -94,12 +255,16 @@ class ThemeManager: ObservableObject {
         }
     }
 
+    var palette: AtelierPalette {
+        currentTheme.palette
+    }
+
     private init() {
         if let saved = UserDefaults.standard.string(forKey: "appTheme"),
            let theme = AppTheme(rawValue: saved) {
             self.currentTheme = theme
         } else {
-            self.currentTheme = .mono  // Sharp, clean default
+            self.currentTheme = .sage
         }
 
         if let savedAppearance = UserDefaults.standard.string(forKey: "appearanceMode"),
@@ -112,193 +277,127 @@ class ThemeManager: ObservableObject {
 
     func applyAppearance() {
         DispatchQueue.main.async {
-            switch self.appearanceMode {
-            case .system:
-                NSApp.appearance = nil
-            case .light:
-                NSApp.appearance = NSAppearance(named: .aqua)
-            case .dark:
+            // Dark palettes force dark appearance, light palettes force light
+            if self.currentTheme.isDark {
                 NSApp.appearance = NSAppearance(named: .darkAqua)
+            } else {
+                switch self.appearanceMode {
+                case .system:
+                    NSApp.appearance = nil
+                case .light:
+                    NSApp.appearance = NSAppearance(named: .aqua)
+                case .dark:
+                    NSApp.appearance = NSAppearance(named: .darkAqua)
+                }
             }
         }
     }
 }
 
-// MARK: - Theme Color Definitions
+// MARK: - Legacy ThemeColors (backward compatibility)
 struct ThemeColors {
-    let lightPrimary: Color      // Page background
-    let lightSecondary: Color    // Cards
-    let lightTertiary: Color     // Inputs
-
-    let darkPrimary: Color       // Page background dark
-    let darkSecondary: Color     // Cards dark
-    let darkTertiary: Color      // Inputs dark
-
-    let accent: Color            // Primary accent
-    let accentHover: Color       // Hover state
+    let lightPrimary: Color
+    let lightSecondary: Color
+    let lightTertiary: Color
+    let darkPrimary: Color
+    let darkSecondary: Color
+    let darkTertiary: Color
+    let accent: Color
+    let accentHover: Color
     let accentGradientStart: Color
     let accentGradientEnd: Color
-
     let success: Color
     let error: Color
     let warning: Color
 
-    // MARK: - Theme Definitions
-    static let electric = ThemeColors(
-        lightPrimary: Color(hex: "F8F7FF"),
-        lightSecondary: Color(hex: "FFFFFF"),
-        lightTertiary: Color(hex: "F0EEFF"),
-        darkPrimary: Color(hex: "0A0A0F"),
-        darkSecondary: Color(hex: "12121A"),
-        darkTertiary: Color(hex: "1A1A25"),
-        accent: Color(hex: "7C3AED"),           // Vivid purple
-        accentHover: Color(hex: "8B5CF6"),
-        accentGradientStart: Color(hex: "7C3AED"),
-        accentGradientEnd: Color(hex: "EC4899"),  // Pink
-        success: Color(hex: "10B981"),
-        error: Color(hex: "EF4444"),
-        warning: Color(hex: "F59E0B")
-    )
-
-    static let warm = ThemeColors(
-        lightPrimary: Color(hex: "FFFBF5"),
-        lightSecondary: Color(hex: "FFFFFF"),
-        lightTertiary: Color(hex: "FEF3E2"),
-        darkPrimary: Color(hex: "1A1612"),
-        darkSecondary: Color(hex: "231F1A"),
-        darkTertiary: Color(hex: "2D2820"),
-        accent: Color(hex: "EA580C"),           // Warm orange
-        accentHover: Color(hex: "F97316"),
-        accentGradientStart: Color(hex: "EA580C"),
-        accentGradientEnd: Color(hex: "FBBF24"),  // Amber
-        success: Color(hex: "22C55E"),
-        error: Color(hex: "DC2626"),
-        warning: Color(hex: "EAB308")
-    )
-
-    static let mono = ThemeColors(
-        lightPrimary: Color(hex: "FFFFFF"),     // Pure white
-        lightSecondary: Color(hex: "FFFFFF"),   // Pure white
-        lightTertiary: Color(hex: "F5F5F5"),    // Very light gray for inputs
-        darkPrimary: Color(hex: "000000"),      // True black
-        darkSecondary: Color(hex: "111111"),    // Near black for cards
-        darkTertiary: Color(hex: "1A1A1A"),     // Slight lift for inputs
-        accent: Color(hex: "888888"),           // Neutral gray - visible on both black and white
-        accentHover: Color(hex: "999999"),
-        accentGradientStart: Color(hex: "888888"),
-        accentGradientEnd: Color(hex: "888888"),  // No gradient
-        success: Color(hex: "22C55E"),
-        error: Color(hex: "EF4444"),
-        warning: Color(hex: "EAB308")
-    )
-
-    static let midnight = ThemeColors(
-        lightPrimary: Color(hex: "F1F5F9"),     // Slate tint for light
-        lightSecondary: Color(hex: "FFFFFF"),
-        lightTertiary: Color(hex: "E2E8F0"),
-        darkPrimary: Color(hex: "020617"),      // Near black
-        darkSecondary: Color(hex: "0F172A"),    // Slate 900
-        darkTertiary: Color(hex: "1E293B"),     // Slate 800
-        accent: Color(hex: "38BDF8"),           // Sky blue glow
-        accentHover: Color(hex: "7DD3FC"),
-        accentGradientStart: Color(hex: "38BDF8"),
-        accentGradientEnd: Color(hex: "818CF8"),  // Indigo
-        success: Color(hex: "4ADE80"),
-        error: Color(hex: "FB7185"),
-        warning: Color(hex: "FBBF24")
-    )
-
     static func current() -> ThemeColors {
-        switch ThemeManager.shared.currentTheme {
-        case .electric: return .electric
-        case .warm: return .warm
-        case .mono: return .mono
-        case .midnight: return .midnight
-        }
+        let p = ThemeManager.shared.palette
+        return ThemeColors(
+            lightPrimary: p.paper,
+            lightSecondary: p.card,
+            lightTertiary: p.sidebar,
+            darkPrimary: p.paper,
+            darkSecondary: p.card,
+            darkTertiary: p.sidebar,
+            accent: p.accent,
+            accentHover: p.accent.opacity(0.85),
+            accentGradientStart: p.accent,
+            accentGradientEnd: p.accent2,
+            success: Color(hex: "22C55E"),
+            error: Color(hex: "EF4444"),
+            warning: Color(hex: "F59E0B")
+        )
     }
 }
 
 // MARK: - Design System
 struct DesignSystem {
 
-    // MARK: - Colors (Theme-Aware)
+    // MARK: - Colors (Palette-Aware)
     struct Colors {
-        // Surface colors - pull from active theme
-        static var primaryBackground: Color { ThemeColors.current().lightPrimary }
-        static var secondaryBackground: Color { ThemeColors.current().lightSecondary }
-        static var tertiaryBackground: Color { ThemeColors.current().lightTertiary }
+        static var palette: AtelierPalette { ThemeManager.shared.palette }
 
-        static var darkPrimaryBackground: Color { ThemeColors.current().darkPrimary }
-        static var darkSecondaryBackground: Color { ThemeColors.current().darkSecondary }
-        static var darkTertiaryBackground: Color { ThemeColors.current().darkTertiary }
+        // Surface colors
+        static var primaryBackground: Color { palette.paper }
+        static var secondaryBackground: Color { palette.card }
+        static var tertiaryBackground: Color { palette.sidebar }
 
-        // Accent colors - mono theme uses adaptive label color
-        static var accent: Color {
-            if ThemeManager.shared.currentTheme == .mono {
-                return Color(nsColor: NSColor.labelColor)  // Black in light, white in dark
-            }
-            return ThemeColors.current().accent
-        }
-        static var accentHover: Color {
-            if ThemeManager.shared.currentTheme == .mono {
-                return Color(nsColor: NSColor.secondaryLabelColor)
-            }
-            return ThemeColors.current().accentHover
-        }
-        static var accentSubtle: Color { accent.opacity(0.12) }
-        static var accentGradientEnd: Color { ThemeColors.current().accentGradientEnd }
+        static var darkPrimaryBackground: Color { palette.paper }
+        static var darkSecondaryBackground: Color { palette.card }
+        static var darkTertiaryBackground: Color { palette.sidebar }
 
-        // Accent gradient
+        // Accent colors
+        static var accent: Color { palette.accent }
+        static var accentHover: Color { palette.accent.opacity(0.85) }
+        static var accentSubtle: Color { palette.halo }
+        static var accentGradientEnd: Color { palette.accent2 }
+
         static var accentGradient: LinearGradient {
             LinearGradient(
-                colors: [ThemeColors.current().accentGradientStart, ThemeColors.current().accentGradientEnd],
+                colors: [palette.accent, palette.accent2],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         }
 
-        // Text colors (system adaptive)
-        static let primaryText = Color(nsColor: NSColor.labelColor)
-        static let secondaryText = Color(nsColor: NSColor.secondaryLabelColor)
-        static let tertiaryText = Color(nsColor: NSColor.tertiaryLabelColor)
+        // Text colors - use palette ink colors
+        static var primaryText: Color { palette.ink }
+        static var secondaryText: Color { palette.ink2 }
+        static var tertiaryText: Color { palette.ink3 }
 
         // Semantic colors
-        static var success: Color { ThemeColors.current().success }
-        static var error: Color { ThemeColors.current().error }
-        static var warning: Color { ThemeColors.current().warning }
+        static var success: Color { Color(hex: "22C55E") }
+        static var error: Color { Color(hex: "EF4444") }
+        static var warning: Color { Color(hex: "F59E0B") }
 
         // Borders
-        static let border = Color(nsColor: NSColor.separatorColor)
-        static let borderHover = Color(nsColor: NSColor.separatorColor).opacity(0.8)
+        static var border: Color { palette.line }
+        static var borderHover: Color { palette.line.opacity(0.8) }
 
-        // Helper functions
         static func surface(_ level: Int, for scheme: ColorScheme) -> Color {
-            switch (level, scheme) {
-            case (0, .light): return primaryBackground
-            case (1, .light): return secondaryBackground
-            case (2, .light): return tertiaryBackground
-            case (0, .dark): return darkPrimaryBackground
-            case (1, .dark): return darkSecondaryBackground
-            case (2, .dark): return darkTertiaryBackground
-            default: return scheme == .dark ? darkPrimaryBackground : primaryBackground
+            switch level {
+            case 0: return palette.paper
+            case 1: return palette.card
+            case 2: return palette.sidebar
+            default: return palette.paper
             }
         }
     }
 
-    // MARK: - Typography (Friendly, using SF Rounded for headers)
+    // MARK: - Typography (Atelier: serif headlines, system body, mono stats)
     struct Typography {
-        // Friendly rounded headers - warm and inviting
-        static let displayLarge = Font.system(size: 32, weight: .bold, design: .rounded)
-        static let displayMedium = Font.system(size: 24, weight: .semibold, design: .rounded)
-        static let largeTitle = Font.system(size: 28, weight: .bold, design: .rounded)
-        static let title = Font.system(size: 20, weight: .semibold, design: .rounded)
-        static let title2 = Font.system(size: 17, weight: .semibold, design: .rounded)
-        static let title3 = Font.system(size: 15, weight: .medium, design: .rounded)
-        static let headline = Font.system(size: 15, weight: .semibold, design: .rounded)
+        // Editorial serif headlines - New York (system serif) for Instrument Serif feel
+        static let displayLarge = Font.system(size: 44, weight: .regular, design: .serif)
+        static let displayMedium = Font.system(size: 32, weight: .regular, design: .serif)
+        static let largeTitle = Font.system(size: 38, weight: .regular, design: .serif)
+        static let title = Font.system(size: 22, weight: .regular, design: .serif)
+        static let title2 = Font.system(size: 19, weight: .regular, design: .serif)
+        static let title3 = Font.system(size: 17, weight: .regular, design: .serif)
+        static let headline = Font.system(size: 15, weight: .medium, design: .default)
 
-        // Body text - default design for readability
-        static let body = Font.system(size: 14, weight: .regular, design: .default)
-        static let bodyMedium = Font.system(size: 14, weight: .medium, design: .default)
+        // Body text
+        static let body = Font.system(size: 13, weight: .regular, design: .default)
+        static let bodyMedium = Font.system(size: 13, weight: .medium, design: .default)
         static let callout = Font.system(size: 13, weight: .regular, design: .default)
         static let caption = Font.system(size: 12, weight: .regular, design: .default)
         static let captionMedium = Font.system(size: 12, weight: .medium, design: .default)
@@ -306,12 +405,15 @@ struct DesignSystem {
         static let micro = Font.system(size: 10, weight: .medium, design: .default)
 
         // Monospace for stats/numbers
-        static let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+        static let mono = Font.system(size: 11, weight: .medium, design: .monospaced)
         static let monoSmall = Font.system(size: 10, weight: .medium, design: .monospaced)
 
-        // Friendly labels - rounded for buttons and badges
-        static let friendlyLabel = Font.system(size: 13, weight: .semibold, design: .rounded)
-        static let friendlySmall = Font.system(size: 11, weight: .medium, design: .rounded)
+        // Section headers (uppercase, tracked)
+        static let sectionHeader = Font.system(size: 10, weight: .semibold, design: .default)
+
+        // Friendly labels
+        static let friendlyLabel = Font.system(size: 13, weight: .semibold, design: .default)
+        static let friendlySmall = Font.system(size: 11, weight: .medium, design: .default)
     }
 
     // MARK: - Spacing
@@ -326,7 +428,7 @@ struct DesignSystem {
         static let xxxl: CGFloat = 48
     }
 
-    // MARK: - Corner Radius (Softer, more friendly)
+    // MARK: - Corner Radius
     struct CornerRadius {
         static let xs: CGFloat = 6
         static let sm: CGFloat = 10
@@ -334,31 +436,29 @@ struct DesignSystem {
         static let lg: CGFloat = 18
         static let xl: CGFloat = 22
         static let xxl: CGFloat = 28
-        static let card: CGFloat = 16  // Craft-style card corners
+        static let card: CGFloat = 14
         static let full: CGFloat = 9999
     }
 
-    // MARK: - Shadows (Soft, diffuse - like objects on a surface)
+    // MARK: - Shadows (Soft, paper-like)
     struct Shadows {
-        // Craft-style soft shadows - more diffuse, less harsh
         static func soft(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.25) : Color.black.opacity(0.06)
+            Color.black.opacity(0.06)
         }
 
         static func medium(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.35) : Color.black.opacity(0.08)
+            Color.black.opacity(0.08)
         }
 
         static func lifted(_ colorScheme: ColorScheme) -> Color {
-            colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12)
+            Color.black.opacity(0.12)
         }
 
-        // Legacy compatibility
         static func small(_ colorScheme: ColorScheme) -> Color { soft(colorScheme) }
         static func large(_ colorScheme: ColorScheme) -> Color { lifted(colorScheme) }
 
         static func glow(_ colorScheme: ColorScheme) -> Color {
-            DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.3 : 0.2)
+            DesignSystem.Colors.accent.opacity(0.2)
         }
 
         struct ShadowParams {
@@ -368,20 +468,18 @@ struct DesignSystem {
             let y: CGFloat
         }
 
-        // Craft-style card shadow - soft, diffuse, feels like paper
         static func cardShadow(_ scheme: ColorScheme) -> ShadowParams {
             ShadowParams(
-                color: scheme == .dark ? Color.black.opacity(0.3) : Color.black.opacity(0.08),
-                radius: 16,
+                color: Color.black.opacity(0.08),
+                radius: 14,
                 x: 0,
-                y: 6
+                y: 4
             )
         }
 
-        // Lifted card shadow - when hovering, feels like picking up
         static func cardLifted(_ scheme: ColorScheme) -> ShadowParams {
             ShadowParams(
-                color: scheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.12),
+                color: Color.black.opacity(0.12),
                 radius: 24,
                 x: 0,
                 y: 12
@@ -389,7 +487,7 @@ struct DesignSystem {
         }
 
         static func floatingShadow(_ scheme: ColorScheme) -> ShadowParams {
-            ShadowParams(color: lifted(scheme), radius: scheme == .dark ? 32 : 28, x: 0, y: scheme == .dark ? 16 : 12)
+            ShadowParams(color: lifted(scheme), radius: 28, x: 0, y: 12)
         }
     }
 
@@ -462,10 +560,10 @@ struct ThemeSwitcher: View {
         .padding(DesignSystem.Spacing.xs)
         .background(
             Capsule()
-                .fill(colorScheme == .dark ? DesignSystem.Colors.darkTertiaryBackground : DesignSystem.Colors.tertiaryBackground)
+                .fill(DesignSystem.Colors.tertiaryBackground)
         )
-        .onTapGesture {} // Capture taps
-        .onHover { _ in } // Keep expanded on hover
+        .onTapGesture {}
+        .onHover { _ in }
     }
 }
 
@@ -487,7 +585,7 @@ struct MinimalIconButton: View {
                 .frame(width: 32, height: 32)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(isHovered ? (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)) : Color.clear)
+                        .fill(isHovered ? DesignSystem.Colors.palette.line : Color.clear)
                 )
         }
         .buttonStyle(PlainButtonStyle())
@@ -528,50 +626,53 @@ struct ThemeSwitcherCompact: View {
         }
         .popover(isPresented: $showPicker, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
-                // Appearance Mode Section
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("APPEARANCE")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 8)
+                // Appearance Mode Section (only for light palettes)
+                if !themeManager.currentTheme.isDark {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("APPEARANCE")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
 
-                    HStack(spacing: 4) {
-                        ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                            Button(action: {
-                                withAnimation {
-                                    themeManager.appearanceMode = mode
+                        HStack(spacing: 4) {
+                            ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                                Button(action: {
+                                    withAnimation {
+                                        themeManager.appearanceMode = mode
+                                    }
+                                }) {
+                                    VStack(spacing: 4) {
+                                        Image(systemName: mode.icon)
+                                            .font(.system(size: 14))
+                                        Text(mode.rawValue)
+                                            .font(.system(size: 10))
+                                    }
+                                    .foregroundColor(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
+                                    )
                                 }
-                            }) {
-                                VStack(spacing: 4) {
-                                    Image(systemName: mode.icon)
-                                        .font(.system(size: 14))
-                                    Text(mode.rawValue)
-                                        .font(.system(size: 10))
-                                }
-                                .foregroundColor(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(mode == themeManager.appearanceMode ? DesignSystem.Colors.accent.opacity(0.1) : Color.clear)
-                                )
+                                .buttonStyle(PlainButtonStyle())
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
+                        .padding(.horizontal, 8)
                     }
-                    .padding(.horizontal, 8)
+
+                    Divider()
+                        .padding(.vertical, 8)
                 }
 
-                Divider()
-                    .padding(.vertical, 8)
-
-                // Theme Section
+                // Palette Section
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("THEME")
+                    Text("PALETTE")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(DesignSystem.Colors.tertiaryText)
                         .padding(.horizontal, 12)
+                        .padding(.top, themeManager.currentTheme.isDark ? 8 : 0)
 
                     ForEach(AppTheme.allCases, id: \.self) { theme in
                         Button(action: {
@@ -580,10 +681,14 @@ struct ThemeSwitcherCompact: View {
                             }
                         }) {
                             HStack(spacing: 10) {
-                                Image(systemName: theme.icon)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(theme == themeManager.currentTheme ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-                                    .frame(width: 20)
+                                // Accent color swatch
+                                Circle()
+                                    .fill(theme.palette.accent)
+                                    .frame(width: 14, height: 14)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(theme.palette.ink.opacity(0.15), lineWidth: 0.5)
+                                    )
 
                                 Text(theme.rawValue)
                                     .font(.system(size: 13, weight: theme == themeManager.currentTheme ? .medium : .regular))
@@ -609,9 +714,9 @@ struct ThemeSwitcherCompact: View {
                 }
                 .padding(.bottom, 8)
             }
-            .frame(width: 200)
+            .frame(width: 220)
         }
-        .help("Change theme")
+        .help("Change palette")
         .onAppear {
             themeManager.applyAppearance()
         }
