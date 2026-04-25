@@ -10,14 +10,10 @@ struct SkeletonView: View {
         RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
             .fill(
                 LinearGradient(
-                    colors: colorScheme == .dark ? [
-                        Color.white.opacity(0.05),
-                        Color.white.opacity(0.1),
-                        Color.white.opacity(0.05)
-                    ] : [
-                        Color.gray.opacity(0.2),
-                        Color.gray.opacity(0.3),
-                        Color.gray.opacity(0.2)
+                    colors: [
+                        DesignSystem.Colors.border.opacity(0.3),
+                        DesignSystem.Colors.border.opacity(0.5),
+                        DesignSystem.Colors.border.opacity(0.3)
                     ],
                     startPoint: isAnimating ? .leading : .trailing,
                     endPoint: isAnimating ? .trailing : .leading
@@ -375,7 +371,7 @@ struct DoubleClickImageView: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Rectangle()
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(DesignSystem.Colors.border.opacity(0.3))
             }
         }
         .onTapGesture(count: 2) {
@@ -418,7 +414,7 @@ struct AsyncThumbnailView: View {
                     .aspectRatio(contentMode: contentMode)
             } else {
                 Rectangle()
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(DesignSystem.Colors.border.opacity(0.3))
                     .overlay(
                         ProgressView()
                             .scaleEffect(0.7)

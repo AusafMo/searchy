@@ -423,7 +423,7 @@ struct SetupView: View {
     @Environment(\.colorScheme) var colorScheme
 
     private var accentGreen: Color {
-        Color(red: 0.376, green: 0.5, blue: 0.308)
+        DesignSystem.Colors.accent
     }
 
     var body: some View {

@@ -1323,7 +1323,7 @@ struct SpotlightResultRow: View {
                         .aspectRatio(contentMode: .fill)
                 } else {
                     Rectangle()
-                        .fill(Color.gray.opacity(0.2))
+                        .fill(DesignSystem.Colors.border.opacity(0.3))
                 }
             }
             .frame(width: CGFloat(thumbnailSize), height: CGFloat(thumbnailSize))
@@ -1454,13 +1454,13 @@ struct SpotlightResultRow: View {
     private var similarityGradient: [Color] {
         let percentage = result.similarity * 100
         if percentage >= 80 {
-            return [Color(hex: "10B981"), Color(hex: "059669")]
+            return [DesignSystem.Colors.success, DesignSystem.Colors.success.opacity(0.8)]
         } else if percentage >= 60 {
             return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
         } else if percentage >= 40 {
-            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+            return [DesignSystem.Colors.warning, DesignSystem.Colors.warning.opacity(0.8)]
         } else {
-            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
+            return [DesignSystem.Colors.error, DesignSystem.Colors.error.opacity(0.8)]
         }
     }
 
@@ -1651,13 +1651,13 @@ struct ResultCardView: View {
     private var similarityGradient: [Color] {
         let percentage = result.similarity * 100
         if percentage >= 80 {
-            return [Color(hex: "10B981"), Color(hex: "059669")]
+            return [DesignSystem.Colors.success, DesignSystem.Colors.success.opacity(0.8)]
         } else if percentage >= 60 {
             return [DesignSystem.Colors.accent, DesignSystem.Colors.accentGradientEnd]
         } else if percentage >= 40 {
-            return [Color(hex: "F59E0B"), Color(hex: "D97706")]
+            return [DesignSystem.Colors.warning, DesignSystem.Colors.warning.opacity(0.8)]
         } else {
-            return [Color(hex: "EF4444"), Color(hex: "DC2626")]
+            return [DesignSystem.Colors.error, DesignSystem.Colors.error.opacity(0.8)]
         }
     }
 
@@ -1870,7 +1870,7 @@ struct ImageCard: View {
                     .clipped()
             } else {
                 Rectangle()
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color(hex: "F8F8F8"))
+                    .fill(DesignSystem.Colors.border.opacity(0.3))
                     .overlay(
                         ProgressView()
                             .scaleEffect(0.8)

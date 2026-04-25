@@ -574,7 +574,7 @@ struct FaceThumbnail: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             } else {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(DesignSystem.Colors.border.opacity(0.3))
                     .frame(width: 50, height: 50)
             }
         }
@@ -646,7 +646,7 @@ struct CircularProgressView: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.gray.opacity(0.2), lineWidth: 3)
+                .stroke(DesignSystem.Colors.border, lineWidth: 3)
 
             Circle()
                 .trim(from: 0, to: progress)
@@ -743,7 +743,7 @@ struct PersonFaceCard: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white)
                                 .frame(width: 44, height: 44)
-                                .background(Circle().fill(Color.red))
+                                .background(Circle().fill(DesignSystem.Colors.error))
                                 .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
                         }
                         .buttonStyle(PlainButtonStyle())

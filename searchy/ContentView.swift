@@ -314,10 +314,10 @@ struct ContentView: View {
                     Text("Loading model \(String(format: "%.0fs", modelElapsed))")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
-                .foregroundColor(.orange)
+                .foregroundColor(DesignSystem.Colors.warning)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color.orange.opacity(0.1))
+                .background(DesignSystem.Colors.warning.opacity(0.1))
                 .clipShape(Capsule())
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else if modelState == "ready" && modelElapsed > 0 {
@@ -467,7 +467,7 @@ struct ContentView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.orange))
+                        .background(Capsule().fill(DesignSystem.Colors.warning))
                         .padding(.trailing, 4)
                 }
 
@@ -482,7 +482,7 @@ struct ContentView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.orange.opacity(0.8)))
+                    .background(Capsule().fill(DesignSystem.Colors.warning.opacity(0.8)))
                     .padding(.trailing, 4)
                 }
 
@@ -538,7 +538,7 @@ struct ContentView: View {
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(faceManager.isScanning ? Color.gray : DesignSystem.Colors.accent)
+                            .fill(faceManager.isScanning ? DesignSystem.Colors.border : DesignSystem.Colors.accent)
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -1341,12 +1341,12 @@ struct ContentView: View {
                                 Text("Review")
                                     .font(.system(size: 12, weight: .medium))
                             }
-                            .foregroundColor(.orange)
+                            .foregroundColor(DesignSystem.Colors.warning)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(
                                 Capsule()
-                                    .fill(Color.orange.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                                    .fill(DesignSystem.Colors.warning.opacity(colorScheme == .dark ? 0.2 : 0.1))
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -1543,7 +1543,7 @@ struct ContentView: View {
                                     .foregroundColor(.white)
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.red))
+                                    .background(Capsule().fill(DesignSystem.Colors.error))
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 .disabled(isBatchProcessing)
@@ -1554,7 +1554,7 @@ struct ContentView: View {
                                 HStack(spacing: 4) {
                                     Image(systemName: "lightbulb.fill")
                                         .font(.system(size: 10))
-                                        .foregroundColor(.orange)
+                                        .foregroundColor(DesignSystem.Colors.warning)
                                     Text("Hover to verify")
                                         .font(.system(size: 11))
                                         .foregroundColor(DesignSystem.Colors.tertiaryText)
@@ -2386,7 +2386,7 @@ struct ContentView: View {
                 VStack(spacing: DesignSystem.Spacing.sm) {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
-                            .foregroundColor(.orange)
+                            .foregroundColor(DesignSystem.Colors.warning)
                         Text("No model loaded")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(DesignSystem.Colors.secondaryText)
@@ -3398,7 +3398,7 @@ struct ContentView: View {
                 // Clickable image area
                 ZStack {
                     Rectangle()
-                        .fill(colorScheme == .dark ? Color.black.opacity(0.3) : Color.gray.opacity(0.1))
+                        .fill(DesignSystem.Colors.border.opacity(0.3))
 
                     AsyncThumbnailView(path: image.path, contentMode: .fit)
                 }
@@ -3449,7 +3449,7 @@ struct ContentView: View {
                                     .foregroundColor(.white)
                             } else {
                                 Circle()
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1.5)
+                                    .stroke(DesignSystem.Colors.border, lineWidth: 1.5)
                                     .frame(width: 22, height: 22)
                             }
                         }
@@ -3864,11 +3864,11 @@ struct ContentView: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .fill(Color.green.opacity(0.1))
+                .fill(DesignSystem.Colors.success.opacity(0.1))
         )
         .overlay(
             RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                .stroke(DesignSystem.Colors.success.opacity(0.3), lineWidth: 1)
         )
         .onAppear {
             // Auto-dismiss after 8 seconds
