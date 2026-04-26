@@ -834,6 +834,69 @@ struct SettingsView: View {
                     }
                     .padding(28)
                 }
+
+                // Footer — always visible
+                HStack(spacing: 12) {
+                    Button(action: {
+                        withAnimation { config.resetToDefaults() }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Reset to Defaults")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.warning)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.warning.opacity(0.08))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(DesignSystem.Colors.warning.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Button(action: {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NSApplication.shared.terminate(nil)
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "power")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Quit Searchy")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(DesignSystem.Colors.error)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(DesignSystem.Colors.error.opacity(0.08))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(DesignSystem.Colors.error.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Spacer()
+                }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 12)
+                .background(pal.sidebar.opacity(0.5))
+                .overlay(
+                    Rectangle()
+                        .frame(height: 1)
+                        .foregroundColor(pal.line),
+                    alignment: .top
+                )
             }
         }
         .frame(minWidth: 700, idealWidth: 750, maxWidth: 850, minHeight: 600, idealHeight: 800, maxHeight: .infinity)
@@ -1326,63 +1389,6 @@ struct SettingsView: View {
                 }
             }
 
-            // Diagnostics Card
-            AtelierCard(title: "Diagnostics", icon: "stethoscope") {
-                VStack(spacing: 12) {
-                    // Reset button
-                    Button(action: {
-                        withAnimation {
-                            config.resetToDefaults()
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 13, weight: .medium))
-                            Text("Reset to Defaults")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(DesignSystem.Colors.warning)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(DesignSystem.Colors.warning.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(DesignSystem.Colors.warning.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-
-                    // Quit button
-                    Button(action: {
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            NSApplication.shared.terminate(nil)
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "power")
-                                .font(.system(size: 13, weight: .medium))
-                            Text("Quit Searchy")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(DesignSystem.Colors.error)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(DesignSystem.Colors.error.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(DesignSystem.Colors.error.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
         }
     }
 
