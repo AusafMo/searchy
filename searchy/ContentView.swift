@@ -3134,11 +3134,11 @@ struct ContentView: View {
 
                 errorView
 
-                // Drag search reference card
-                if pastedImage != nil && !searchManager.results.isEmpty {
-                    dragSearchReferenceCard
+                // Search reference card (visual or text)
+                if !searchManager.results.isEmpty && !searchManager.isSearching {
+                    searchReferenceCard
                         .padding(.horizontal, 32)
-                        .padding(.top, 12)
+                        .padding(.top, 10)
                 }
 
                 // Results area
@@ -3155,22 +3155,6 @@ struct ContentView: View {
                         }
                     } else if !searchManager.results.isEmpty {
                         ScrollView {
-                            // Visual similarity results header
-                            if pastedImage != nil {
-                                HStack(spacing: 16) {
-                                    HStack(spacing: 0) {
-                                        Text("\(searchManager.results.count) visually similar")
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundColor(p.ink)
-                                    }
-                                    Spacer()
-                                    Text("sorted by cosine similarity \u{2193}")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(p.ink3)
-                                }
-                                .padding(.horizontal, 24)
-                                .padding(.bottom, 4)
-                            }
                             filteredResultsList
                                 .padding(.horizontal, 24)
                         }
@@ -3240,93 +3224,79 @@ struct ContentView: View {
     }
 
     // MARK: - Drag Search Reference Card
-    private var dragSearchReferenceCard: some View {
-        HStack(spacing: 18) {
-            // Thumbnail of the dropped/pasted image
+    private var searchReferenceCard: some View {
+        HStack(spacing: 12) {
+            // Left: icon or image thumbnail
             if let image = pastedImage {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 130, height: 95)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(p.accent, lineWidth: 1.5))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(p.accent.opacity(0.1))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(p.accent)
+                }
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.up.doc")
+            // Middle: description
+            VStack(alignment: .leading, spacing: 2) {
+                if pastedImage != nil {
+                    Text("Visual reference")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(p.ink)
+                } else {
+                    Text("\u{201C}\(searchText)\u{201D}")
+                        .font(.system(size: 12, weight: .medium, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink)
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 6) {
+                    Text("\(searchManager.results.count) results")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(p.accent)
-                    Text("VISUAL REFERENCE")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(1.5)
-                        .foregroundColor(p.accent)
-                }
-
-                Text("find images like this one")
-                    .font(.system(size: 26, weight: .regular, design: .serif))
-                    .italic()
-                    .foregroundColor(p.ink)
-                    .lineLimit(1)
-                    .padding(.top, 6)
-
-                Text("CLIP embedding cached")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(p.ink2)
-                    .padding(.top, 4)
-
-                Spacer(minLength: 0)
-
-                // Vision / text balance indicator (read-only)
-                HStack(spacing: 10) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 14))
                         .foregroundColor(p.ink2)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(p.line)
-                                .frame(height: 4)
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(p.accent)
-                                .frame(width: geo.size.width * CGFloat(1.0 - clipBalance), height: 4)
-                        }
-                    }
-                    .frame(maxWidth: 140)
-                    .frame(height: 4)
-                    Image(systemName: "textformat")
-                        .font(.system(size: 14))
+                    Text("\u{00B7}")
                         .foregroundColor(p.ink3)
-
-                    Spacer()
-
-                    Button(action: {
-                        withAnimation { pastedImage = nil }
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text("Clear")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(p.ink2)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(p.paper)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                    Text(pastedImage != nil ? "cosine similarity" : "semantic search")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(p.ink3)
                 }
+            }
+
+            Spacer()
+
+            // Right: clear button (for image search)
+            if pastedImage != nil {
+                Button(action: {
+                    withAnimation { pastedImage = nil }
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(p.ink3)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(p.paper)
+                                .overlay(Circle().stroke(p.line, lineWidth: 1))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(18)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 10)
                 .fill(p.card)
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(p.line, lineWidth: 1))
-                .shadow(color: p.halo, radius: 8, y: 0)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(p.line, lineWidth: 1))
         )
     }
 
