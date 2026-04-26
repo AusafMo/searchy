@@ -1,6 +1,46 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Flow Layout (wrapping horizontal layout)
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth && x > 0 {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: maxWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x: CGFloat = bounds.minX
+        var y: CGFloat = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX && x > bounds.minX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
 // MARK: - Loading Skeleton Components
 struct SkeletonView: View {
     @State private var isAnimating = false
@@ -432,6 +472,62 @@ struct DoubleClickImageView: View {
 
 // MARK: - Async Thumbnail View
 /// Efficiently loads thumbnails using CGImageSource (reads minimal bytes from file)
+// MARK: - Sidebar Drag Handle (uses NSEvent for smooth, stutter-free resizing)
+struct SidebarDragHandle: NSViewRepresentable {
+    @Binding var sidebarWidth: CGFloat
+
+    func makeNSView(context: Context) -> SidebarDragNSView {
+        let view = SidebarDragNSView()
+        view.onDrag = { delta in
+            DispatchQueue.main.async {
+                let newWidth = self.sidebarWidth + delta
+                self.sidebarWidth = min(max(newWidth, 140), 320)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: SidebarDragNSView, context: Context) {}
+}
+
+class SidebarDragNSView: NSView {
+    var onDrag: ((CGFloat) -> Void)?
+    private var lastX: CGFloat = 0
+    private var isDragging = false
+    private var trackingArea: NSTrackingArea?
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 6, height: NSView.noIntrinsicMetric) }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        lastX = NSEvent.mouseLocation.x
+        isDragging = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
+        let currentX = NSEvent.mouseLocation.x
+        let delta = currentX - lastX
+        lastX = currentX
+        onDrag?(delta)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        isDragging = false
+    }
+}
+
 struct AsyncThumbnailView: View {
     let path: String
     var maxSize: Int = 200

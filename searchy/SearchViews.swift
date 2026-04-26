@@ -446,13 +446,13 @@ struct MasonryImageCard: View {
                 }
             }
 
-            // Hover: gradient + caption + action bar
-            if isHovered && !showCopied {
+            // Gradient + caption + action bar (always visible)
+            if !showCopied {
                 VStack {
                     Spacer()
                     ZStack(alignment: .bottom) {
                         LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.55)],
+                            colors: [.clear, Color.black.opacity(isHovered ? 0.65 : 0.45)],
                             startPoint: UnitPoint(x: 0.5, y: 0.0),
                             endPoint: UnitPoint(x: 0.5, y: 1.0)
                         )
@@ -464,23 +464,25 @@ struct MasonryImageCard: View {
                                 .shadow(color: Color.black.opacity(0.4), radius: 4, y: 1)
                                 .lineLimit(1)
 
-                            AtelierActionBar(
-                                onStar: {
-                                    isFavorite.toggle()
-                                    FavoritesManager.shared.toggleFavorite(result.path)
-                                },
-                                onQuickLook: masonryOpenInPreview,
-                                onFinder: masonryOpenInFinder,
-                                onCopy: handleCopy,
-                                onOpen: masonryOpenInPreview,
-                                onFindSimilar: onFindSimilar != nil ? { onFindSimilar?(result.path) } : nil
-                            )
+                            if isHovered {
+                                AtelierActionBar(
+                                    onStar: {
+                                        isFavorite.toggle()
+                                        FavoritesManager.shared.toggleFavorite(result.path)
+                                    },
+                                    onQuickLook: masonryOpenInPreview,
+                                    onFinder: masonryOpenInFinder,
+                                    onCopy: handleCopy,
+                                    onOpen: masonryOpenInPreview,
+                                    onFindSimilar: onFindSimilar != nil ? { onFindSimilar?(result.path) } : nil
+                                )
+                                .transition(.opacity)
+                            }
                         }
                         .padding(.horizontal, 8)
                         .padding(.bottom, 8)
                     }
                 }
-                .transition(.opacity)
             }
         }
     }
@@ -2754,13 +2756,13 @@ struct ImageCard: View {
                 }
             }
 
-            // Hover: gradient + caption + action bar
-            if isHovered && !showCopied {
+            // Gradient + caption (always visible) + action bar (hover only)
+            if !showCopied {
                 VStack {
                     Spacer()
                     ZStack(alignment: .bottom) {
                         LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.55)],
+                            colors: [.clear, Color.black.opacity(isHovered ? 0.65 : 0.45)],
                             startPoint: UnitPoint(x: 0.5, y: 0.0),
                             endPoint: UnitPoint(x: 0.5, y: 1.0)
                         )
@@ -2772,23 +2774,25 @@ struct ImageCard: View {
                                 .shadow(color: Color.black.opacity(0.4), radius: 4, y: 1)
                                 .lineLimit(1)
 
-                            AtelierActionBar(
-                                onStar: {
-                                    isFavorite.toggle()
-                                    FavoritesManager.shared.toggleFavorite(result.path)
-                                },
-                                onQuickLook: gridOpenInPreview,
-                                onFinder: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") },
-                                onCopy: gridHandleCopy,
-                                onOpen: gridOpenInPreview,
-                                onFindSimilar: onFindSimilar != nil ? { onFindSimilar?(result.path) } : nil
-                            )
+                            if isHovered {
+                                AtelierActionBar(
+                                    onStar: {
+                                        isFavorite.toggle()
+                                        FavoritesManager.shared.toggleFavorite(result.path)
+                                    },
+                                    onQuickLook: gridOpenInPreview,
+                                    onFinder: { NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "") },
+                                    onCopy: gridHandleCopy,
+                                    onOpen: gridOpenInPreview,
+                                    onFindSimilar: onFindSimilar != nil ? { onFindSimilar?(result.path) } : nil
+                                )
+                                .transition(.opacity)
+                            }
                         }
                         .padding(.horizontal, 8)
                         .padding(.bottom, 8)
                     }
                 }
-                .transition(.opacity)
             }
         }
     }

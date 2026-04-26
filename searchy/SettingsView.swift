@@ -820,86 +820,89 @@ struct SettingsView: View {
         ZStack {
             pal.paper.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header
-                settingsHeader
+            HStack(spacing: 0) {
+                // Left sidebar navigation
+                settingsSidebar
 
-                // Tab bar
-                tabBar
+                // Main content area
+                VStack(spacing: 0) {
+                    // Per-tab header
+                    settingsHeader
 
-                // Content
-                ScrollView {
-                    VStack(spacing: 20) {
-                        tabContent
+                    // Content
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            tabContent
+                        }
+                        .padding(28)
                     }
-                    .padding(28)
+
+                    // Footer — always visible
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            withAnimation { config.resetToDefaults() }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Reset to Defaults")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(DesignSystem.Colors.warning)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(DesignSystem.Colors.warning.opacity(0.08))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(DesignSystem.Colors.warning.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button(action: {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                NSApplication.shared.terminate(nil)
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "power")
+                                    .font(.system(size: 11, weight: .medium))
+                                Text("Quit Searchy")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            .foregroundColor(DesignSystem.Colors.error)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(DesignSystem.Colors.error.opacity(0.08))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(DesignSystem.Colors.error.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 12)
+                    .background(pal.sidebar.opacity(0.5))
+                    .overlay(
+                        Rectangle()
+                            .frame(height: 1)
+                            .foregroundColor(pal.line),
+                        alignment: .top
+                    )
                 }
-
-                // Footer — always visible
-                HStack(spacing: 12) {
-                    Button(action: {
-                        withAnimation { config.resetToDefaults() }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Reset to Defaults")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(DesignSystem.Colors.warning)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule()
-                                .fill(DesignSystem.Colors.warning.opacity(0.08))
-                        )
-                        .overlay(
-                            Capsule()
-                                .stroke(DesignSystem.Colors.warning.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-
-                    Button(action: {
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            NSApplication.shared.terminate(nil)
-                        }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "power")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Quit Searchy")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(DesignSystem.Colors.error)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule()
-                                .fill(DesignSystem.Colors.error.opacity(0.08))
-                        )
-                        .overlay(
-                            Capsule()
-                                .stroke(DesignSystem.Colors.error.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-
-                    Spacer()
-                }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 12)
-                .background(pal.sidebar.opacity(0.5))
-                .overlay(
-                    Rectangle()
-                        .frame(height: 1)
-                        .foregroundColor(pal.line),
-                    alignment: .top
-                )
             }
         }
-        .frame(minWidth: 700, idealWidth: 750, maxWidth: 850, minHeight: 600, idealHeight: 800, maxHeight: .infinity)
+        .frame(minWidth: 750, idealWidth: 800, maxWidth: 900, minHeight: 600, idealHeight: 800, maxHeight: .infinity)
         .fileImporter(isPresented: $isShowingBaseDirectoryPicker, allowedContentTypes: [.directory]) { result in
             if case .success(let url) = result {
                 config.baseDirectory = url.path
@@ -911,18 +914,70 @@ struct SettingsView: View {
         .onAppear { fetchModelTTL() }
     }
 
-    // MARK: - Header
+    // MARK: - Settings Sidebar
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("SETTINGS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.6)
+                .foregroundColor(pal.ink3)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 12)
+
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                Button(action: {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        selectedTab = tab
+                    }
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(selectedTab == tab ? pal.accent : pal.ink3)
+                            .frame(width: 16)
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: selectedTab == tab ? .semibold : .medium))
+                            .foregroundColor(selectedTab == tab ? pal.ink : pal.ink2)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selectedTab == tab ? pal.card : Color.clear)
+                            .shadow(color: selectedTab == tab ? Color.black.opacity(0.06) : .clear, radius: 8, y: 2)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            Spacer()
+        }
+        .padding(.top, 42)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+        .frame(width: 170)
+        .background(pal.sidebar)
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(pal.line)
+                .frame(width: 1)
+        }
+    }
+
+    // MARK: - Header (per-tab title)
     private var settingsHeader: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("PREFERENCES")
+                Text(selectedTab.rawValue.uppercased())
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(2)
                     .foregroundColor(pal.ink3)
-                Text("Settings")
-                    .font(.system(size: 38, weight: .regular, design: .serif))
+                Text(settingsTitle)
+                    .font(.system(size: 28, weight: .regular, design: .serif))
                     .foregroundColor(pal.ink)
-                Text("Tune every corner of the experience")
+                Text(settingsSubtitle)
                     .font(.system(size: 13, weight: .regular, design: .serif).italic())
                     .foregroundColor(pal.ink3)
             }
@@ -949,49 +1004,26 @@ struct SettingsView: View {
         .padding(.horizontal, 28)
         .padding(.top, 24)
         .padding(.bottom, 16)
-        .background(pal.sidebar)
     }
 
-    // MARK: - Tab Bar
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(SettingsTab.allCases, id: \.self) { tab in
-                Button(action: {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                        selectedTab = tab
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 12, weight: .medium))
-                        Text(tab.rawValue)
-                            .font(.system(size: 12, weight: selectedTab == tab ? .semibold : .medium))
-                    }
-                    .foregroundColor(selectedTab == tab ? pal.accent : pal.ink2)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        Group {
-                            if selectedTab == tab {
-                                Capsule()
-                                    .fill(pal.accent.opacity(0.1))
-                            }
-                        }
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            Spacer()
+    private var settingsTitle: String {
+        switch selectedTab {
+        case .display: return "The look of things"
+        case .search: return "How search behaves"
+        case .indexing: return "What gets indexed"
+        case .server: return "Under the hood"
+        case .aiModel: return "Which mind is reading"
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 8)
-        .background(pal.sidebar.opacity(0.5))
-        .overlay(
-            Rectangle()
-                .frame(height: 1)
-                .foregroundColor(pal.line),
-            alignment: .bottom
-        )
+    }
+
+    private var settingsSubtitle: String {
+        switch selectedTab {
+        case .display: return "Palette, layout, and visual polish"
+        case .search: return "Results, ranking, and relevance"
+        case .indexing: return "Directories, file types, and schedules"
+        case .server: return "Python backend, ports, and diagnostics"
+        case .aiModel: return "CLIP model selection and configuration"
+        }
     }
 
     // MARK: - Tab Content Router
@@ -1014,13 +1046,6 @@ struct SettingsView: View {
     // MARK: - Display Tab
     private var displayTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Section heading
-            sectionHeading(
-                eyebrow: "APPEARANCE",
-                title: "The look of things",
-                subtitle: "Palette, layout, and visual polish"
-            )
-
             // Theme / Palette Card
             AtelierCard(title: "Palette", icon: "paintpalette") {
                 VStack(alignment: .leading, spacing: 14) {
@@ -1087,9 +1112,11 @@ struct SettingsView: View {
                                                 .font(.system(size: 11))
                                             Text(mode.rawValue)
                                                 .font(.system(size: 12, weight: mode == themeManager.appearanceMode ? .semibold : .regular))
+                                                .lineLimit(1)
+                                                .fixedSize()
                                         }
                                         .foregroundColor(mode == themeManager.appearanceMode ? .white : pal.ink2)
-                                        .padding(.horizontal, 12)
+                                        .padding(.horizontal, 14)
                                         .padding(.vertical, 6)
                                         .background(
                                             Capsule()
@@ -1149,12 +1176,6 @@ struct SettingsView: View {
     // MARK: - Search Tab
     private var searchTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sectionHeading(
-                eyebrow: "SEARCH",
-                title: "Finding things",
-                subtitle: "Result count, thresholds, and behaviour"
-            )
-
             // Default Mode Card
             AtelierCard(title: "Default Mode", icon: "slider.horizontal.3") {
                 VStack(spacing: 0) {
@@ -1190,11 +1211,6 @@ struct SettingsView: View {
     // MARK: - Indexing Tab
     private var indexingTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sectionHeading(
-                eyebrow: "INDEXING",
-                title: "Cataloguing the archive",
-                subtitle: "Watched folders, schedule, and processing"
-            )
 
             // Watched Folders Card
             AtelierCard(title: "Watched Folders", icon: "folder.badge.gearshape") {
@@ -1282,12 +1298,6 @@ struct SettingsView: View {
     // MARK: - Server Tab
     private var serverTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sectionHeading(
-                eyebrow: "SERVER",
-                title: "Under the hood",
-                subtitle: "Port, directories, and memory management"
-            )
-
             // Configuration Card
             AtelierCard(title: "Configuration", icon: "wrench.and.screwdriver") {
                 VStack(spacing: 0) {
@@ -1322,6 +1332,7 @@ struct SettingsView: View {
                         TextField("Directory", text: $config.baseDirectory)
                             .textFieldStyle(PlainTextFieldStyle())
                             .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(pal.ink)
                             .padding(8)
                             .background(
                                 RoundedRectangle(cornerRadius: 7)
@@ -1395,12 +1406,6 @@ struct SettingsView: View {
     // MARK: - AI Model Tab
     private var aiModelTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sectionHeading(
-                eyebrow: "AI MODEL",
-                title: "The seeing eye",
-                subtitle: "CLIP model selection and configuration"
-            )
-
             AIModelSettingsSection()
         }
     }

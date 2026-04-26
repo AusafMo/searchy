@@ -437,92 +437,209 @@ struct FaceVerificationView: View {
     @ObservedObject var faceManager: FaceManager
     let onDismiss: () -> Void
 
-    @State private var offset: CGFloat = 0
-    @State private var isAnimating = false
     @State private var verificationResults: [String: Bool] = [:]
     @Environment(\.colorScheme) var colorScheme
 
-    private var facesToReview: [(id: String, imagePath: String, boundingBox: CGRect)] {
-        person.faces.compactMap { face in
-            if verificationResults[face.id.uuidString] == nil {
-                return (id: face.id.uuidString, imagePath: face.imagePath, boundingBox: face.boundingBox)
-            }
-            return nil
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
+
+    private var allFaces: [(id: String, faceId: String?, imagePath: String, boundingBox: CGRect)] {
+        person.faces.map { face in
+            (id: face.id.uuidString, faceId: face.faceId, imagePath: face.imagePath, boundingBox: face.boundingBox)
         }
     }
 
-    private var progress: Double {
-        let total = person.faces.count
-        let reviewed = verificationResults.count
-        return total > 0 ? Double(reviewed) / Double(total) : 0
-    }
-
-    private var confirmedCount: Int {
-        verificationResults.filter { $0.value }.count
-    }
-
-    private var rejectedCount: Int {
-        verificationResults.filter { !$0.value }.count
-    }
+    private var reviewedCount: Int { verificationResults.count }
+    private var confirmedCount: Int { verificationResults.filter { $0.value }.count }
+    private var rejectedCount: Int { verificationResults.filter { !$0.value }.count }
 
     var body: some View {
         VStack(spacing: 0) {
-            headerView
-            Divider()
-            if facesToReview.isEmpty {
+            // Header
+            HStack(alignment: .center) {
+                // Person thumbnail
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("VERIFYING")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundColor(pal.ink3)
+                    HStack(spacing: 0) {
+                        Text("Is this ")
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .foregroundColor(pal.ink)
+                        Text(person.name)
+                            .font(.system(size: 22, weight: .regular, design: .serif).italic())
+                            .foregroundColor(pal.accent)
+                        Text("?")
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .foregroundColor(pal.ink)
+                    }
+                }
+
+                Spacer()
+
+                // Progress pill
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(DesignSystem.Colors.success)
+                        .frame(width: 6, height: 6)
+                    Text("\(reviewedCount) of \(person.faces.count) reviewed")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(pal.ink)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(pal.sidebar)
+                        .overlay(Capsule().stroke(pal.line, lineWidth: 0.5))
+                )
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
+
+            Rectangle().fill(pal.line).frame(height: 0.5)
+
+            if allFaces.isEmpty {
                 completionView
             } else {
-                swipeInterface
+                // Grid of face cards
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 10)], spacing: 10) {
+                        ForEach(allFaces, id: \.id) { face in
+                            verificationGridCard(face: face)
+                        }
+                    }
+                    .padding(16)
+                }
+
+                // Keyboard hints footer
+                HStack(spacing: 16) {
+                    KeyboardHint(key: "\u{2190}", description: "reject")
+                    KeyboardHint(key: "\u{2192}", description: "confirm")
+                    KeyboardHint(key: "r", description: "skip")
+                    Spacer()
+                    KeyboardHint(key: "\u{238b}", description: "undo")
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(pal.line).frame(height: 0.5)
+                }
             }
         }
-        .frame(width: 520, height: 680)
+        .frame(width: 720, height: 640)
         .background(pal.card)
     }
 
-    private var pal: AtelierPalette { ThemeManager.shared.palette }
+    private func verificationGridCard(face: (id: String, faceId: String?, imagePath: String, boundingBox: CGRect)) -> some View {
+        let result = verificationResults[face.id]
+        let isReviewed = result != nil
+        let isConfirmed = result == true
+        let isRejected = result == false
+        let verifyId = face.faceId ?? face.id
 
-    private var headerView: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("FACE REVIEW")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .tracking(1.6)
-                    .foregroundColor(pal.ink3)
-                Text("Reviewing \(person.name)")
-                    .font(.system(size: 22, weight: .regular, design: .serif))
-                    .italic()
-                    .foregroundColor(pal.ink)
-                HStack(spacing: 8) {
-                    Text("\(verificationResults.count)/\(person.faces.count)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(pal.ink2)
-                    Text("\(confirmedCount) kept")
-                        .font(.system(size: 11))
-                        .foregroundColor(DesignSystem.Colors.success)
-                    Text("\(rejectedCount) removed")
-                        .font(.system(size: 11))
-                        .foregroundColor(DesignSystem.Colors.error)
+        return ZStack {
+            // Face image
+            FaceReviewCard(imagePath: face.imagePath, boundingBox: face.boundingBox)
+
+            // Reviewed indicator (top-right)
+            VStack {
+                HStack {
+                    Spacer()
+                    if isConfirmed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(DesignSystem.Colors.success)
+                            .shadow(color: .black.opacity(0.3), radius: 2)
+                    } else if isRejected {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(DesignSystem.Colors.error)
+                            .shadow(color: .black.opacity(0.3), radius: 2)
+                    }
+                }
+                .padding(8)
+                Spacer()
+            }
+
+            // Yes/No buttons at bottom (only for unreviewed)
+            if !isReviewed {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 0) {
+                        Button(action: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                verificationResults[face.id] = false
+                            }
+                            Task { await verifyFace(faceId: verifyId, isCorrect: false) }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("No")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 32)
+                            .background(Color.black.opacity(0.6))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button(action: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                verificationResults[face.id] = true
+                            }
+                            Task { await verifyFace(faceId: verifyId, isCorrect: true) }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Yes")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 32)
+                            .background(DesignSystem.Colors.success.opacity(0.85))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
             }
-            Spacer()
-            CircularProgressView(progress: progress)
-                .frame(width: 36, height: 36)
-            Button(action: onDismiss) {
-                ZStack {
-                    Circle()
-                        .fill(pal.paper)
-                        .overlay(Circle().stroke(pal.line, lineWidth: 1))
-                        .frame(width: 28, height: 28)
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(pal.ink3)
-                }
+
+            // Dim overlay for reviewed cards
+            if isReviewed {
+                Color.black.opacity(isRejected ? 0.3 : 0.05)
+                    .allowsHitTesting(false)
             }
-            .buttonStyle(PlainButtonStyle())
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 28)
-        .padding(.bottom, 16)
+        .aspectRatio(0.85, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isConfirmed ? DesignSystem.Colors.success :
+                        (isRejected ? DesignSystem.Colors.error : Color.clear),
+                        lineWidth: isReviewed ? 2.5 : 0)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .onTapGesture {
+            if isReviewed {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    verificationResults.removeValue(forKey: face.id)
+                }
+            }
+        }
     }
 
     private var completionView: some View {
@@ -548,173 +665,6 @@ struct FaceVerificationView: View {
             .buttonStyle(PlainButtonStyle())
             .padding(.top, 12)
             Spacer()
-        }
-    }
-
-    private var swipeInterface: some View {
-        VStack(spacing: 0) {
-            cardStack
-                .padding(22)
-            actionButtons
-                .padding(.horizontal, 22)
-                .padding(.bottom, 22)
-            // Keyboard hints footer
-            HStack(spacing: 16) {
-                KeyboardHint(key: "\u{2190}", description: "reject")
-                KeyboardHint(key: "\u{2192}", description: "confirm")
-                KeyboardHint(key: "\u{2191}", description: "skip")
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 14)
-            .padding(.bottom, 18)
-            .frame(maxWidth: .infinity)
-            .overlay(alignment: .top) {
-                Divider().background(pal.line)
-            }
-        }
-    }
-
-    private var cardStack: some View {
-        ZStack {
-            ForEach(Array(facesToReview.prefix(3).enumerated().reversed()), id: \.element.id) { index, face in
-                if index > 0 {
-                    FaceReviewCard(imagePath: face.imagePath, boundingBox: face.boundingBox)
-                        .id(face.id)
-                        .scaleEffect(1.0 - CGFloat(index) * 0.05)
-                        .offset(y: CGFloat(index) * 8)
-                        .opacity(1.0 - Double(index) * 0.2)
-                }
-            }
-            if let currentFace = facesToReview.first {
-                FaceReviewCard(imagePath: currentFace.imagePath, boundingBox: currentFace.boundingBox)
-                    .id(currentFace.id)
-                    .offset(x: offset)
-                    .rotationEffect(.degrees(Double(offset / 20)))
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                if !isAnimating { offset = value.translation.width }
-                            }
-                            .onEnded { value in
-                                handleSwipe(value: value, faceId: currentFace.id)
-                            }
-                    )
-                    .overlay(swipeIndicators)
-            }
-        }
-    }
-
-    private var swipeIndicators: some View {
-        ZStack {
-            HStack {
-                Spacer()
-                VStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(DesignSystem.Colors.success)
-                    Text("Confirm")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(DesignSystem.Colors.success)
-                }
-                .padding(24)
-                .opacity(offset > 50 ? Double(min(1, (offset - 50) / 50)) : 0)
-            }
-            HStack {
-                VStack {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(DesignSystem.Colors.error)
-                    Text("Reject")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(DesignSystem.Colors.error)
-                }
-                .padding(24)
-                .opacity(offset < -50 ? Double(min(1, (-offset - 50) / 50)) : 0)
-                Spacer()
-            }
-        }
-    }
-
-    private var actionButtons: some View {
-        HStack(spacing: 14) {
-            Button(action: { if let f = facesToReview.first { swipeLeft(faceId: f.id) } }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .medium))
-                    Text("not them")
-                        .font(.system(size: 17, weight: .regular, design: .serif))
-                        .italic()
-                }
-                .foregroundColor(DesignSystem.Colors.error)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(pal.paper)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(pal.line, lineWidth: 1)
-                )
-            }
-            .buttonStyle(PlainButtonStyle())
-
-            Button(action: { if let f = facesToReview.first { swipeRight(faceId: f.id) } }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 16, weight: .medium))
-                    Text("yes, that\u{2019}s them")
-                        .font(.system(size: 17, weight: .regular, design: .serif))
-                        .italic()
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(pal.accent)
-                )
-                .shadow(color: pal.accent.opacity(0.3), radius: 11, x: 0, y: 4)
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-    }
-
-    private func handleSwipe(value: DragGesture.Value, faceId: String) {
-        let threshold: CGFloat = 100
-        if value.translation.width > threshold {
-            swipeRight(faceId: faceId)
-        } else if value.translation.width < -threshold {
-            swipeLeft(faceId: faceId)
-        } else {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { offset = 0 }
-        }
-    }
-
-    private func swipeRight(faceId: String) {
-        isAnimating = true
-        withAnimation(.easeOut(duration: 0.3)) { offset = 500 }
-        Task { await verifyFace(faceId: faceId, isCorrect: true) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            // Reset offset without animation before removing the card
-            offset = 0
-            withAnimation(.easeInOut(duration: 0.2)) {
-                verificationResults[faceId] = true
-            }
-            isAnimating = false
-        }
-    }
-
-    private func swipeLeft(faceId: String) {
-        isAnimating = true
-        withAnimation(.easeOut(duration: 0.3)) { offset = -500 }
-        Task { await verifyFace(faceId: faceId, isCorrect: false) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            offset = 0
-            withAnimation(.easeInOut(duration: 0.2)) {
-                verificationResults[faceId] = false
-            }
-            isAnimating = false
         }
     }
 

@@ -61,7 +61,6 @@ struct ContentView: View {
     @State private var newCollectionName = ""
     @State private var previewPanelWidth: CGFloat = 340
     @State private var sidebarWidth: CGFloat = 196
-    @State private var sidebarDragStart: CGFloat = 196
     @State private var modelState: String = "pending"
     @State private var modelMessage: String = ""
     @State private var modelElapsed: Double = 0
@@ -189,7 +188,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
-                .frame(width: 680, height: 760)
+                .frame(width: 820, height: 760)
         }
         .onAppear {
             loadRecentImages()
@@ -212,8 +211,8 @@ struct ContentView: View {
     // MARK: - Atelier Sidebar
     private var atelierSidebar: some View {
         let sidebarItems: [(id: AppTab, label: String, icon: String, count: Int?, badge: Bool)] = [
-            (.faces,      "Faces",      "person.2",            faceManager.people.count > 0 ? faceManager.people.count : nil, false),
-            (.search,     "Searchy",    "magnifyingglass",     nil, false),
+            (.faces,      "Faces",      "person",              faceManager.people.count > 0 ? faceManager.people.count : nil, false),
+            (.search,     "Searchy",    "magnifyingglass",     indexStats?.totalImages, false),
             (.volumes,    "Volumes",    "externaldrive",       nil, false),
             (.duplicates, "Duplicates", "doc.on.doc",          duplicatesManager.groups.count > 0 ? duplicatesManager.groups.count : nil, duplicatesManager.groups.count > 0),
             (.favorites,  "Favorites",  "heart",               favoritesManager.favorites.count > 0 ? favoritesManager.favorites.count : nil, false),
@@ -241,7 +240,7 @@ struct ContentView: View {
             // Section header
             Text("LIBRARY")
                 .font(.system(size: 10, weight: .semibold))
-                .tracking(1)
+                .tracking(1.6)
                 .foregroundColor(p.ink3)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
@@ -266,7 +265,7 @@ struct ContentView: View {
                         Spacer()
 
                         if let count = item.count {
-                            Text("\(count)")
+                            Text(count.formatted())
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(item.badge ? p.accent : p.ink3)
                                 .fontWeight(item.badge ? .semibold : .regular)
@@ -287,9 +286,9 @@ struct ContentView: View {
 
             // Recent searches
             if !recentSearchQueries.isEmpty {
-                Text("RECENT")
+                Text("RECENT SEARCHES")
                     .font(.system(size: 10, weight: .semibold))
-                    .tracking(1)
+                    .tracking(1.6)
                     .foregroundColor(p.ink3)
                     .padding(.horizontal, 8)
                     .padding(.top, 20)
@@ -337,20 +336,21 @@ struct ContentView: View {
             Spacer()
 
             // Model status footer
-            HStack(spacing: 8) {
-                Image(systemName: "cpu")
-                    .font(.system(size: 11))
-                    .foregroundColor(p.ink3)
-
+            HStack(spacing: 6) {
                 Circle()
                     .fill(modelState == "ready" ? DesignSystem.Colors.success : (modelState == "loading" ? p.accent : p.ink3))
                     .frame(width: 6, height: 6)
                     .shadow(color: modelState == "ready" ? DesignSystem.Colors.success.opacity(0.6) : .clear, radius: 3)
 
                 Text(modelState == "ready" ? "CLIP \(modelSettings.currentModelName.components(separatedBy: "/").last ?? "ready")" : (modelState == "loading" ? "loading..." : "unloaded"))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(p.ink3)
                     .lineLimit(1)
+
+                Text("\u{00b7} ready")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(p.ink3)
+                    .opacity(modelState == "ready" ? 1 : 0)
             }
             .padding(.top, 10)
             .padding(.horizontal, 8)
@@ -370,27 +370,8 @@ struct ContentView: View {
                 .frame(width: 1)
         }
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color.clear)
-                .frame(width: 5)
-                .contentShape(Rectangle())
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
-                .gesture(
-                    DragGesture(minimumDistance: 1)
-                        .onChanged { value in
-                            let newWidth = sidebarDragStart + value.translation.width
-                            sidebarWidth = min(max(newWidth, 140), 320)
-                        }
-                        .onEnded { _ in
-                            sidebarDragStart = sidebarWidth
-                        }
-                )
+            SidebarDragHandle(sidebarWidth: $sidebarWidth)
+                .frame(width: 6)
         }
     }
 
@@ -1472,21 +1453,19 @@ struct ContentView: View {
     }
 
     private var bulkMergeSheet: some View {
-        VStack(spacing: 0) {
+        let totalPhotos = bulkMergeSelectedPeople.reduce(0) { $0 + $1.faceCount }
+
+        return VStack(spacing: 0) {
             // Header
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("BULK MERGE")
+                    Text("PEOPLE \u{00b7} MERGE")
                         .font(.system(size: 9.5, weight: .semibold))
                         .tracking(1.6)
                         .foregroundColor(p.ink3)
-                    Text("Merge \(selectedPeopleIds.count) People")
+                    Text("Merge \(selectedPeopleIds.count) groups into one")
                         .font(.system(size: 22, weight: .regular, design: .serif))
                         .foregroundColor(p.ink)
-                    Text("Select which person to keep as the primary")
-                        .font(.system(size: 13, weight: .regular, design: .serif))
-                        .italic()
-                        .foregroundColor(p.ink2)
                 }
                 Spacer()
                 Button(action: { showBulkMergeSheet = false }) {
@@ -1508,72 +1487,213 @@ struct ContentView: View {
 
             Rectangle().fill(p.line).frame(height: 0.5)
 
-            // List of selected people to pick target
+            // FROM → INTO layout
             ScrollView {
-                LazyVStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 16) {
+                        // FROM section
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("FROM")
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(1.6)
+                                .foregroundColor(p.ink3)
+
+                            // Chips for source people
+                            let sources = bulkMergeSelectedPeople.filter { $0.id != bulkMergeTargetId }
+                            FlowLayout(spacing: 6) {
+                                ForEach(sources) { person in
+                                    bulkMergeChip(person)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // Arrow
+                        VStack {
+                            Spacer()
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(p.ink3)
+                            Text("merge")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(p.ink3)
+                            Spacer()
+                        }
+                        .frame(width: 40)
+
+                        // INTO section
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("INTO")
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(1.6)
+                                .foregroundColor(p.ink3)
+
+                            if let targetId = bulkMergeTargetId,
+                               let target = faceManager.people.first(where: { $0.id == targetId }) {
+                                bulkMergeTargetCard(target)
+                            } else {
+                                Text("Select a target below")
+                                    .font(.system(size: 12, design: .serif).italic())
+                                    .foregroundColor(p.ink3)
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [5, 3]))
+                                            .foregroundColor(p.line)
+                                    )
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    // Info line
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10))
+                            .foregroundColor(p.accent)
+                        Text("\(totalPhotos) photos")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("will be re-tagged \u{00b7} ")
+                            .font(.system(size: 12))
+                        Text("this can be undone")
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+                    .foregroundColor(p.ink2)
+
+                    Rectangle().fill(p.line).frame(height: 0.5)
+
+                    // Target selection list
+                    Text("Select target person:")
+                        .font(.system(size: 12, design: .serif).italic())
+                        .foregroundColor(p.ink3)
+
                     ForEach(bulkMergeSelectedPeople) { person in
                         bulkMergeTargetRow(person)
                     }
                 }
-                .padding(.horizontal)
-                .padding(.bottom, bulkMergeTargetId == nil ? 16 : 80)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
             }
 
-            // Bottom action bar when target is selected
-            if let targetId = bulkMergeTargetId,
-               let target = faceManager.people.first(where: { $0.id == targetId }) {
-                VStack(spacing: 0) {
-                    Divider()
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Keep: \(target.name)")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(p.ink)
-                            Text("Merge \(selectedPeopleIds.count - 1) others into this person")
-                                .font(.system(size: 11))
-                                .foregroundColor(p.ink2)
-                        }
+            // Bottom action bar
+            VStack(spacing: 0) {
+                Rectangle().fill(p.line).frame(height: 0.5)
+                HStack {
+                    Spacer()
 
-                        Spacer()
+                    Button(action: { showBulkMergeSheet = false }) {
+                        Text("Cancel")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(p.ink2)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
 
+                    if let targetId = bulkMergeTargetId,
+                       let target = faceManager.people.first(where: { $0.id == targetId }) {
                         if isMerging {
                             HStack(spacing: 8) {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                Text("Merging...")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(p.ink2)
+                                ProgressView().scaleEffect(0.7)
+                                Text("Merging...").font(.system(size: 13)).foregroundColor(p.ink2)
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                         } else {
                             Button(action: performBulkMerge) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.triangle.merge")
                                         .font(.system(size: 12, weight: .medium))
-                                    Text("Merge")
+                                    Text("Merge into \(target.name)")
                                         .font(.system(size: 13, weight: .semibold))
                                 }
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 20)
                                 .padding(.vertical, 8)
-                                .background(
-                                    Capsule()
-                                        .fill(p.accent)
-                                )
+                                .background(Capsule().fill(p.ink))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
                     }
-                    .padding()
                 }
-                .background(p.card)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
             }
+            .background(p.card)
         }
-        .frame(width: 380, height: 450)
+        .frame(width: 580, height: 520)
         .background(p.card)
     }
 
     private var bulkMergeSelectedPeople: [Person] {
         return faceManager.people.filter { selectedPeopleIds.contains($0.id) }
+    }
+
+    private func bulkMergeChip(_ person: Person) -> some View {
+        Button(action: {
+            withAnimation { bulkMergeTargetId = person.id }
+        }) {
+            HStack(spacing: 6) {
+                if let thumbPath = person.thumbnailPath,
+                   let image = NSImage(contentsOfFile: thumbPath) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 24, height: 24)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(p.line.opacity(0.5))
+                        .frame(width: 24, height: 24)
+                        .overlay(Image(systemName: "person.fill").font(.system(size: 10)).foregroundColor(p.ink3))
+                }
+                Text(person.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(p.ink)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(p.sidebar)
+                    .overlay(Capsule().stroke(p.line, lineWidth: 0.5))
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private func bulkMergeTargetCard(_ person: Person) -> some View {
+        HStack(spacing: 10) {
+            if let thumbPath = person.thumbnailPath,
+               let image = NSImage(contentsOfFile: thumbPath) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 48, height: 48)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(p.line.opacity(0.5))
+                    .frame(width: 48, height: 48)
+                    .overlay(Image(systemName: "person.fill").foregroundColor(p.ink3))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.name)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(p.ink)
+                Text("\(person.faceCount) photos \u{00b7} pinned")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(p.ink3)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(p.accent.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(p.accent.opacity(0.3), lineWidth: 1))
+        )
     }
 
     private func bulkMergeTargetRow(_ person: Person) -> some View {
@@ -1584,10 +1704,9 @@ struct ContentView: View {
             }
         }) {
             HStack(spacing: 12) {
-                // Radio button
                 ZStack {
                     Circle()
-                        .stroke(isTarget ? p.accent : p.ink3, lineWidth: 2)
+                        .stroke(isTarget ? p.accent : p.ink3.opacity(0.5), lineWidth: 2)
                         .frame(width: 22, height: 22)
                     if isTarget {
                         Circle()
@@ -1596,31 +1715,26 @@ struct ContentView: View {
                     }
                 }
 
-                // Thumbnail
                 if let thumbPath = person.thumbnailPath,
                    let image = NSImage(contentsOfFile: thumbPath) {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 40, height: 40)
+                        .frame(width: 36, height: 36)
                         .clipShape(Circle())
                 } else {
                     Circle()
                         .fill(p.line.opacity(0.5))
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Image(systemName: "person.fill")
-                                .foregroundColor(p.ink3)
-                        )
+                        .frame(width: 36, height: 36)
+                        .overlay(Image(systemName: "person.fill").foregroundColor(p.ink3))
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(person.name)
-                        .font(.system(size: 14, weight: .regular, design: .serif))
-                        .italic()
+                        .font(.system(size: 13, weight: .regular, design: .serif).italic())
                         .foregroundColor(p.ink)
                     Text("\(person.faceCount) photos")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(p.ink3)
                 }
 
@@ -1632,22 +1746,18 @@ struct ContentView: View {
                         .foregroundColor(p.accent)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(p.accent.opacity(0.15))
-                        )
+                        .background(Capsule().fill(p.accent.opacity(0.12)))
                 }
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(isTarget
-                          ? p.accent.opacity(0.1)
-                          : p.line.opacity(0.15))
+                    .fill(isTarget ? p.accent.opacity(0.06) : Color.clear)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isTarget ? p.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+                    .stroke(isTarget ? p.accent.opacity(0.3) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
@@ -3629,13 +3739,14 @@ struct ContentView: View {
     @State private var previewImagePath: String? = nil
     @State private var dupSimilarityFilter: Float = 0.92
     @State private var dupLastScanDate: Date? = nil
+    @State private var sharpnessCache: [String: Float] = [:]
+    @State private var dimensionsCache: [String: String] = [:]
 
     // MARK: - Duplicates Helpers
     private var dupTotalPhotos: Int {
         duplicatesManager.groups.reduce(0) { $0 + $1.images.count }
     }
     private var dupRecoverableBytes: Int64 {
-        // Recoverable = everything except the keeper (first) in each group
         Int64(duplicatesManager.groups.reduce(0) { acc, group in
             acc + group.images.dropFirst().reduce(0) { $0 + $1.size }
         })
@@ -3659,17 +3770,70 @@ struct ContentView: View {
         formatter.countStyle = .file
         return formatter.string(fromByteCount: bytes)
     }
-    private func dupImageDimensions(for path: String) -> String {
-        guard let nsImage = NSImage(contentsOfFile: path) else { return "" }
-        let w = Int(nsImage.size.width)
-        let h = Int(nsImage.size.height)
-        return "\(w)×\(h)"
+    private func dupImagePixelDimensions(for path: String) -> String {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else { return "" }
+        return "\(w)\u{00d7}\(h)"
+    }
+    private func dupTimeDifference(for group: DuplicateGroup) -> String? {
+        let dates = group.images.compactMap { img -> Date? in
+            (try? FileManager.default.attributesOfItem(atPath: img.path))?[.modificationDate] as? Date
+        }
+        guard let earliest = dates.min(), let latest = dates.max() else { return nil }
+        let diff = latest.timeIntervalSince(earliest)
+        if diff < 1 { return nil }
+        if diff < 60 { return String(format: "%.1fs apart", diff) }
+        if diff < 3600 { return "\(Int(diff / 60))m apart" }
+        return "\(Int(diff / 3600))h apart"
+    }
+    private func dupEstimateSharpness(for path: String) -> Float? {
+        guard let ciImage = CIImage(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        let extent = ciImage.extent
+        let cropSize: CGFloat = min(256, min(extent.width, extent.height))
+        let centerCrop = ciImage.cropped(to: CGRect(
+            x: extent.midX - cropSize/2, y: extent.midY - cropSize/2,
+            width: cropSize, height: cropSize
+        ))
+        let laplacian = centerCrop.applyingFilter("CIConvolution3X3", parameters: [
+            "inputWeights": CIVector(values: [0,1,0,1,-4,1,0,1,0], count: 9),
+            "inputBias": 0.5
+        ])
+        guard let avgFilter = CIFilter(name: "CIAreaAverage", parameters: [
+            kCIInputImageKey: laplacian,
+            "inputExtent": CIVector(cgRect: laplacian.extent)
+        ]) else { return nil }
+        let ctx = CIContext()
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let output = avgFilter.outputImage else { return nil }
+        ctx.render(output, toBitmap: &pixel, rowBytes: 4,
+                   bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBA8, colorSpace: nil)
+        let variance = abs(Float(pixel[0]) / 255.0 - 0.5) * 2
+        return min(variance * 2.5, 1.0)
+    }
+    private func precomputeImageMetadata() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            var dims: [String: String] = [:]
+            var sharp: [String: Float] = [:]
+            for group in duplicatesManager.groups {
+                for image in group.images {
+                    let d = dupImagePixelDimensions(for: image.path)
+                    if !d.isEmpty { dims[image.path] = d }
+                    if let s = dupEstimateSharpness(for: image.path) { sharp[image.path] = s }
+                }
+            }
+            DispatchQueue.main.async {
+                dimensionsCache = dims
+                sharpnessCache = sharp
+            }
+        }
     }
 
     private var duplicatesTabContent: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Content
                 if duplicatesManager.isScanning {
                     VStack(spacing: 12) {
                         Spacer()
@@ -3699,7 +3863,6 @@ struct ContentView: View {
                     }
                     .padding()
                 } else if duplicatesManager.groups.isEmpty {
-                    // Header even when empty
                     duplicatesHeader
                         .padding(.horizontal, 24)
                         .padding(.top, 16)
@@ -3716,7 +3879,6 @@ struct ContentView: View {
                         .padding(.top, 10)
                     duplicatesResultsList
 
-                    // Bottom action bar when items selected
                     if duplicatesManager.totalSelected > 0 {
                         duplicatesActionBar
                     }
@@ -3735,11 +3897,12 @@ struct ContentView: View {
                 }
             }
 
-            // Image preview overlay
             if let previewPath = previewImagePath {
                 imagePreviewOverlay(path: previewPath)
             }
         }
+        .onAppear { precomputeImageMetadata() }
+        .onChange(of: duplicatesManager.groups.count) { _ in precomputeImageMetadata() }
     }
 
     private func imagePreviewOverlay(path: String) -> some View {
@@ -3845,19 +4008,20 @@ struct ContentView: View {
 
     // MARK: - Duplicates Header
     private var duplicatesHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("Duplicates")
-                    .font(.system(size: 24, weight: .regular, design: .serif))
+                    .font(.system(size: 28, weight: .regular, design: .serif))
                     .foregroundColor(p.ink)
 
                 if !duplicatesManager.groups.isEmpty {
-                    Text("\(duplicatesManager.groups.count) clusters \u{00b7} \(dupTotalPhotos) photos \u{00b7}")
-                        .font(.system(size: 12))
-                        .foregroundColor(p.ink2)
-                    Text("\(dupFormattedBytes(dupRecoverableBytes)) recoverable")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(p.accent)
+                    HStack(spacing: 0) {
+                        Text("\(duplicatesManager.groups.count) clusters \u{00b7} \(dupTotalPhotos) photos \u{00b7} ")
+                            .foregroundColor(p.ink2)
+                        Text("\(dupFormattedBytes(dupRecoverableBytes)) recoverable")
+                            .foregroundColor(DesignSystem.Colors.success)
+                    }
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
 
                 Spacer()
@@ -3866,23 +4030,19 @@ struct ContentView: View {
                     duplicatesManager.scanForDuplicates()
                     dupLastScanDate = Date()
                 }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 10))
-                        Text("Scan")
-                    }
-                    .font(.system(size: 12).weight(.medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(p.accent))
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(p.ink3)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(p.sidebar))
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(duplicatesManager.isScanning)
+                .help("Re-scan for duplicates")
             }
 
-            Text("Grouped by similarity. Searchy picks a keeper \u{2014} you confirm.")
-                .font(.system(size: 12, design: .serif).italic())
+            Text("Photos that look almost identical, grouped by what they have in common. Searchy picks a keeper for each \u{2014} you confirm.")
+                .font(.system(size: 13, design: .serif).italic())
                 .foregroundColor(p.ink3)
         }
         .padding(.bottom, 4)
@@ -3892,51 +4052,59 @@ struct ContentView: View {
     private var duplicatesBulkActionBar: some View {
         let nonKeeperCount = duplicatesManager.groups.reduce(0) { $0 + max($1.images.count - 1, 0) }
 
-        return HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 12))
-                .foregroundColor(p.accent)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14))
+                    .foregroundColor(p.accent)
 
-            Text("Auto-pick all \(duplicatesManager.groups.count) clusters \u{00b7} frees ~\(dupFormattedBytes(dupRecoverableBytes))")
-                .font(.system(size: 12))
-                .foregroundColor(p.ink2)
+                Text("Apply auto-pick to all \(duplicatesManager.groups.count) clusters")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(p.ink)
 
-            Spacer()
-
-            Button(action: {}) {
-                Text("Review")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(p.ink2)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().stroke(p.line, lineWidth: 1))
+                Spacer()
             }
-            .buttonStyle(PlainButtonStyle())
 
-            Button(action: { duplicatesManager.autoSelectAllSmaller() }) {
-                HStack(spacing: 3) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .bold))
-                    Text("Apply all")
-                        .font(.system(size: 11, weight: .semibold))
+            Text("Keeps the sharpest and largest of each group \u{00b7} frees ~\(dupFormattedBytes(dupRecoverableBytes)) \u{00b7} \(nonKeeperCount) photos to trash")
+                .font(.system(size: 12))
+                .foregroundColor(p.ink3)
+
+            HStack {
+                Spacer()
+
+                Button(action: {}) {
+                    Text("Review one by one")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Capsule().stroke(p.line, lineWidth: 1))
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(p.ink))
+                .buttonStyle(PlainButtonStyle())
+
+                Button(action: { duplicatesManager.autoSelectAllSmaller() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Apply all")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(p.ink))
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(p.sidebar.opacity(0.5))
-        )
+        .padding(16)
+        .background(p.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(p.line, lineWidth: 0.5)
         )
+        .shadow(color: Color.black.opacity(p.isDark ? 0.2 : 0.06), radius: 8, x: 0, y: 3)
     }
 
     // MARK: - Filter Rail
@@ -3944,12 +4112,12 @@ struct ContentView: View {
         HStack(spacing: 12) {
             Text("FILTER")
                 .font(.system(size: 10, weight: .semibold))
-                .tracking(1.2)
+                .tracking(1.6)
                 .foregroundColor(p.ink3)
 
             // Similarity slider pill
             HStack(spacing: 6) {
-                Text("similarity \u{2265} \(String(format: "%.2f", dupSimilarityFilter))")
+                Text("similarity \u{2248} \(String(format: "%.2f", dupSimilarityFilter))")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(p.ink2)
                 Slider(value: $dupSimilarityFilter, in: 0.85...0.99, step: 0.01)
@@ -4076,13 +4244,9 @@ struct ContentView: View {
         let totalBytes = group.images.reduce(0) { $0 + $1.size }
         let reclaimBytes = Int64(group.images.dropFirst().reduce(0) { $0 + $1.size })
         let whyLabel = dupWhyLabel(for: group)
-        let keeperReason: String = {
-            guard let first = group.images.first else { return "first in group" }
-            let maxSize = group.images.map { $0.size }.max() ?? 0
-            return first.size == maxSize ? "largest file" : "first in group"
-        }()
+        let timeDiff = dupTimeDifference(for: group)
 
-        // Date from first image (best-effort)
+        // Date from first image
         let firstImageDate: String = {
             guard let firstImage = group.images.first,
                   let attrs = try? FileManager.default.attributesOfItem(atPath: firstImage.path),
@@ -4093,41 +4257,35 @@ struct ContentView: View {
         }()
 
         return VStack(alignment: .leading, spacing: 0) {
-            // Card Header
+            // Row 1: Why label + match badge + date + count + dismiss
             HStack(spacing: 8) {
-                Text(whyLabel)
+                // Why label with optional time diff
+                Text(timeDiff != nil ? "\(whyLabel) \u{00b7} \(timeDiff!)" : whyLabel)
                     .font(.system(size: 14, weight: .regular, design: .serif).italic())
                     .foregroundColor(p.ink)
 
-                Text("\(avgSimPercent)%")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(p.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(p.accent.opacity(0.10)))
+                Text("\(avgSimPercent)% match")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(DesignSystem.Colors.success)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(DesignSystem.Colors.success.opacity(0.10)))
 
                 if !firstImageDate.isEmpty {
-                    Text(firstImageDate)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(p.ink3)
+                    HStack(spacing: 3) {
+                        Image(systemName: "camera")
+                            .font(.system(size: 9))
+                        Text(firstImageDate)
+                    }
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(p.ink3)
                 }
 
                 Spacer()
 
-                Text("\(group.images.count) \u{00b7} \(dupFormattedBytes(Int64(totalBytes)))")
-                    .font(.system(size: 10, design: .monospaced))
+                Text("\(group.images.count) photos \u{00b7} \(dupFormattedBytes(Int64(totalBytes)))")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(p.ink3)
-
-                Button(action: { duplicatesManager.autoSelectSmaller(groupId: group.id) }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9))
-                        Text("Auto-pick")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(p.accent)
-                }
-                .buttonStyle(PlainButtonStyle())
 
                 Button(action: {
                     withAnimation {
@@ -4139,131 +4297,132 @@ struct ContentView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(p.ink3)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(p.line).frame(height: 0.5)
-            }
+            .padding(.top, 12)
+            .padding(.bottom, 4)
 
-            // Photo Grid — adaptive sizing, max ~200px per card
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 8)], spacing: 8) {
+            // Row 2: Suggestion + apply action
+            HStack {
+                Text("Searchy suggests keeping the sharpest \u{00b7} largest")
+                    .font(.system(size: 12, design: .serif).italic())
+                    .foregroundColor(p.ink3)
+
+                Spacer()
+
+                Button(action: { duplicatesManager.autoSelectSmaller(groupId: group.id) }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
+                        Text("Apply suggestion \u{00b7} save \(dupFormattedBytes(reclaimBytes))")
+                            .font(.system(size: 11, weight: .medium))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(p.accent)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+
+            // Divider
+            Rectangle().fill(p.line).frame(height: 0.5)
+
+            // Photo Grid
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 260), spacing: 10)], spacing: 10) {
                 ForEach(Array(group.images.enumerated()), id: \.element.path) { index, image in
                     dupImageCard(image, isKeeper: index == 0, groupId: group.id)
                 }
             }
-            .padding(10)
+            .padding(12)
         }
         .background(p.card)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(p.line, lineWidth: 0.5)
         )
+        .shadow(color: Color.black.opacity(p.isDark ? 0.15 : 0.05), radius: 6, x: 0, y: 3)
     }
 
-    // MARK: - Photo Card (Nude direction)
+    // MARK: - Photo Card
     private func dupImageCard(_ image: DuplicateImage, isKeeper: Bool, groupId: Int) -> some View {
         let fileExt = URL(fileURLWithPath: image.path).pathExtension.uppercased()
+        let dims = dimensionsCache[image.path] ?? ""
+        let sharpness = sharpnessCache[image.path]
 
-        return ZStack {
-            // Image fills the fixed aspect ratio frame
-            GeometryReader { geo in
-                AsyncThumbnailView(path: image.path, contentMode: .fill)
-                    .frame(width: geo.size.width, height: geo.size.height)
-            }
+        return VStack(alignment: .leading, spacing: 4) {
+            // Image with badge
+            ZStack {
+                GeometryReader { geo in
+                    AsyncThumbnailView(path: image.path, contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
 
-            // Top-left badge: KEEP or TRASH
-            VStack {
-                HStack {
-                    if isKeeper {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 7, weight: .bold))
-                            Text("KEEP")
-                                .font(.system(size: 9, weight: .bold))
+                // Top-left badge
+                VStack {
+                    HStack {
+                        if isKeeper {
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 7, weight: .bold))
+                                Text("KEEP")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(DesignSystem.Colors.success))
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "nosign")
+                                    .font(.system(size: 8))
+                                Text("TRASH")
+                                    .font(.system(size: 9, weight: .medium))
+                            }
+                            .foregroundColor(p.ink2)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.white.opacity(0.92)))
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(p.accent))
-                    } else {
-                        HStack(spacing: 3) {
-                            Image(systemName: "trash")
-                                .font(.system(size: 7))
-                            Text("TRASH")
-                                .font(.system(size: 9, weight: .medium))
-                        }
-                        .foregroundColor(p.ink2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.white.opacity(0.92)))
+                        Spacer()
                     }
                     Spacer()
                 }
-                Spacer()
+                .padding(6)
             }
-            .padding(5)
+            .aspectRatio(1.3, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isKeeper ? DesignSystem.Colors.success : Color.clear, lineWidth: isKeeper ? 2 : 0)
+            )
 
-            // Bottom gradient with meta + actions
-            VStack {
-                Spacer()
-                ZStack(alignment: .bottom) {
-                    LinearGradient(
-                        colors: [.clear, Color.black.opacity(0.5)],
-                        startPoint: UnitPoint(x: 0.5, y: 0.0),
-                        endPoint: UnitPoint(x: 0.5, y: 1.0)
-                    )
-                    .frame(height: 44)
+            // Metadata below image
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dims.isEmpty ? "\(image.formattedSize) \u{00b7} \(fileExt)" : "\(image.formattedSize) \u{00b7} \(dims) \u{00b7} \(fileExt)")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(p.ink3)
+                    .lineLimit(1)
 
-                    HStack(spacing: 4) {
-                        Text("\(image.formattedSize) \u{00b7} \(fileExt)")
+                if let s = sharpness {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(s > 0.8 ? DesignSystem.Colors.success : (s > 0.5 ? Color.orange : Color.red.opacity(0.7)))
+                            .frame(width: 5, height: 5)
+                        Text("sharpness \(String(format: "%.2f", s))")
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-
-                        Spacer(minLength: 2)
-
-                        Button(action: {
-                            duplicatesManager.toggleSelection(groupId: groupId, imagePath: image.path)
-                        }) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(image.isSelected ? p.accent : Color.white.opacity(0.2))
-                                    .frame(width: 16, height: 16)
-                                if image.isSelected {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.white)
-                                }
-                            }
-                        }
-                        .buttonStyle(PlainButtonStyle())
-
-                        Button(action: {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: image.path)])
-                        }) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                            .foregroundColor(p.ink3)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 6)
                 }
             }
+            .padding(.horizontal, 2)
         }
-        .aspectRatio(1.3, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isKeeper ? p.accent : Color.clear, lineWidth: isKeeper ? 1.5 : 0)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
                 previewImagePath = image.path
