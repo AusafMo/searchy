@@ -77,6 +77,16 @@ struct ContentView: View {
 
     private var p: AtelierPalette { themeManager.palette }
 
+    /// True only when we should show the big editorial greeting (idle state)
+    private var showGreeting: Bool {
+        searchText.isEmpty && pastedImage == nil && searchManager.results.isEmpty && !searchManager.isSearching
+    }
+
+    /// True when there's content below the search bar (results or recent images)
+    private var hasContentBelow: Bool {
+        !searchManager.results.isEmpty || !recentImages.isEmpty || searchManager.isSearching
+    }
+
     var body: some View {
         ZStack {
             p.paper.ignoresSafeArea()
@@ -3113,23 +3123,22 @@ struct ContentView: View {
                     indexingReportView(report)
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
-                } else if searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil && !searchManager.isSearching {
-                    // Atelier editorial greeting
-                    atelierGreeting
                 }
 
-                // Search bar (always visible when not indexing)
+                // Search bar (always visible when not indexing) — fixed position, never jumps
                 if !isIndexing && indexingReport == nil {
                     modernSearchBar
                         .padding(.horizontal, 32)
-                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil && !searchManager.isSearching ? 0 : 16)
+                        .padding(.top, 16)
                 }
 
-                // Filter bar — don't hide during search transitions to prevent layout jump
-                if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !isIndexing {
+                // Filter bar — always present once we have any content, never hides
+                if !isIndexing {
                     filterBar
                         .padding(.top, 12)
-                        .opacity(searchManager.isSearching ? 0.5 : 1.0)
+                        .opacity(hasContentBelow ? (searchManager.isSearching ? 0.5 : 1.0) : 0)
+                        .frame(height: hasContentBelow ? nil : 0)
+                        .clipped()
                 }
 
                 errorView
@@ -3141,50 +3150,49 @@ struct ContentView: View {
                         .padding(.top, 10)
                 }
 
-                // Results area
-                ZStack {
-                    Group {
+                // Results area — use id to keep transitions smooth
+                Group {
+                    if showGreeting {
+                        VStack(spacing: 0) {
+                            atelierGreeting
+                            recentImagesSection
+                        }
+                        .transition(.opacity)
+                    } else if searchManager.isSearching || searchDebounceTimer != nil {
                         if !searchManager.results.isEmpty {
                             ScrollView {
                                 filteredResultsList
                                     .padding(.horizontal, 24)
                             }
-                            .opacity(searchManager.isSearching ? 0.4 : 1.0)
-                            .animation(.easeOut(duration: 0.15), value: searchManager.isSearching)
-                        } else if searchManager.isSearching {
+                            .opacity(0.4)
+                            .transition(.opacity)
+                        } else {
                             VStack {
                                 Spacer()
                                 ProgressView()
-                                Text("Searching...")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(p.ink3)
-                                    .padding(.top, 8)
                                 Spacer()
                             }
-                        } else if searchText.isEmpty && pastedImage == nil {
-                            recentImagesSection
-                        } else {
-                            emptyStateView
+                            .transition(.opacity)
                         }
-                    }
-
-                    // Subtle loading indicator when re-searching with existing results
-                    if searchManager.isSearching && !searchManager.results.isEmpty {
-                        VStack {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(p.card)
-                                        .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
-                                )
-                            Spacer()
+                    } else if !searchManager.results.isEmpty && searchManager.errorMessage == nil {
+                        ScrollView {
+                            filteredResultsList
+                                .padding(.horizontal, 24)
                         }
-                        .padding(.top, 20)
                         .transition(.opacity)
+                    } else if searchText.isEmpty && pastedImage == nil {
+                        VStack(spacing: 0) {
+                            recentImagesSection
+                        }
+                        .transition(.opacity)
+                    } else if searchManager.errorMessage == nil {
+                        emptyStateView
+                            .transition(.opacity)
                     }
                 }
+                .animation(.easeInOut(duration: 0.12), value: showGreeting)
+                .animation(.easeInOut(duration: 0.12), value: searchManager.results.isEmpty)
+                .animation(.easeInOut(duration: 0.12), value: searchManager.isSearching)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, 12)
             }
@@ -3210,37 +3218,29 @@ struct ContentView: View {
 
     // MARK: - Atelier Greeting
     private var atelierGreeting: some View {
-        VStack(spacing: 6) {
-            Text("24,891 photos \u{00B7} 7 directories")
-                .font(.system(size: 11))
-                .tracking(2)
-                .textCase(.uppercase)
-                .foregroundColor(p.ink3)
-                .padding(.bottom, 8)
-
+        VStack(spacing: 4) {
             HStack(spacing: 0) {
                 Text("What are you ")
-                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .font(.system(size: 28, weight: .regular, design: .serif))
                     .foregroundColor(p.ink)
                 Text("looking")
-                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .font(.system(size: 28, weight: .regular, design: .serif))
                     .italic()
                     .foregroundColor(p.accent)
                 Text(" for?")
-                    .font(.system(size: 44, weight: .regular, design: .serif))
+                    .font(.system(size: 28, weight: .regular, design: .serif))
                     .foregroundColor(p.ink)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.6)
 
             Text("describe a moment, paste a screenshot, drop an image")
-                .font(.system(size: 14, weight: .regular, design: .serif))
+                .font(.system(size: 12, weight: .regular, design: .serif))
                 .italic()
-                .foregroundColor(p.ink2)
-                .padding(.top, 2)
+                .foregroundColor(p.ink3)
         }
-        .padding(.top, 40)
-        .padding(.bottom, 24)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
     }
 
@@ -4313,11 +4313,21 @@ struct ContentView: View {
                             pastedImage = nil
                         }
                         searchDebounceTimer?.invalidate()
+                        searchDebounceTimer = nil
                         if newValue.isEmpty {
-                            searchManager.clearResults()
+                            // Delay clearing so layout doesn't jump immediately
+                            searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+                                DispatchQueue.main.async {
+                                    self.searchDebounceTimer = nil
+                                    self.searchManager.clearResults()
+                                }
+                            }
                             return
                         }
                         searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                            DispatchQueue.main.async {
+                                self.searchDebounceTimer = nil
+                            }
                             if !searchManager.isSearching && !newValue.isEmpty {
                                 performSearch()
                             }

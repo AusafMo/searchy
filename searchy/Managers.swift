@@ -24,8 +24,7 @@ class SearchManager: ObservableObject {
         DispatchQueue.main.async {
             self.isSearching = true
             self.errorMessage = nil
-            self.results = []
-            self.searchStats = nil
+            // Don't clear results — keep old results visible while searching
         }
 
         Task {
@@ -41,6 +40,7 @@ class SearchManager: ObservableObject {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    self.results = []
                     self.errorMessage = error.localizedDescription
                     self.isSearching = false
                 }
