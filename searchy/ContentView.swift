@@ -2526,8 +2526,7 @@ struct ContentView: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
                             ForEach(favoritesManager.favoriteImages) { result in
                                 FavoriteImageTile(result: result, onFindSimilar: { path in
-                                    activeTab = .search
-                                    searchManager.findSimilar(imagePath: path)
+                                    findSimilarWithPreview(path: path)
                                 })
                             }
                         }
@@ -3114,7 +3113,7 @@ struct ContentView: View {
                     indexingReportView(report)
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
-                } else if searchText.isEmpty && searchManager.results.isEmpty {
+                } else if searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil {
                     // Atelier editorial greeting
                     atelierGreeting
                 }
@@ -3123,19 +3122,20 @@ struct ContentView: View {
                 if !isIndexing && indexingReport == nil {
                     modernSearchBar
                         .padding(.horizontal, 32)
-                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty ? 0 : 16)
+                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil ? 0 : 16)
                 }
 
-                // Filter bar
-                if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
+                // Filter bar — don't hide during search transitions to prevent layout jump
+                if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !isIndexing {
                     filterBar
                         .padding(.top, 12)
+                        .opacity(searchManager.isSearching ? 0.5 : 1.0)
                 }
 
                 errorView
 
-                // Search reference card (visual or text)
-                if !searchManager.results.isEmpty && !searchManager.isSearching {
+                // Visual reference card (only for image-based searches)
+                if pastedImage != nil && !searchManager.results.isEmpty && !searchManager.isSearching {
                     searchReferenceCard
                         .padding(.horizontal, 32)
                         .padding(.top, 10)
@@ -3300,6 +3300,20 @@ struct ContentView: View {
         )
     }
 
+    // MARK: - Find Similar (with pasted image preview)
+    private func findSimilarWithPreview(path: String) {
+        // Load the image for the reference card thumbnail
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let img = NSImage(contentsOfFile: path) {
+                DispatchQueue.main.async {
+                    self.pastedImage = img
+                    self.activeTab = .search
+                }
+            }
+        }
+        searchManager.findSimilar(imagePath: path)
+    }
+
     // MARK: - Preview Hover Handling
     private func handlePreviewHoverStart(_ result: SearchResult) {
         previewTimer?.invalidate()
@@ -3373,7 +3387,7 @@ struct ContentView: View {
                     result: result,
                     showSimilarity: true,
                     onFindSimilar: { path in
-                        searchManager.findSimilar(imagePath: path)
+                        findSimilarWithPreview(path: path)
                     },
                     onOpen: {
                         openLightbox(result: result, allResults: results)
@@ -5407,7 +5421,7 @@ struct ContentView: View {
                         MasonryImageCard(
                             result: result,
                             onFindSimilar: { path in
-                                searchManager.findSimilar(imagePath: path)
+                                findSimilarWithPreview(path: path)
                             },
                             onOpen: {
                                 openLightbox(result: result, allResults: filteredRecentImages)
@@ -5573,7 +5587,7 @@ struct ContentView: View {
                             result: result,
                             showSimilarity: true,
                             onFindSimilar: { path in
-                                searchManager.findSimilar(imagePath: path)
+                                findSimilarWithPreview(path: path)
                             }
                         )
                         .transition(.asymmetric(
