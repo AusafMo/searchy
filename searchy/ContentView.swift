@@ -57,7 +57,11 @@ struct ContentView: View {
     @State private var previewResult: SearchResult? = nil
     @State private var previewTimer: Timer? = nil
     @State private var showPreviewPanel = false
+    @State private var showingNewCollectionSheet = false
+    @State private var newCollectionName = ""
     @State private var previewPanelWidth: CGFloat = 340
+    @State private var sidebarWidth: CGFloat = 196
+    @State private var sidebarDragStart: CGFloat = 196
     @State private var modelState: String = "pending"
     @State private var modelMessage: String = ""
     @State private var modelElapsed: Double = 0
@@ -306,12 +310,27 @@ struct ContentView: View {
                                 .italic()
                                 .foregroundColor(p.ink2)
                                 .lineLimit(1)
+                            Spacer()
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .contextMenu {
+                        Button(action: {
+                            recentSearchQueries.removeAll { $0 == query }
+                            UserDefaults.standard.set(recentSearchQueries, forKey: "recentSearchQueries")
+                        }) {
+                            Label("Remove", systemImage: "xmark")
+                        }
+                        Button(action: {
+                            recentSearchQueries.removeAll()
+                            UserDefaults.standard.set(recentSearchQueries, forKey: "recentSearchQueries")
+                        }) {
+                            Label("Clear All", systemImage: "trash")
+                        }
+                    }
                 }
             }
 
@@ -342,13 +361,36 @@ struct ContentView: View {
             }
         }
         .padding(14)
-        .padding(.top, 6)
-        .frame(width: 196)
+        .padding(.top, 28)
+        .frame(width: sidebarWidth)
         .background(p.sidebar)
         .overlay(alignment: .trailing) {
             Rectangle()
                 .fill(p.line)
                 .frame(width: 1)
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 5)
+                .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            let newWidth = sidebarDragStart + value.translation.width
+                            sidebarWidth = min(max(newWidth, 140), 320)
+                        }
+                        .onEnded { _ in
+                            sidebarDragStart = sidebarWidth
+                        }
+                )
         }
     }
 
@@ -1087,7 +1129,7 @@ struct ContentView: View {
                                             isPinned: true,
                                             isHidden: faceManager.isHidden(person),
                                             isSelected: selectedPeopleIds.contains(person.id),
-                                            circleSize: 110,
+                                            circleSize: 132,
                                             onRename: { newName in
                                                 Task {
                                                     await faceManager.renamePerson(person, to: newName)
@@ -1147,7 +1189,7 @@ struct ContentView: View {
                                             isHidden: faceManager.isHidden(person),
                                             isSelected: selectedPeopleIds.contains(person.id),
                                             showPhotosLabel: false,
-                                            circleSize: 100,
+                                            circleSize: 120,
                                             onRename: { newName in
                                                 Task {
                                                     await faceManager.renamePerson(person, to: newName)
@@ -1208,7 +1250,7 @@ struct ContentView: View {
                                             isHidden: faceManager.isHidden(person),
                                             isSelected: selectedPeopleIds.contains(person.id),
                                             isUnknown: true,
-                                            circleSize: 80,
+                                            circleSize: 96,
                                             onRename: { newName in
                                                 Task {
                                                     await faceManager.renamePerson(person, to: newName)
@@ -2494,10 +2536,29 @@ struct ContentView: View {
                         // Collections row
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
-                                favoritesCollectionCard(name: "All Favorites", icon: "heart.fill", iconColor: p.accent, count: favoritesManager.favoriteImages.count, isSelected: true)
+                                favoritesCollectionCard(
+                                    name: "All Favorites", icon: "heart.fill", iconColor: p.accent,
+                                    count: favoritesManager.favoriteImages.count,
+                                    isSelected: favoritesManager.selectedCollectionId == nil
+                                )
+                                .onTapGesture { favoritesManager.selectedCollectionId = nil }
+
+                                ForEach(favoritesManager.collections) { collection in
+                                    favoritesCollectionCard(
+                                        name: collection.name, icon: collection.icon, iconColor: p.accent,
+                                        count: collection.paths.count,
+                                        isSelected: favoritesManager.selectedCollectionId == collection.id
+                                    )
+                                    .onTapGesture { favoritesManager.selectedCollectionId = collection.id }
+                                    .contextMenu {
+                                        Button("Delete Collection") {
+                                            favoritesManager.deleteCollection(id: collection.id)
+                                        }
+                                    }
+                                }
 
                                 // Dashed "new collection" button
-                                Button(action: {}) {
+                                Button(action: { showingNewCollectionSheet = true }) {
                                     HStack(spacing: 8) {
                                         Image(systemName: "plus")
                                             .font(.system(size: 14, weight: .medium))
@@ -2506,9 +2567,11 @@ struct ContentView: View {
                                             .font(.system(size: 14, design: .serif))
                                             .italic()
                                             .foregroundColor(p.ink3)
+                                        Spacer(minLength: 0)
                                     }
-                                    .padding(.horizontal, 18)
-                                    .padding(.vertical, 14)
+                                    .frame(width: 180)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
                                     .background(
                                         RoundedRectangle(cornerRadius: 12)
                                             .stroke(style: StrokeStyle(lineWidth: 1, dash: [5, 3]))
@@ -2519,6 +2582,30 @@ struct ContentView: View {
                             }
                         }
                         .padding(.bottom, 28)
+                        .sheet(isPresented: $showingNewCollectionSheet) {
+                            VStack(spacing: 16) {
+                                Text("New Collection")
+                                    .font(.system(size: 16, weight: .semibold, design: .serif))
+                                TextField("Collection name", text: $newCollectionName)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 240)
+                                    .onSubmit {
+                                        createCollectionAndDismiss()
+                                    }
+                                HStack(spacing: 12) {
+                                    Button("Cancel") {
+                                        newCollectionName = ""
+                                        showingNewCollectionSheet = false
+                                    }
+                                    Button("Create") {
+                                        createCollectionAndDismiss()
+                                    }
+                                    .disabled(newCollectionName.trimmingCharacters(in: .whitespaces).isEmpty)
+                                    .keyboardShortcut(.defaultAction)
+                                }
+                            }
+                            .padding(24)
+                        }
 
                         // Recently starred label
                         HStack(spacing: 6) {
@@ -2534,7 +2621,7 @@ struct ContentView: View {
 
                         // 4-column grid with heart overlays
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
-                            ForEach(favoritesManager.favoriteImages) { result in
+                            ForEach(favoritesManager.displayedImages) { result in
                                 FavoriteImageTile(result: result, onFindSimilar: { path in
                                     findSimilarWithPreview(path: path)
                                 })
@@ -2553,6 +2640,14 @@ struct ContentView: View {
         }
     }
 
+    private func createCollectionAndDismiss() {
+        let name = newCollectionName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        favoritesManager.createCollection(name: name)
+        newCollectionName = ""
+        showingNewCollectionSheet = false
+    }
+
     private func favoritesCollectionCard(name: String, icon: String, iconColor: Color, count: Int, isSelected: Bool) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -2565,7 +2660,7 @@ struct ContentView: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
-                    .font(.system(size: 16, design: .serif))
+                    .font(.system(size: 14, design: .serif))
                     .italic()
                     .foregroundColor(p.ink)
                     .lineLimit(1)
@@ -2573,9 +2668,11 @@ struct ContentView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(p.ink3)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .frame(width: 180)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(p.card)
@@ -3125,11 +3222,19 @@ struct ContentView: View {
                         .padding(.top, 12)
                 }
 
+                // Greeting above search bar when idle
+                if !isIndexing && indexingReport == nil {
+                    if showGreeting {
+                        Spacer(minLength: 0)
+                        atelierGreeting
+                    }
+                }
+
                 // Search bar (always visible when not indexing) — fixed position, never jumps
                 if !isIndexing && indexingReport == nil {
                     modernSearchBar
                         .padding(.horizontal, 32)
-                        .padding(.top, 16)
+                        .padding(.top, showGreeting ? 0 : 16)
                 }
 
                 // Filter bar — always present once we have any content, never hides
@@ -3154,7 +3259,6 @@ struct ContentView: View {
                 Group {
                     if showGreeting {
                         VStack(spacing: 0) {
-                            atelierGreeting
                             recentImagesSection
                         }
                         .transition(.opacity)
@@ -5660,6 +5764,33 @@ struct ContentView: View {
                 return nil // Consume the event
             }
 
+            // Check for Cmd+K (focus search)
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "k" {
+                DispatchQueue.main.async {
+                    self.activeTab = .search
+                    self.isSearchFocused = true
+                }
+                return nil
+            }
+
+            // Check for Cmd+1-6 (switch tabs)
+            if event.modifierFlags.contains(.command), let chars = event.charactersIgnoringModifiers, chars.count == 1,
+               let digit = chars.first?.wholeNumberValue, digit >= 1 && digit <= 6 {
+                let tabs: [AppTab] = [.faces, .search, .volumes, .duplicates, .favorites, .setup]
+                DispatchQueue.main.async {
+                    self.activeTab = tabs[digit - 1]
+                }
+                return nil
+            }
+
+            // Check for Cmd+, (settings)
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "," {
+                DispatchQueue.main.async {
+                    self.isShowingSettings = true
+                }
+                return nil
+            }
+
             // Check for Cmd+? (keyboard overlay toggle)
             if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "/" {
                 DispatchQueue.main.async {
@@ -5668,12 +5799,38 @@ struct ContentView: View {
                 return nil
             }
 
-            // Check for Escape to close overlay
-            if event.keyCode == 53 && self.showKeyboardOverlay {
-                DispatchQueue.main.async {
-                    withAnimation { self.showKeyboardOverlay = false }
+            // Check for Escape to close overlays/panels
+            if event.keyCode == 53 {
+                if self.showKeyboardOverlay {
+                    DispatchQueue.main.async {
+                        withAnimation { self.showKeyboardOverlay = false }
+                    }
+                    return nil
                 }
-                return nil
+                if self.lightboxResult != nil {
+                    DispatchQueue.main.async {
+                        withAnimation { self.lightboxResult = nil }
+                    }
+                    return nil
+                }
+                if self.showPreviewPanel {
+                    DispatchQueue.main.async {
+                        withAnimation { self.showPreviewPanel = false }
+                    }
+                    return nil
+                }
+            }
+
+            // Arrow keys for lightbox navigation
+            if self.lightboxResult != nil {
+                if event.keyCode == 123 { // Left arrow
+                    DispatchQueue.main.async { self.navigateLightbox(-1) }
+                    return nil
+                }
+                if event.keyCode == 124 { // Right arrow
+                    DispatchQueue.main.async { self.navigateLightbox(1) }
+                    return nil
+                }
             }
 
             // Check for Cmd+V

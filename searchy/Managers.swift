@@ -332,22 +332,52 @@ class DuplicatesManager: ObservableObject {
     }
 }
 
+// MARK: - Collection Model
+struct FavoriteCollection: Codable, Identifiable {
+    let id: UUID
+    var name: String
+    var icon: String
+    var paths: [String]
+
+    init(name: String, icon: String = "folder.fill", paths: [String] = []) {
+        self.id = UUID()
+        self.name = name
+        self.icon = icon
+        self.paths = paths
+    }
+}
+
 // MARK: - Favorites Manager
 class FavoritesManager: ObservableObject {
     static let shared = FavoritesManager()
 
     @Published var favorites: Set<String> = []
     @Published var favoriteImages: [SearchResult] = []
+    @Published var collections: [FavoriteCollection] = []
+    @Published var selectedCollectionId: UUID? = nil
     @Published var isLoading = false
 
     private let favoritesFileURL: URL
+    private let collectionsFileURL: URL
+
+    /// Images filtered to selected collection, or all favorites if none selected
+    var displayedImages: [SearchResult] {
+        guard let selectedId = selectedCollectionId,
+              let collection = collections.first(where: { $0.id == selectedId }) else {
+            return favoriteImages
+        }
+        let pathSet = Set(collection.paths)
+        return favoriteImages.filter { pathSet.contains($0.path) }
+    }
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let searchyDir = appSupport.appendingPathComponent("searchy")
         try? FileManager.default.createDirectory(at: searchyDir, withIntermediateDirectories: true)
         favoritesFileURL = searchyDir.appendingPathComponent("favorites.json")
+        collectionsFileURL = searchyDir.appendingPathComponent("collections.json")
         loadFavorites()
+        loadCollections()
     }
 
     private func loadFavorites() {
@@ -371,10 +401,34 @@ class FavoritesManager: ObservableObject {
         }
     }
 
+    private func loadCollections() {
+        guard FileManager.default.fileExists(atPath: collectionsFileURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: collectionsFileURL)
+            collections = try JSONDecoder().decode([FavoriteCollection].self, from: data)
+        } catch {
+            print("Failed to load collections: \(error)")
+        }
+    }
+
+    private func saveCollections() {
+        do {
+            let data = try JSONEncoder().encode(collections)
+            try data.write(to: collectionsFileURL)
+        } catch {
+            print("Failed to save collections: \(error)")
+        }
+    }
+
     func toggleFavorite(_ path: String) {
-        objectWillChange.send()  // Force UI update
+        objectWillChange.send()
         if favorites.contains(path) {
             favorites.remove(path)
+            // Remove from all collections too
+            for i in 0..<collections.count {
+                collections[i].paths.removeAll { $0 == path }
+            }
+            saveCollections()
         } else {
             favorites.insert(path)
         }
@@ -384,6 +438,45 @@ class FavoritesManager: ObservableObject {
 
     func isFavorite(_ path: String) -> Bool {
         favorites.contains(path)
+    }
+
+    // MARK: - Collection CRUD
+
+    func createCollection(name: String) {
+        let collection = FavoriteCollection(name: name)
+        collections.append(collection)
+        saveCollections()
+    }
+
+    func renameCollection(id: UUID, name: String) {
+        if let idx = collections.firstIndex(where: { $0.id == id }) {
+            collections[idx].name = name
+            saveCollections()
+        }
+    }
+
+    func deleteCollection(id: UUID) {
+        collections.removeAll { $0.id == id }
+        if selectedCollectionId == id {
+            selectedCollectionId = nil
+        }
+        saveCollections()
+    }
+
+    func addToCollection(id: UUID, path: String) {
+        if let idx = collections.firstIndex(where: { $0.id == id }) {
+            if !collections[idx].paths.contains(path) {
+                collections[idx].paths.append(path)
+                saveCollections()
+            }
+        }
+    }
+
+    func removeFromCollection(id: UUID, path: String) {
+        if let idx = collections.firstIndex(where: { $0.id == id }) {
+            collections[idx].paths.removeAll { $0 == path }
+            saveCollections()
+        }
     }
 
     func refreshFavoriteImages() {

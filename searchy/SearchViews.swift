@@ -22,6 +22,8 @@ struct LightboxImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .allowsHitTesting(false)
         .onAppear { loadImage() }
         .onChange(of: path) { _, _ in loadImage() }
     }
@@ -606,6 +608,23 @@ struct MasonryImageCard: View {
                 FavoritesManager.shared.toggleFavorite(result.path)
             }) {
                 Label(isFavorite ? "Remove from Favorites" : "Add to Favorites", systemImage: isFavorite ? "heart.slash" : "heart")
+            }
+
+            if !FavoritesManager.shared.collections.isEmpty {
+                Menu("Add to Collection") {
+                    ForEach(FavoritesManager.shared.collections) { collection in
+                        Button(action: {
+                            // Auto-favorite if not already
+                            if !FavoritesManager.shared.isFavorite(result.path) {
+                                isFavorite = true
+                                FavoritesManager.shared.toggleFavorite(result.path)
+                            }
+                            FavoritesManager.shared.addToCollection(id: collection.id, path: result.path)
+                        }) {
+                            Label(collection.name, systemImage: collection.paths.contains(result.path) ? "checkmark.circle.fill" : "folder")
+                        }
+                    }
+                }
             }
 
             Button(action: {
@@ -2889,6 +2908,21 @@ struct ImageCard: View {
         }) {
             Label(isFavorite ? "Remove from Favorites" : "Add to Favorites", systemImage: isFavorite ? "heart.slash" : "heart")
         }
+        if !FavoritesManager.shared.collections.isEmpty {
+            Menu("Add to Collection") {
+                ForEach(FavoritesManager.shared.collections) { collection in
+                    Button(action: {
+                        if !FavoritesManager.shared.isFavorite(result.path) {
+                            isFavorite = true
+                            FavoritesManager.shared.toggleFavorite(result.path)
+                        }
+                        FavoritesManager.shared.addToCollection(id: collection.id, path: result.path)
+                    }) {
+                        Label(collection.name, systemImage: collection.paths.contains(result.path) ? "checkmark.circle.fill" : "folder")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Data Loading
@@ -3068,6 +3102,18 @@ struct FavoriteImageTile: View {
             if let findSimilar = onFindSimilar {
                 Button(action: { findSimilar(result.path) }) {
                     Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+                }
+            }
+            Divider()
+            if !FavoritesManager.shared.collections.isEmpty {
+                Menu("Add to Collection") {
+                    ForEach(FavoritesManager.shared.collections) { collection in
+                        Button(action: {
+                            FavoritesManager.shared.addToCollection(id: collection.id, path: result.path)
+                        }) {
+                            Label(collection.name, systemImage: collection.paths.contains(result.path) ? "checkmark.circle.fill" : "folder")
+                        }
+                    }
                 }
             }
             Divider()

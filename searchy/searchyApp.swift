@@ -1041,11 +1041,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
 
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.title = "Searchy"
         window.contentView = hostingView
         window.center()
@@ -1321,6 +1323,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         do {
             try await waitForServerReady()
             print("FastAPI server is ready at \(serverURL).")
+            // Reload face data now that server is ready
+            await FaceManager.shared.loadClustersFromAPI()
+            await FaceManager.shared.checkForNewImages()
         } catch {
             print("Failed to connect to FastAPI server: \(error.localizedDescription)")
         }

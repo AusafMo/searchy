@@ -9,7 +9,7 @@ struct PersonCard: View {
     var isSelected: Bool = false
     var isUnknown: Bool = false
     var showPhotosLabel: Bool = true
-    var circleSize: CGFloat = 106
+    var circleSize: CGFloat = 127
     var onRename: ((String) -> Void)?
     var onSelect: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -897,9 +897,8 @@ struct PersonFaceCard: View {
                 if let img = thumbnail {
                     Image(nsImage: img)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(height: cardHeight)
-                        .clipped()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: cardHeight)
                 } else {
                     Rectangle()
                         .fill(pal.card)
@@ -1058,8 +1057,8 @@ struct PersonFaceCard: View {
             let bbox = face.boundingBox
             let imgW = CGFloat(cgImage.width)
             let imgH = CGFloat(cgImage.height)
-            // Expand crop area by 40% for more context around face
-            let pad = max(bbox.width, bbox.height) * 0.4
+            // Expand crop area by 80% for more context around face
+            let pad = max(bbox.width, bbox.height) * 0.8
             let cropRect = CGRect(
                 x: max(0, bbox.origin.x - pad),
                 y: max(0, bbox.origin.y - pad),
