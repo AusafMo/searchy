@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var selectedPerson: Person? = nil
     @State private var peopleSearchText = ""
     @State private var selectedPeopleIds: Set<String> = []
+    @State private var scrollToUnknownSection = false
     @State private var searchText = ""
     @State private var isIndexing = false
     @State private var indexingProgress = ""
@@ -56,13 +57,19 @@ struct ContentView: View {
     @State private var previewResult: SearchResult? = nil
     @State private var previewTimer: Timer? = nil
     @State private var showPreviewPanel = false
-    @State private var previewPanelWidth: CGFloat = 300
+    @State private var previewPanelWidth: CGFloat = 340
     @State private var modelState: String = "pending"
     @State private var modelMessage: String = ""
     @State private var modelElapsed: Double = 0
     @State private var modelPollTimer: Timer? = nil
     @State private var updateAvailable: String? = nil  // nil = no update, else new version string
     @State private var showUpdateBanner = false
+    @State private var showKeyboardOverlay = false
+    @State private var showCopyToast = false
+    @State private var copyToastFilename = ""
+    @State private var recentSearchQueries: [String] = {
+        UserDefaults.standard.stringArray(forKey: "recentSearchQueries") ?? []
+    }()
     @Environment(\.colorScheme) var colorScheme
 
     private var p: AtelierPalette { themeManager.palette }
@@ -82,7 +89,7 @@ struct ContentView: View {
 
                     // Update banner
                     if showUpdateBanner, let newVersion = updateAvailable {
-                        HStack(spacing: DesignSystem.Spacing.sm) {
+                        HStack(spacing: 8) {
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.system(size: 13))
                             Text("Searchy v\(newVersion) available")
@@ -110,8 +117,8 @@ struct ContentView: View {
                             .buttonStyle(PlainButtonStyle())
                         }
                         .foregroundColor(p.accent)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
-                        .padding(.vertical, DesignSystem.Spacing.sm)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                         .background(p.accent.opacity(0.08))
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
@@ -133,6 +140,28 @@ struct ContentView: View {
                     }
                 }
             }
+
+            // MARK: - Full-Window Drop Overlay
+            if isDropTargeted {
+                dropOverlayView
+                    .transition(.opacity)
+                    .animation(.easeOut(duration: 0.2), value: isDropTargeted)
+            }
+
+            // MARK: - Keyboard Overlay
+            if showKeyboardOverlay {
+                keyboardOverlayView
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: showKeyboardOverlay)
+            }
+
+            // MARK: - Copy Toast
+            VStack {
+                Spacer()
+                CopyNotification(isShowing: $showCopyToast, filename: copyToastFilename)
+                    .padding(.bottom, 32)
+            }
+            .allowsHitTesting(false)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -233,35 +262,37 @@ struct ContentView: View {
             }
 
             // Recent searches
-            Text("RECENT SEARCHES")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1)
-                .foregroundColor(p.ink3)
-                .padding(.horizontal, 8)
-                .padding(.top, 20)
-                .padding(.bottom, 6)
+            if !recentSearchQueries.isEmpty {
+                Text("RECENT")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1)
+                    .foregroundColor(p.ink3)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 20)
+                    .padding(.bottom, 6)
 
-            ForEach(["sunset over mountains", "invoice 2024", "people wearing red"], id: \.self) { query in
-                Button(action: {
-                    activeTab = .search
-                    searchText = query
-                    performSearch()
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 10))
-                            .foregroundColor(p.ink3)
-                        Text(query)
-                            .font(.system(size: 14, weight: .regular, design: .serif))
-                            .italic()
-                            .foregroundColor(p.ink2)
-                            .lineLimit(1)
+                ForEach(recentSearchQueries, id: \.self) { query in
+                    Button(action: {
+                        activeTab = .search
+                        searchText = query
+                        performSearch()
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 10))
+                                .foregroundColor(p.ink3)
+                            Text(query)
+                                .font(.system(size: 12, weight: .regular, design: .serif))
+                                .italic()
+                                .foregroundColor(p.ink2)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .contentShape(Rectangle())
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
 
             Spacer()
@@ -303,68 +334,125 @@ struct ContentView: View {
 
     // MARK: - Compact Header (replaces old modernHeader)
     private var atelierHeader: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
+        HStack(spacing: 8) {
             Spacer()
 
             // Model loading indicator
             if modelState == "loading" {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     ProgressView()
-                        .scaleEffect(0.6)
-                    Text("Loading model \(String(format: "%.0fs", modelElapsed))")
+                        .scaleEffect(0.55)
+                    Text("LOADING")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(0.8)
+                    Text(String(format: "%.0fs", modelElapsed))
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
                 .foregroundColor(DesignSystem.Colors.warning)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 11)
                 .padding(.vertical, 5)
-                .background(DesignSystem.Colors.warning.opacity(0.1))
-                .clipShape(Capsule())
+                .background(
+                    Capsule()
+                        .fill(DesignSystem.Colors.warning.opacity(0.08))
+                        .overlay(Capsule().stroke(DesignSystem.Colors.warning.opacity(0.2), lineWidth: 1))
+                )
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else if modelState == "ready" && modelElapsed > 0 {
-                Text("Model ready \(String(format: "%.1fs", modelElapsed))")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(DesignSystem.Colors.success)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(DesignSystem.Colors.success.opacity(0.1))
-                    .clipShape(Capsule())
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                            withAnimation { self.modelElapsed = 0 }
-                        }
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(DesignSystem.Colors.success)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: DesignSystem.Colors.success.opacity(0.6), radius: 3)
+                    Text("READY")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(0.8)
+                    Text(String(format: "%.1fs", modelElapsed))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(DesignSystem.Colors.success)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(DesignSystem.Colors.success.opacity(0.08))
+                        .overlay(Capsule().stroke(DesignSystem.Colors.success.opacity(0.2), lineWidth: 1))
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        withAnimation { self.modelElapsed = 0 }
                     }
+                }
             }
 
             // Indexing indicator
             if isIndexing {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .scaleEffect(0.6)
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(p.accent)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: p.accent.opacity(0.6), radius: 3)
+                    Text("INDEXING")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundColor(p.accent)
                     Text("\(Int(indexingPercent))%")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(p.accent)
                 }
-                .foregroundColor(p.accent)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 11)
                 .padding(.vertical, 5)
-                .background(p.accent.opacity(0.1))
-                .clipShape(Capsule())
+                .background(
+                    Capsule()
+                        .fill(p.accent.opacity(0.08))
+                        .overlay(Capsule().stroke(p.accent.opacity(0.2), lineWidth: 1))
+                )
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
 
-            MinimalIconButton(icon: "plus", tooltip: "Add folder") {
-                if !isIndexing { selectAndIndexFolder() }
+            Button(action: { if !isIndexing { selectAndIndexFolder() } }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isIndexing ? p.ink3.opacity(0.4) : p.ink2)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(p.paper)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                    )
             }
+            .buttonStyle(PlainButtonStyle())
             .disabled(isIndexing)
+            .help("Add folder")
 
-            MinimalIconButton(icon: "arrow.clockwise", tooltip: "Rebuild index") {
-                if !isIndexing { rebuildIndex() }
+            Button(action: { if !isIndexing { rebuildIndex() } }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isIndexing ? p.ink3.opacity(0.4) : p.ink2)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(p.paper)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                    )
             }
+            .buttonStyle(PlainButtonStyle())
             .disabled(isIndexing)
+            .help("Rebuild index")
 
-            MinimalIconButton(icon: "gearshape", tooltip: "Settings") {
-                isShowingSettings = true
+            Button(action: { isShowingSettings = true }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(p.ink2)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(p.paper)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                    )
             }
+            .buttonStyle(PlainButtonStyle())
+            .help("Settings")
 
             ThemeSwitcherCompact()
         }
@@ -394,31 +482,101 @@ struct ContentView: View {
         return result
     }
 
+    /// People who are pinned (from filteredPeople)
+    private var pinnedPeople: [Person] {
+        filteredPeople.filter { faceManager.isPinned($0) }
+    }
+
+    /// People who have been given a custom name (not auto-generated "Person N") and are NOT pinned
+    private var namedPeople: [Person] {
+        filteredPeople.filter { person in
+            !faceManager.isPinned(person) && !isUnknownPerson(person)
+        }
+    }
+
+    /// People with auto-generated names ("Person N") or empty names
+    private var unknownPeople: [Person] {
+        filteredPeople.filter { person in
+            !faceManager.isPinned(person) && isUnknownPerson(person)
+        }
+    }
+
+    /// Check if a person has an auto-generated name (i.e. hasn't been manually named)
+    private func isUnknownPerson(_ person: Person) -> Bool {
+        let name = person.name.trimmingCharacters(in: .whitespaces)
+        if name.isEmpty { return true }
+        // Match auto-generated names like "Person 1", "Person 23", etc.
+        let pattern = #"^Person \d+$"#
+        return name.range(of: pattern, options: .regularExpression) != nil
+    }
+
     private var facesTabContent: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+            if selectedPerson != nil {
+                personDetailView
+            } else {
+                facesGridContent
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 20)
+        .sheet(isPresented: $showMergeSheet) {
+            mergePersonSheet
+        }
+        .sheet(isPresented: $showVerificationView) {
+            if let person = selectedPerson {
+                FaceVerificationView(
+                    person: person,
+                    faceManager: faceManager,
+                    onDismiss: {
+                        showVerificationView = false
+                        Task { await faceManager.loadClustersFromAPI() }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showBulkMergeSheet) {
+            bulkMergeSheet
+        }
+        .sheet(isPresented: $showAddGroupSheet) {
+            addGroupSheet
+        }
+    }
+
+    private var facesGridContent: some View {
+        VStack(spacing: 0) {
+            // Header — primary row: title + stats + action buttons
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("People")
                         .font(.system(size: 38, weight: .regular, design: .serif))
                         .foregroundColor(p.ink)
+
                     if faceManager.totalFacesDetected > 0 {
                         if !peopleSearchText.isEmpty {
                             Text("\(filteredPeople.count) of \(faceManager.people.count) people")
-                                .font(DesignSystem.Typography.caption)
+                                .font(.system(size: 12))
                                 .foregroundColor(p.ink2)
                         } else {
                             HStack(spacing: 6) {
-                                Image(systemName: "person.2")
+                                Image(systemName: "person.crop.circle")
                                     .font(.system(size: 11))
                                     .foregroundColor(p.ink3)
-                                Text("\(faceManager.people.count) named")
-                                    .font(DesignSystem.Typography.caption)
+                                Text("\(namedPeople.count) named")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(p.ink2)
+                                Text("\u{00B7}")
+                                    .foregroundColor(p.ink3)
+                                Image(systemName: "circle")
+                                    .font(.system(size: 7))
+                                    .foregroundColor(p.ink3)
+                                Text("\(unknownPeople.count) unknown")
+                                    .font(.system(size: 12))
                                     .foregroundColor(p.ink2)
                                 Text("\u{00B7}")
                                     .foregroundColor(p.ink3)
                                 Text("\(faceManager.totalFacesDetected) faces")
-                                    .font(DesignSystem.Typography.caption)
+                                    .font(.system(size: 12))
                                     .foregroundColor(p.ink2)
                             }
                         }
@@ -432,7 +590,7 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Text("\(selectedPeopleIds.count) selected")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.accent)
+                            .foregroundColor(p.accent)
 
                         Button(action: {
                             withAnimation {
@@ -441,82 +599,143 @@ struct ContentView: View {
                         }) {
                             Text("Clear")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.trailing, 8)
                 }
 
-                if faceManager.hasScannedBefore && !faceManager.isScanning && selectedPeopleIds.isEmpty {
+                // Merge ghost button — enters selection mode
+                if !faceManager.people.isEmpty && selectedPeopleIds.isEmpty && !faceManager.isScanning {
                     Button(action: {
-                        faceManager.clearAllFaces()
+                        withAnimation { isSelectionMode = true }
                     }) {
-                        Text("Clear All")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .padding(.trailing, 8)
-                }
-
-                // Show new images badge if there are unscanned images
-                if faceManager.newImagesCount > 0 && !faceManager.isScanning {
-                    Text("\(faceManager.newImagesCount) new")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(DesignSystem.Colors.warning))
-                        .padding(.trailing, 4)
-                }
-
-                // Show unverified count badge
-                if faceManager.totalUnverifiedCount > 0 && !faceManager.isScanning {
-                    HStack(spacing: 3) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 9))
-                        Text("\(faceManager.totalUnverifiedCount) to review")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(DesignSystem.Colors.warning.opacity(0.8)))
-                    .padding(.trailing, 4)
-                }
-
-                // Show Hidden toggle (only when there are hidden people)
-                if faceManager.hiddenCount > 0 {
-                    Button(action: {
-                        withAnimation {
-                            faceManager.showHidden.toggle()
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.merge")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Merge")
+                                .font(.system(size: 12, weight: .semibold))
                         }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: faceManager.showHidden ? "eye" : "eye.slash")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("\(faceManager.hiddenCount)")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .foregroundColor(faceManager.showHidden ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                         .background(
-                            Capsule()
-                                .fill(faceManager.showHidden
-                                      ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1)
-                                      : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
                     .padding(.trailing, 4)
                 }
 
+                // Review unknown accent button — scrolls to unknown section
+                if unknownPeople.count > 0 && selectedPeopleIds.isEmpty && !faceManager.isScanning {
+                    Button(action: {
+                        withAnimation {
+                            peopleSearchText = ""
+                            scrollToUnknownSection = true
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Review \(unknownPeople.count) unknown")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(p.accent)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+
+                // Overflow menu button
+                if selectedPeopleIds.isEmpty && !faceManager.isScanning {
+                    Menu {
+                        Button(action: {
+                            faceManager.reclusterWithConstraints()
+                        }) {
+                            Label("Re-cluster faces", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(faceManager.isReclustering || !faceManager.hasVerifiedFaces)
+
+                        Button(action: {
+                            faceManager.clearAllFaces()
+                        }) {
+                            Label("Clear all faces", systemImage: "trash")
+                        }
+                        .disabled(!faceManager.hasScannedBefore)
+
+                        Button(action: {
+                            withAnimation {
+                                faceManager.showHidden.toggle()
+                            }
+                        }) {
+                            Label(faceManager.showHidden ? "Hide hidden" : "Show hidden", systemImage: faceManager.showHidden ? "eye.slash" : "eye")
+                        }
+                    } label: {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
+                                .frame(width: 32, height: 32)
+                            HStack(spacing: 3) {
+                                ForEach(0..<3, id: \.self) { _ in
+                                    Circle()
+                                        .fill(p.ink2)
+                                        .frame(width: 3, height: 3)
+                                }
+                            }
+                        }
+                    }
+                    .menuStyle(BorderlessButtonMenuStyle())
+                    .frame(width: 32, height: 32)
+                }
+            }
+            .padding(.bottom, 4)
+            .onAppear {
+                faceManager.refreshNewImagesCount()
+            }
+
+            // Subtitle
+            if !faceManager.people.isEmpty && selectedPerson == nil {
+                Text("The faces Searchy keeps finding in your library. Name them, hide them, or merge.")
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink2)
+                    .padding(.bottom, 6)
+            }
+
+            // Editorial signal line
+            if !faceManager.isScanning && (faceManager.newImagesCount > 0 || faceManager.totalUnverifiedCount > 0) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 11))
+                        .foregroundColor(p.accent)
+                    Group {
+                        if faceManager.newImagesCount > 0 && faceManager.totalUnverifiedCount > 0 {
+                            Text("\(faceManager.newImagesCount) new faces since last scan \u{00B7} \(faceManager.totalUnverifiedCount) still unverified")
+                        } else if faceManager.newImagesCount > 0 {
+                            Text("\(faceManager.newImagesCount) new faces since last scan")
+                        } else {
+                            Text("\(faceManager.totalUnverifiedCount) still unverified")
+                        }
+                    }
+                    .font(.system(size: 14, design: .serif))
+                    .italic()
+                    .foregroundColor(p.accent)
+                }
+                .padding(.bottom, 10)
+            }
+
+            // Secondary row: scan, badges
+            HStack(spacing: 8) {
                 Button(action: {
-                    if faceManager.isScanning {
-                        // Could add cancel functionality
-                    } else {
+                    if !faceManager.isScanning {
                         faceManager.scanForFaces()
                     }
                 }) {
@@ -538,58 +757,27 @@ struct ContentView: View {
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(faceManager.isScanning ? DesignSystem.Colors.border : DesignSystem.Colors.accent)
+                            .fill(faceManager.isScanning ? p.line : p.accent)
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(faceManager.isScanning)
 
-                // Re-cluster button - only show when there are verified faces
-                if faceManager.hasVerifiedFaces && !faceManager.isScanning {
-                    Button(action: {
-                        faceManager.reclusterWithConstraints()
-                    }) {
-                        HStack(spacing: 6) {
-                            if faceManager.isReclustering {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                    .frame(width: 14, height: 14)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            Text(faceManager.isReclustering ? "Re-clustering..." : "Re-cluster")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundColor(DesignSystem.Colors.accent)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(DesignSystem.Colors.accent, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .disabled(faceManager.isReclustering)
-                    .help("Re-assign faces using verified faces as anchors")
-                }
+                Spacer()
             }
-            .padding(.bottom, DesignSystem.Spacing.md)
-            .onAppear {
-                faceManager.refreshNewImagesCount()
-            }
+            .padding(.bottom, 12)
 
             // Search bar - only show when there are people
             if !faceManager.people.isEmpty && selectedPerson == nil {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .foregroundColor(p.ink3)
 
                     TextField("Search people...", text: $peopleSearchText)
                         .textFieldStyle(PlainTextFieldStyle())
                         .font(.system(size: 14))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .foregroundColor(p.ink)
 
                     if !peopleSearchText.isEmpty {
                         Button(action: {
@@ -599,7 +787,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 14))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                         }
                         .buttonStyle(PlainButtonStyle())
                         .transition(.scale.combined(with: .opacity))
@@ -615,84 +803,99 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
                 )
-                .padding(.bottom, DesignSystem.Spacing.sm)
+                .padding(.bottom, 8)
             }
 
             // Group filter bar - only show when there are groups
             if !faceManager.availableGroups.isEmpty && selectedPerson == nil {
                 groupFilterBar
-                    .padding(.bottom, DesignSystem.Spacing.md)
+                    .padding(.bottom, 12)
             }
 
-            // Scanning progress
+            // Scanning progress — inline card
             if faceManager.isScanning {
-                VStack(spacing: 16) {
-                    HStack(spacing: 12) {
-                        // Animated face icon
-                        ZStack {
-                            Circle()
-                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
-                                .frame(width: 44, height: 44)
-                            Image(systemName: "faceid")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.accent)
-                        }
+                HStack(spacing: 10) {
+                    // Left: face icon in accent circle
+                    ZStack {
+                        Circle()
+                            .fill(p.accent.opacity(colorScheme == .dark ? 0.15 : 0.1))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "faceid")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(p.accent)
+                    }
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Scanning for faces...")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(DesignSystem.Colors.primaryText)
+                    // Middle: label + scan count + progress bar
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("Scanning faces\u{2026}")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(p.ink)
                             Text(faceManager.scanProgress)
-                                .font(.system(size: 11))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(p.ink2)
                                 .lineLimit(1)
                         }
 
-                        Spacer()
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 1.5)
+                                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
+                                    .frame(height: 3)
 
-                        Text("\(Int(faceManager.scanPercentage * 100))%")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(DesignSystem.Colors.accent)
-                    }
-
-                    // Modern progress bar
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
-                                .frame(height: 6)
-
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.7)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: geometry.size.width * faceManager.scanPercentage, height: 6)
-                                .animation(.easeInOut(duration: 0.3), value: faceManager.scanPercentage)
+                                RoundedRectangle(cornerRadius: 1.5)
+                                    .fill(p.accent)
+                                    .frame(width: geometry.size.width * faceManager.scanPercentage, height: 3)
+                                    .animation(.easeInOut(duration: 0.3), value: faceManager.scanPercentage)
+                            }
                         }
+                        .frame(height: 3)
                     }
-                    .frame(height: 6)
+
+                    Spacer()
+
+                    // Right: estimated time + pause button
+                    VStack(alignment: .trailing, spacing: 4) {
+                        let remainingPercent = max(1.0 - faceManager.scanPercentage, 0)
+                        let estimatedMinutes = Int(ceil(remainingPercent * 5))
+                        Text("~\(estimatedMinutes) min left")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(p.ink3)
+
+                        Button(action: {
+                            // Pause scanning
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "pause.fill")
+                                    .font(.system(size: 9, weight: .medium))
+                                Text("Pause")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(p.ink2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
-                .padding(16)
+                .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.03))
-                        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.05), radius: 8, y: 2)
+                        .fill(p.paper)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.clear, lineWidth: 1)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), lineWidth: 1)
                 )
-                .padding(.bottom, DesignSystem.Spacing.lg)
+                .padding(.bottom, 12)
             }
 
             // Content
-            if selectedPerson != nil {
-                personDetailView
-            } else if faceManager.people.isEmpty && !faceManager.isScanning {
+            if faceManager.people.isEmpty && !faceManager.isScanning {
                 // Empty state - modern card design
                 VStack(spacing: 24) {
                     Spacer()
@@ -703,8 +906,8 @@ struct ContentView: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.25 : 0.15),
-                                        DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.1 : 0.05)
+                                        p.accent.opacity(colorScheme == .dark ? 0.25 : 0.15),
+                                        p.accent.opacity(colorScheme == .dark ? 0.1 : 0.05)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -714,19 +917,19 @@ struct ContentView: View {
 
                         Image(systemName: "person.2.crop.square.stack")
                             .font(.system(size: 48, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.8 : 0.7))
+                            .foregroundColor(p.accent.opacity(colorScheme == .dark ? 0.8 : 0.7))
                     }
 
                     VStack(spacing: 8) {
                         Text("Face Recognition")
-                            .font(.system(size: 22, weight: .bold, design: .serif))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .foregroundColor(p.ink)
 
                         Text(faceManager.hasScannedBefore
                              ? "No faces found in your photos.\nTry scanning more images."
                              : "Find and group people in your photos\nusing face detection.")
                             .font(.system(size: 14))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .foregroundColor(p.ink2)
                             .multilineTextAlignment(.center)
                             .lineSpacing(2)
                     }
@@ -748,12 +951,12 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(
                                         LinearGradient(
-                                            colors: [DesignSystem.Colors.accent, DesignSystem.Colors.accent.opacity(0.8)],
+                                            colors: [p.accent, p.accent.opacity(0.8)],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
                                     )
-                                    .shadow(color: DesignSystem.Colors.accent.opacity(0.3), radius: 8, y: 4)
+                                    .shadow(color: p.accent.opacity(0.3), radius: 8, y: 4)
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -772,14 +975,14 @@ struct ContentView: View {
                             Spacer()
                             Image(systemName: "person.slash")
                                 .font(.system(size: 40, weight: .light))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                             Text("No people matching \"\(peopleSearchText)\"")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                             Button(action: { peopleSearchText = "" }) {
                                 Text("Clear Search")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(DesignSystem.Colors.accent)
+                                    .foregroundColor(p.accent)
                             }
                             .buttonStyle(PlainButtonStyle())
                             Spacer()
@@ -791,14 +994,14 @@ struct ContentView: View {
                             Spacer()
                             Image(systemName: "person.2.slash")
                                 .font(.system(size: 40, weight: .light))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                             Text("No people in this group")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                             Button(action: { faceManager.selectedGroupFilter = nil }) {
                                 Text("Show All")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(DesignSystem.Colors.accent)
+                                    .foregroundColor(p.accent)
                             }
                             .buttonStyle(PlainButtonStyle())
                             Spacer()
@@ -810,14 +1013,14 @@ struct ContentView: View {
                             Spacer()
                             Image(systemName: "eye.slash")
                                 .font(.system(size: 40, weight: .light))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                             Text("All people are hidden")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                             Button(action: { faceManager.showHidden = true }) {
                                 Text("Show Hidden")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(DesignSystem.Colors.accent)
+                                    .foregroundColor(p.accent)
                             }
                             .buttonStyle(PlainButtonStyle())
                             Spacer()
@@ -829,60 +1032,210 @@ struct ContentView: View {
                             Spacer()
                             Image(systemName: "person.crop.circle.badge.questionmark")
                                 .font(.system(size: 40, weight: .light))
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                             Text("No people to display")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
+                    ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVGrid(columns: [
-                            GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 12)
-                        ], spacing: 14) {
-                            ForEach(filteredPeople) { person in
-                                PersonCard(
-                                    person: person,
-                                    isPinned: faceManager.isPinned(person),
-                                    isHidden: faceManager.isHidden(person),
-                                    isSelected: selectedPeopleIds.contains(person.id),
-                                    onRename: { newName in
-                                        Task {
-                                            await faceManager.renamePerson(person, to: newName)
-                                        }
-                                    },
-                                    onSelect: {
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            selectedPerson = person
-                                        }
-                                    },
-                                    onTogglePin: {
-                                        Task {
-                                            await faceManager.togglePin(person)
-                                        }
-                                    },
-                                    onToggleHide: {
-                                        Task {
-                                            await faceManager.toggleHide(person)
-                                        }
-                                    },
-                                    onToggleSelection: {
-                                        withAnimation {
-                                            if selectedPeopleIds.contains(person.id) {
-                                                selectedPeopleIds.remove(person.id)
-                                            } else {
-                                                selectedPeopleIds.insert(person.id)
+                        VStack(alignment: .leading, spacing: 0) {
+                            // MARK: - Pinned Section
+                            if !pinnedPeople.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "star")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(p.ink3)
+                                    Text("PINNED")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .tracking(1.5)
+                                        .foregroundColor(p.ink3)
+                                        .textCase(.uppercase)
+                                }
+                                .padding(.bottom, 14)
+
+                                LazyVGrid(columns: [
+                                    GridItem(.adaptive(minimum: 140, maximum: 170), spacing: 18)
+                                ], spacing: 18) {
+                                    ForEach(pinnedPeople) { person in
+                                        PersonCard(
+                                            person: person,
+                                            isPinned: true,
+                                            isHidden: faceManager.isHidden(person),
+                                            isSelected: selectedPeopleIds.contains(person.id),
+                                            circleSize: 110,
+                                            onRename: { newName in
+                                                Task {
+                                                    await faceManager.renamePerson(person, to: newName)
+                                                }
+                                            },
+                                            onSelect: {
+                                                withAnimation(.easeInOut(duration: 0.2)) {
+                                                    selectedPerson = person
+                                                }
+                                            },
+                                            onTogglePin: {
+                                                Task {
+                                                    await faceManager.togglePin(person)
+                                                }
+                                            },
+                                            onToggleHide: {
+                                                Task {
+                                                    await faceManager.toggleHide(person)
+                                                }
+                                            },
+                                            onToggleSelection: {
+                                                withAnimation {
+                                                    if selectedPeopleIds.contains(person.id) {
+                                                        selectedPeopleIds.remove(person.id)
+                                                    } else {
+                                                        selectedPeopleIds.insert(person.id)
+                                                    }
+                                                }
                                             }
-                                        }
+                                        )
                                     }
-                                )
+                                }
+                                .padding(.bottom, 36)
+                            }
+
+                            // MARK: - Named Section
+                            if !namedPeople.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(p.ink3)
+                                    Text("NAMED")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .tracking(1.5)
+                                        .foregroundColor(p.ink3)
+                                        .textCase(.uppercase)
+                                }
+                                .padding(.bottom, 14)
+
+                                LazyVGrid(columns: [
+                                    GridItem(.adaptive(minimum: 130, maximum: 150), spacing: 18)
+                                ], spacing: 18) {
+                                    ForEach(namedPeople) { person in
+                                        PersonCard(
+                                            person: person,
+                                            isPinned: false,
+                                            isHidden: faceManager.isHidden(person),
+                                            isSelected: selectedPeopleIds.contains(person.id),
+                                            showPhotosLabel: false,
+                                            circleSize: 100,
+                                            onRename: { newName in
+                                                Task {
+                                                    await faceManager.renamePerson(person, to: newName)
+                                                }
+                                            },
+                                            onSelect: {
+                                                withAnimation(.easeInOut(duration: 0.2)) {
+                                                    selectedPerson = person
+                                                }
+                                            },
+                                            onTogglePin: {
+                                                Task {
+                                                    await faceManager.togglePin(person)
+                                                }
+                                            },
+                                            onToggleHide: {
+                                                Task {
+                                                    await faceManager.toggleHide(person)
+                                                }
+                                            },
+                                            onToggleSelection: {
+                                                withAnimation {
+                                                    if selectedPeopleIds.contains(person.id) {
+                                                        selectedPeopleIds.remove(person.id)
+                                                    } else {
+                                                        selectedPeopleIds.insert(person.id)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.bottom, 36)
+                            }
+
+                            // MARK: - Unknown Section
+                            if !unknownPeople.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "circle")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(p.ink3)
+                                    Text("UNKNOWN \u{00B7} CLICK TO NAME")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .tracking(1.5)
+                                        .foregroundColor(p.ink3)
+                                        .textCase(.uppercase)
+                                }
+                                .id("unknownSection")
+                                .padding(.bottom, 14)
+
+                                LazyVGrid(columns: [
+                                    GridItem(.adaptive(minimum: 110, maximum: 130), spacing: 14)
+                                ], spacing: 14) {
+                                    ForEach(unknownPeople) { person in
+                                        PersonCard(
+                                            person: person,
+                                            isPinned: false,
+                                            isHidden: faceManager.isHidden(person),
+                                            isSelected: selectedPeopleIds.contains(person.id),
+                                            isUnknown: true,
+                                            circleSize: 80,
+                                            onRename: { newName in
+                                                Task {
+                                                    await faceManager.renamePerson(person, to: newName)
+                                                }
+                                            },
+                                            onSelect: {
+                                                withAnimation(.easeInOut(duration: 0.2)) {
+                                                    selectedPerson = person
+                                                }
+                                            },
+                                            onTogglePin: {
+                                                Task {
+                                                    await faceManager.togglePin(person)
+                                                }
+                                            },
+                                            onToggleHide: {
+                                                Task {
+                                                    await faceManager.toggleHide(person)
+                                                }
+                                            },
+                                            onToggleSelection: {
+                                                withAnimation {
+                                                    if selectedPeopleIds.contains(person.id) {
+                                                        selectedPeopleIds.remove(person.id)
+                                                    } else {
+                                                        selectedPeopleIds.insert(person.id)
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.bottom, 16)
                             }
                         }
                         .padding(.top, 8)
                         .padding(.bottom, !selectedPeopleIds.isEmpty ? 80 : 16)
                     }
+                    .onChange(of: scrollToUnknownSection) { _, shouldScroll in
+                        if shouldScroll {
+                            withAnimation {
+                                proxy.scrollTo("unknownSection", anchor: .top)
+                            }
+                            scrollToUnknownSection = false
+                        }
+                    }
+                    } // ScrollViewReader
 
                     // Floating selection action bar
                     if !selectedPeopleIds.isEmpty {
@@ -891,8 +1244,8 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(.top, DesignSystem.Spacing.lg)
-        .padding(.horizontal, DesignSystem.Spacing.xl)
+        .padding(.top, 16)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -905,12 +1258,12 @@ struct ContentView: View {
                 }) {
                     Text("All")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(faceManager.selectedGroupFilter == nil ? .white : DesignSystem.Colors.secondaryText)
+                        .foregroundColor(faceManager.selectedGroupFilter == nil ? .white : p.ink2)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
                             Capsule()
-                                .fill(faceManager.selectedGroupFilter == nil ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                                .fill(faceManager.selectedGroupFilter == nil ? p.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -924,12 +1277,12 @@ struct ContentView: View {
                     }) {
                         Text(group)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(faceManager.selectedGroupFilter == group ? .white : DesignSystem.Colors.secondaryText)
+                            .foregroundColor(faceManager.selectedGroupFilter == group ? .white : p.ink2)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(
                                 Capsule()
-                                    .fill(faceManager.selectedGroupFilter == group ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                                    .fill(faceManager.selectedGroupFilter == group ? p.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
                             )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -939,7 +1292,7 @@ struct ContentView: View {
                 Button(action: { showAddGroupSheet = true }) {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .foregroundColor(p.ink3)
                         .frame(width: 26, height: 26)
                         .background(
                             Circle()
@@ -1054,34 +1407,44 @@ struct ContentView: View {
             )
             .padding(.bottom, 16)
         }
-        .sheet(isPresented: $showBulkMergeSheet) {
-            bulkMergeSheet
-        }
     }
 
     private var bulkMergeSheet: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                Text("Merge \(selectedPeopleIds.count) People")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("BULK MERGE")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundColor(p.ink3)
+                    Text("Merge \(selectedPeopleIds.count) People")
+                        .font(.system(size: 22, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
+                    Text("Select which person to keep as the primary")
+                        .font(.system(size: 13, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
+                }
                 Spacer()
                 Button(action: { showBulkMergeSheet = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    ZStack {
+                        Circle()
+                            .fill(p.paper)
+                            .overlay(Circle().stroke(p.line, lineWidth: 1))
+                            .frame(width: 28, height: 28)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(p.ink3)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .padding()
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
 
-            // Info text
-            Text("Select which person to keep. All other selected people will be merged into them.")
-                .font(.system(size: 13))
-                .foregroundColor(DesignSystem.Colors.secondaryText)
-                .padding(.horizontal)
-                .padding(.bottom, 16)
+            Rectangle().fill(p.line).frame(height: 0.5)
 
             // List of selected people to pick target
             ScrollView {
@@ -1103,10 +1466,10 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Keep: \(target.name)")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(DesignSystem.Colors.primaryText)
+                                .foregroundColor(p.ink)
                             Text("Merge \(selectedPeopleIds.count - 1) others into this person")
                                 .font(.system(size: 11))
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .foregroundColor(p.ink2)
                         }
 
                         Spacer()
@@ -1117,7 +1480,7 @@ struct ContentView: View {
                                     .scaleEffect(0.7)
                                 Text("Merging...")
                                     .font(.system(size: 13))
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .foregroundColor(p.ink2)
                             }
                         } else {
                             Button(action: performBulkMerge) {
@@ -1132,7 +1495,7 @@ struct ContentView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     Capsule()
-                                        .fill(DesignSystem.Colors.accent)
+                                        .fill(p.accent)
                                 )
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -1140,11 +1503,11 @@ struct ContentView: View {
                     }
                     .padding()
                 }
-                .background(DesignSystem.Colors.secondaryBackground)
+                .background(p.card)
             }
         }
         .frame(width: 380, height: 450)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .background(p.card)
     }
 
     private var bulkMergeSelectedPeople: [Person] {
@@ -1162,11 +1525,11 @@ struct ContentView: View {
                 // Radio button
                 ZStack {
                     Circle()
-                        .stroke(isTarget ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .stroke(isTarget ? p.accent : p.ink3, lineWidth: 2)
                         .frame(width: 22, height: 22)
                     if isTarget {
                         Circle()
-                            .fill(DesignSystem.Colors.accent)
+                            .fill(p.accent)
                             .frame(width: 14, height: 14)
                     }
                 }
@@ -1178,24 +1541,25 @@ struct ContentView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(Circle())
                 } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                    Circle()
+                        .fill(p.line.opacity(0.5))
                         .frame(width: 40, height: 40)
                         .overlay(
                             Image(systemName: "person.fill")
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                         )
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(person.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 14, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink)
                     Text("\(person.faceCount) photos")
-                        .font(.system(size: 12))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(p.ink3)
                 }
 
                 Spacer()
@@ -1203,12 +1567,12 @@ struct ContentView: View {
                 if isTarget {
                     Text("Keep")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.accent)
+                        .foregroundColor(p.accent)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
                             Capsule()
-                                .fill(DesignSystem.Colors.accent.opacity(0.15))
+                                .fill(p.accent.opacity(0.15))
                         )
                 }
             }
@@ -1216,12 +1580,12 @@ struct ContentView: View {
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isTarget
-                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
-                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+                          ? p.accent.opacity(0.1)
+                          : p.line.opacity(0.15))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isTarget ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+                    .stroke(isTarget ? p.accent.opacity(0.5) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
@@ -1286,11 +1650,11 @@ struct ContentView: View {
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.accent)
+                        .foregroundColor(p.accent)
                         .frame(width: 32, height: 32)
                         .background(
                             Circle()
-                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                                .fill(p.accent.opacity(0.1))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -1300,13 +1664,13 @@ struct ContentView: View {
                     if isEditingPersonName {
                         TextField("Name", text: $editingPersonName)
                             .textFieldStyle(PlainTextFieldStyle())
-                            .font(.system(size: 20, weight: .bold, design: .serif))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
+                            .font(.system(size: 20, weight: .regular, design: .serif))
+                            .foregroundColor(p.ink)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                                    .fill(p.line.opacity(0.3))
                             )
                             .focused($personNameFieldFocused)
                             .onSubmit { commitPersonNameEdit() }
@@ -1315,14 +1679,15 @@ struct ContentView: View {
                     } else {
                         HStack(spacing: 6) {
                             Text(person.name)
-                                .font(.system(size: 20, weight: .bold, design: .serif))
-                                .foregroundColor(DesignSystem.Colors.primaryText)
+                                .font(.system(size: 20, weight: .regular, design: .serif))
+                                .italic()
+                                .foregroundColor(p.ink)
                                 .lineLimit(1)
 
                             Button(action: { startPersonNameEdit() }) {
                                 Image(systemName: "pencil.circle.fill")
                                     .font(.system(size: 16))
-                                    .foregroundColor(DesignSystem.Colors.accent.opacity(0.7))
+                                    .foregroundColor(p.accent.opacity(0.7))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -1364,12 +1729,12 @@ struct ContentView: View {
                             Text("Merge")
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .foregroundColor(p.ink2)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
                             Capsule()
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                                .fill(p.line)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1384,12 +1749,12 @@ struct ContentView: View {
                             Text("Share")
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(DesignSystem.Colors.accent)
+                        .foregroundColor(p.ink2)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
                             Capsule()
-                                .fill(DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                                .fill(p.line)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1404,12 +1769,12 @@ struct ContentView: View {
                             Text("Album")
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .foregroundColor(p.ink2)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
                             Capsule()
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                                .fill(p.line)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1419,18 +1784,18 @@ struct ContentView: View {
                         Image(systemName: "photo.stack")
                             .font(.system(size: 12))
                         Text("\(person.faceCount) photos")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 12, design: .monospaced))
                     }
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .foregroundColor(p.ink3)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
                         Capsule()
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
+                            .fill(p.line)
                     )
                 }
             }
-            .padding(.bottom, DesignSystem.Spacing.lg)
+            .padding(.bottom, 16)
 
             // Person's photos grid
             if let person = selectedPerson {
@@ -1439,10 +1804,10 @@ struct ContentView: View {
                         Spacer()
                         Image(systemName: "photo.on.rectangle.angled")
                             .font(.system(size: 48, weight: .light))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .foregroundColor(p.ink3)
                         Text("No photos available")
                             .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .foregroundColor(p.ink2)
                         Spacer()
                     }
                 } else {
@@ -1464,12 +1829,12 @@ struct ContentView: View {
                                     Text(isSelectionMode ? "Done" : "Select")
                                         .font(.system(size: 12, weight: .medium))
                                 }
-                                .foregroundColor(isSelectionMode ? .white : DesignSystem.Colors.secondaryText)
+                                .foregroundColor(isSelectionMode ? .white : p.ink2)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
                                 .background(
                                     Capsule()
-                                        .fill(isSelectionMode ? DesignSystem.Colors.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                                        .fill(isSelectionMode ? p.accent : p.line.opacity(0.5))
                                 )
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -1485,14 +1850,14 @@ struct ContentView: View {
                                 }) {
                                     Text(selectedFaceIds.count == person.faces.count ? "Deselect All" : "Select All")
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(DesignSystem.Colors.accent)
+                                        .foregroundColor(p.accent)
                                 }
                                 .buttonStyle(PlainButtonStyle())
 
                                 if !selectedFaceIds.isEmpty {
                                     Text("\(selectedFaceIds.count) selected")
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                                        .foregroundColor(p.ink2)
                                 }
                             }
 
@@ -1557,7 +1922,7 @@ struct ContentView: View {
                                         .foregroundColor(DesignSystem.Colors.warning)
                                     Text("Hover to verify")
                                         .font(.system(size: 11))
-                                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                        .foregroundColor(p.ink3)
                                 }
                             }
                         }
@@ -1600,52 +1965,73 @@ struct ContentView: View {
             }
         }
         .onChange(of: selectedPerson) { _ in
-            // Clear selection when changing person
             selectedFaceIds.removeAll()
             isSelectionMode = false
-        }
-        .sheet(isPresented: $showMergeSheet) {
-            mergePersonSheet
-        }
-        .sheet(isPresented: $showVerificationView) {
-            if let person = selectedPerson {
-                FaceVerificationView(
-                    person: person,
-                    faceManager: faceManager,
-                    onDismiss: {
-                        showVerificationView = false
-                    }
-                )
-            }
-        }
-        .sheet(isPresented: $showAddGroupSheet) {
-            addGroupSheet
         }
     }
 
     private var addGroupSheet: some View {
-        VStack(spacing: 16) {
-            Text("Create Group")
-                .font(.system(size: 16, weight: .bold, design: .serif))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+        VStack(spacing: 0) {
+            // Header
+            VStack(alignment: .leading, spacing: 4) {
+                Text("NEW GROUP")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .tracking(1.6)
+                    .foregroundColor(p.ink3)
+                Text("Create a group")
+                    .font(.system(size: 22, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+                Text("Organize people into named collections")
+                    .font(.system(size: 13, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
 
-            TextField("Group name", text: $newGroupName)
-                .textFieldStyle(PlainTextFieldStyle())
-                .font(.system(size: 14))
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                )
+            Rectangle().fill(p.line).frame(height: 0.5)
 
-            HStack(spacing: 12) {
+            // Input area
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Group name")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(p.ink2)
+
+                TextField("e.g. Family, Work, Friends", text: $newGroupName)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 15, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(p.paper)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(p.line, lineWidth: 1)
+                            )
+                    )
+            }
+            .padding(24)
+
+            Rectangle().fill(p.line).frame(height: 0.5)
+
+            // Footer buttons
+            HStack(spacing: 10) {
+                Spacer()
                 Button(action: { showAddGroupSheet = false; newGroupName = "" }) {
                     Text("Cancel")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                        .padding(.horizontal, 20)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 18)
                         .padding(.vertical, 8)
-                        .background(Capsule().fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.04)))
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(p.paper)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
 
@@ -1658,64 +2044,82 @@ struct ContentView: View {
                         }
                     }
                 }) {
-                    Text("Create")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Create Group")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 18)
                         .padding(.vertical, 8)
-                        .background(Capsule().fill(DesignSystem.Colors.accent))
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(newGroupName.isEmpty ? p.accent.opacity(0.4) : p.accent)
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(newGroupName.isEmpty)
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
         }
-        .padding(24)
-        .frame(width: 280)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .frame(width: 380)
+        .background(p.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private var mergePersonSheet: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                Text("Merge People")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("MERGE")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundColor(p.ink3)
+                    Text("Merge People")
+                        .font(.system(size: 22, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
+                    if let target = selectedPerson {
+                        Text("Select people to combine into \"\(target.name)\"")
+                            .font(.system(size: 13, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(p.ink2)
+                    }
+                }
                 Spacer()
                 Button(action: { showMergeSheet = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    ZStack {
+                        Circle()
+                            .fill(p.paper)
+                            .overlay(Circle().stroke(p.line, lineWidth: 1))
+                            .frame(width: 28, height: 28)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(p.ink3)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .padding()
+            .padding(.horizontal, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
 
-            // Info text
-            if let target = selectedPerson {
-                Text("Select people to merge into \"\(target.name)\". Their faces will be combined into this person.")
-                    .font(.system(size: 13))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                    .padding(.horizontal)
-                    .padding(.bottom, 12)
-            }
+            Rectangle().fill(p.line).frame(height: 0.5)
 
             // Search bar
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .foregroundColor(p.ink3)
 
                 TextField("Search people...", text: $mergeSearchText)
                     .textFieldStyle(PlainTextFieldStyle())
                     .font(.system(size: 14))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .foregroundColor(p.ink)
 
                 if !mergeSearchText.isEmpty {
                     Button(action: { mergeSearchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .foregroundColor(p.ink3)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -1724,7 +2128,7 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                    .fill(p.line.opacity(0.3))
             )
             .padding(.horizontal)
             .padding(.bottom, 12)
@@ -1747,7 +2151,7 @@ struct ContentView: View {
                     HStack {
                         Text("\(mergeSelectedIds.count) selected")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .foregroundColor(p.ink2)
 
                         Spacer()
 
@@ -1757,7 +2161,7 @@ struct ContentView: View {
                                     .scaleEffect(0.7)
                                 Text("Merging...")
                                     .font(.system(size: 13))
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .foregroundColor(p.ink2)
                             }
                         } else {
                             Button(action: performMerge) {
@@ -1772,7 +2176,7 @@ struct ContentView: View {
                                 .padding(.vertical, 8)
                                 .background(
                                     Capsule()
-                                        .fill(DesignSystem.Colors.accent)
+                                        .fill(p.accent)
                                 )
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -1780,11 +2184,11 @@ struct ContentView: View {
                     }
                     .padding()
                 }
-                .background(DesignSystem.Colors.secondaryBackground)
+                .background(p.card)
             }
         }
         .frame(width: 420, height: 520)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .background(p.card)
     }
 
     private var mergeTargetPeople: [Person] {
@@ -1813,11 +2217,11 @@ struct ContentView: View {
                 // Selection checkbox
                 ZStack {
                     Circle()
-                        .stroke(isSelected ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText, lineWidth: 2)
+                        .stroke(isSelected ? p.accent : p.ink3, lineWidth: 2)
                         .frame(width: 22, height: 22)
                     if isSelected {
                         Circle()
-                            .fill(DesignSystem.Colors.accent)
+                            .fill(p.accent)
                             .frame(width: 22, height: 22)
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .bold))
@@ -1832,24 +2236,25 @@ struct ContentView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 40, height: 40)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(Circle())
                 } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                    Circle()
+                        .fill(p.line.opacity(0.5))
                         .frame(width: 40, height: 40)
                         .overlay(
                             Image(systemName: "person.fill")
-                                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                                .foregroundColor(p.ink3)
                         )
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(person.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 14, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink)
                     Text("\(person.faceCount) photos")
-                        .font(.system(size: 12))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(p.ink3)
                 }
 
                 Spacer()
@@ -1858,12 +2263,12 @@ struct ContentView: View {
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isSelected
-                          ? DesignSystem.Colors.accent.opacity(colorScheme == .dark ? 0.15 : 0.1)
-                          : (colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.02)))
+                          ? p.accent.opacity(0.1)
+                          : p.line.opacity(0.15))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? DesignSystem.Colors.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+                    .stroke(isSelected ? p.accent.opacity(0.5) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
@@ -2018,21 +2423,30 @@ struct ContentView: View {
     private var favoritesTabContent: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline) {
                     Text("Favorites")
-                        .font(.system(size: 24, weight: .bold, design: .serif))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 38, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
 
-                    Text("\(favoritesManager.favoriteImages.count) images")
-                        .font(DesignSystem.Typography.callout)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Text("\(favoritesManager.favoriteImages.count) photos")
+                        .font(.system(size: 17, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
+                        .padding(.leading, 14)
+
+                    Spacer()
                 }
 
-                Spacer()
+                Text("Star anything from search. They stay searchable like everything else.")
+                    .font(.system(size: 14, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink3)
+                    .padding(.top, 6)
             }
-            .padding(.horizontal, DesignSystem.Spacing.lg)
-            .padding(.vertical, DesignSystem.Spacing.md)
+            .padding(.horizontal, 32)
+            .padding(.top, 32)
+            .padding(.bottom, 20)
 
             if favoritesManager.isLoading {
                 Spacer()
@@ -2041,18 +2455,19 @@ struct ContentView: View {
                 Spacer()
             } else if favoritesManager.favoriteImages.isEmpty {
                 Spacer()
-                VStack(spacing: DesignSystem.Spacing.lg) {
+                VStack(spacing: 20) {
                     Image(systemName: "heart.slash")
-                        .font(.system(size: 64, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                        .font(.system(size: 48, weight: .light))
+                        .foregroundColor(p.ink3)
 
                     Text("No Favorites Yet")
-                        .font(.system(size: 24, weight: .bold, design: .serif))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 32, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
 
                     Text("Hover over any image and click the heart\nto add it to your favorites.")
-                        .font(DesignSystem.Typography.body)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 16, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
                         .multilineTextAlignment(.center)
                 }
                 Spacer()
@@ -2075,7 +2490,7 @@ struct ContentView: View {
                             )
                         }
                     }
-                    .padding(DesignSystem.Spacing.lg)
+                    .padding(16)
                 }
             }
         }
@@ -2088,95 +2503,77 @@ struct ContentView: View {
     // MARK: - Volumes Tab Content
     private var volumesTabContent: some View {
         ScrollView {
-            VStack(spacing: DesignSystem.Spacing.xxl) {
+            VStack(spacing: 32) {
                 // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline) {
                         Text("Volumes")
-                            .font(.system(size: 20, weight: .bold, design: .serif))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
-                        Text("Manage external drives, RAID arrays, and network storage")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                    }
-                    Spacer()
+                            .font(.system(size: 38, weight: .regular, design: .serif))
+                            .foregroundColor(p.ink)
 
-                    HStack(spacing: DesignSystem.Spacing.sm) {
-                        Button(action: {
-                            VolumeManager.shared.refreshVolumes()
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 11, weight: .medium))
-                                Text("Refresh")
-                                    .font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundColor(DesignSystem.Colors.accent)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(DesignSystem.Colors.accentSubtle)
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        Text("external drives, indexed independently")
+                            .font(.system(size: 17, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(p.ink2)
+                            .padding(.leading, 14)
 
-                        Button(action: {
-                            isShowingAddVolume = true
-                        }) {
-                            HStack(spacing: 4) {
+                        Spacer()
+
+                        Button(action: { isShowingAddVolume = true }) {
+                            HStack(spacing: 6) {
                                 Image(systemName: "plus")
                                     .font(.system(size: 11, weight: .semibold))
-                                Text("Add Path")
-                                    .font(.system(size: 12, weight: .medium))
+                                Text("Add volume")
+                                    .font(.system(size: 12, weight: .semibold))
                             }
-                            .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                             .background(
-                                Capsule()
-                                    .fill(DesignSystem.Colors.accent)
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(p.accent)
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
-                }
-                .padding(.horizontal, DesignSystem.Spacing.lg)
-                .padding(.top, DesignSystem.Spacing.md)
 
-                // Volume Stats Summary
-                volumeStatsSummary
-                    .padding(.horizontal, DesignSystem.Spacing.lg)
+                    Text("Each volume keeps its own index. Eject a drive and its photos quietly disappear from results.")
+                        .font(.system(size: 14, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink3)
+                        .padding(.top, 6)
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 32)
 
                 // Connected Mobile Devices
                 if !mobileDeviceManager.devices.isEmpty {
                     devicesSection
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.horizontal, 32)
                 }
 
-                // Online Volumes
-                let onlineVolumes = VolumeManager.shared.volumes.filter { $0.isOnline }
-                if !onlineVolumes.isEmpty {
-                    volumeSection(title: "Online Volumes", icon: "checkmark.circle.fill", iconColor: DesignSystem.Colors.success, volumes: onlineVolumes)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
-                }
-
-                // Offline Volumes
-                let offlineVolumes = VolumeManager.shared.volumes.filter { !$0.isOnline }
-                if !offlineVolumes.isEmpty {
-                    volumeSection(title: "Offline Volumes", icon: "xmark.circle.fill", iconColor: DesignSystem.Colors.secondaryText, volumes: offlineVolumes)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                // All Volumes in 2-column grid
+                let allVolumes = VolumeManager.shared.volumes
+                if !allVolumes.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                            ForEach(allVolumes) { volume in
+                                VolumeCard(volume: volume)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 32)
                 }
 
                 // Empty State
                 if VolumeManager.shared.volumes.isEmpty {
                     volumesEmptyState
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
+                        .padding(.horizontal, 32)
                 }
 
                 Spacer()
             }
-            .padding(.bottom, DesignSystem.Spacing.xxl)
+            .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $isShowingAddVolume) {
@@ -2194,18 +2591,11 @@ struct ContentView: View {
     @ObservedObject private var mobileDeviceManager = MobileDeviceManager.shared
 
     private var devicesSection: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            HStack(spacing: 6) {
-                Image(systemName: "iphone")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                Text("Connected Devices")
-                    .font(.system(size: 15, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-                Text("(\(mobileDeviceManager.devices.count))")
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            Text("CONNECTED DEVICES")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .foregroundColor(p.ink3)
 
             if mobileDeviceManager.devices.isEmpty {
                 // Empty state
@@ -2214,19 +2604,19 @@ struct ContentView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "iphone.slash")
                             .font(.system(size: 24))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .foregroundColor(p.ink3)
                         Text("No devices connected")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .font(.system(size: 12))
+                            .foregroundColor(p.ink2)
                         Text("Connect an iPhone, iPad, or camera via USB")
-                            .font(DesignSystem.Typography.caption2)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .font(.system(size: 12))
+                            .foregroundColor(p.ink3)
                     }
                     Spacer()
                 }
-                .padding(.vertical, DesignSystem.Spacing.lg)
+                .padding(.vertical, 16)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
                     ForEach(mobileDeviceManager.devices) { device in
                         DeviceCard(device: device)
                     }
@@ -2235,68 +2625,33 @@ struct ContentView: View {
         }
     }
 
-    private var volumeStatsSummary: some View {
-        let volumes = VolumeManager.shared.volumes
-        let onlineCount = volumes.filter { $0.isOnline }.count
-        let totalImages = volumes.reduce(0) { $0 + $1.imageCount }
-        let enabledCount = volumes.filter { $0.isEnabled }.count
-
-        return HStack(spacing: DesignSystem.Spacing.md) {
-            VolumeStatCard(title: "Total Volumes", value: "\(volumes.count)", icon: "externaldrive", color: DesignSystem.Colors.accent)
-            VolumeStatCard(title: "Online", value: "\(onlineCount)", icon: "checkmark.circle", color: DesignSystem.Colors.success)
-            VolumeStatCard(title: "Indexed Images", value: formatNumber(totalImages), icon: "photo.stack", color: .purple)
-            VolumeStatCard(title: "Enabled", value: "\(enabledCount)", icon: "power", color: DesignSystem.Colors.warning)
-        }
-    }
-
-    private func volumeSection(title: String, icon: String, iconColor: Color, volumes: [ExternalVolume]) -> some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(iconColor)
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-                Text("(\(volumes.count))")
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
-                ForEach(volumes) { volume in
-                    VolumeCard(volume: volume)
-                }
-            }
-        }
-    }
-
     private var volumesEmptyState: some View {
-        VStack(spacing: DesignSystem.Spacing.lg) {
+        VStack(spacing: 20) {
             Image(systemName: "externaldrive.badge.questionmark")
-                .font(.system(size: 48))
-                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                .font(.system(size: 48, weight: .light))
+                .foregroundColor(p.ink3)
+
             Text("No External Volumes Detected")
-                .font(.system(size: 16, weight: .semibold, design: .serif))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+                .font(.system(size: 24, weight: .regular, design: .serif))
+                .foregroundColor(p.ink)
+
             Text("Connect an external drive, RAID array, or add a network path manually")
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .font(.system(size: 14, weight: .regular, design: .serif))
+                .italic()
+                .foregroundColor(p.ink2)
                 .multilineTextAlignment(.center)
+
             Button(action: { isShowingAddVolume = true }) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("Add Manual Path")
-                        .font(.system(size: 12, weight: .medium))
+                    Text("Add volume")
+                        .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
+                .foregroundColor(.white)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(DesignSystem.Colors.accent)
-                )
+                .background(RoundedRectangle(cornerRadius: 10).fill(p.accent))
             }
             .buttonStyle(PlainButtonStyle())
         }
@@ -2316,345 +2671,348 @@ struct ContentView: View {
     // MARK: - Setup Tab Content
     private var setupTabContent: some View {
         ScrollView {
-            VStack(spacing: DesignSystem.Spacing.xxl) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Setup")
-                            .font(.system(size: 24, weight: .bold, design: .serif))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
+            VStack(alignment: .leading, spacing: 0) {
+                // Library heading
+                Text("Library")
+                    .font(.system(size: 38, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 32)
 
-                        Text("Configure your search index and CLIP model")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                    }
-                    Spacer()
+                Text(isIndexing
+                    ? "Searchy is indexing your photos. You can keep using the app."
+                    : "At a glance — your indexed photo library.")
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink2)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 6)
+                    .padding(.bottom, 28)
+
+                // Hero progress card when indexing
+                if isIndexing {
+                    atelierHeroProgress
+                        .padding(.horizontal, 32)
+                        .padding(.bottom, 28)
                 }
-                .padding(.horizontal, DesignSystem.Spacing.lg)
-                .padding(.top, DesignSystem.Spacing.md)
 
-                // Three column layout for cards
-                HStack(alignment: .top, spacing: DesignSystem.Spacing.xl) {
-                    // Model Card
-                    setupModelCard
+                // Index stats + quick actions
+                setupStatsSection
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 28)
 
-                    // Directories Card
-                    setupDirectoriesCard
-
-                    // Stats Card
-                    setupStatsCard
-                }
-                .padding(.horizontal, DesignSystem.Spacing.lg)
-
-                Spacer()
-            }
-            .padding(.bottom, DesignSystem.Spacing.xxl)
-        }
-    }
-
-    private var setupModelCard: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            // Card Header
-            HStack {
-                Image(systemName: "cpu")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                Text("CLIP Model")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-                Spacer()
-                if modelSettings.isChangingModel {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                }
-            }
-
-            Divider()
-
-            // Current Model
-            if modelSettings.isLoading {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading model info...")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                }
-                .padding(DesignSystem.Spacing.sm)
-            } else if modelSettings.currentModelName.isEmpty {
-                // No model loaded
-                VStack(spacing: DesignSystem.Spacing.sm) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundColor(DesignSystem.Colors.warning)
-                        Text("No model loaded")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                    }
-
-                    Button(action: {
-                        // Load the default model
-                        modelSettings.changeModel(to: "openai/clip-vit-base-patch32") { _, _ in }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10))
-                            Text("Load Default Model")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill(DesignSystem.Colors.accent)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(DesignSystem.Spacing.sm)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(DesignSystem.Colors.warning.opacity(0.08))
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(modelSettings.currentModelDisplayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.accent)
-
-                    HStack(spacing: DesignSystem.Spacing.md) {
-                        Label(modelSettings.currentDevice, systemImage: "cpu")
-                        Label("\(modelSettings.currentEmbeddingDim)-dim", systemImage: "number")
-                    }
-                    .font(.system(size: 11))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                }
-                .padding(DesignSystem.Spacing.sm)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(DesignSystem.Colors.accent.opacity(0.08))
-                )
-            }
-
-            // Model Selection
-            VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                Text("Available Models")
-                    .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                ForEach(modelSettings.availableModels) { model in
-                    SetupModelRow(
-                        model: model,
-                        isSelected: modelSettings.currentModelName == model.id,
-                        isChanging: modelSettings.isChangingModel
-                    ) {
-                        changeModelFromSetup(to: model.id, newDim: model.embeddingDim)
-                    }
-                }
+                // Compact summary cards (directories + model)
+                setupSummaryCards
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 32)
             }
         }
-        .padding(DesignSystem.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
-        )
-        .frame(maxWidth: .infinity)
         .onAppear {
             modelSettings.fetchCurrentModel()
+            loadIndexStats()
         }
     }
 
-    private var setupDirectoriesCard: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            // Card Header
-            HStack {
-                Image(systemName: "folder")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                Text("Watched Directories")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+    // MARK: - Atelier Hero Progress Card
+    private var atelierHeroProgress: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("\(Int(indexingPercent))")
+                        .font(.system(size: 56, weight: .regular, design: .serif))
+                        .foregroundColor(p.accent)
+                    Text("%")
+                        .font(.system(size: 28, weight: .regular, design: .serif))
+                        .foregroundColor(p.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    if !indexingProgress.isEmpty {
+                        Text(indexingProgress)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(p.ink)
+                    }
+                    HStack(spacing: 0) {
+                        if !indexingBatchInfo.isEmpty {
+                            Text(indexingBatchInfo)
+                        }
+                        if indexingSpeed > 0 {
+                            Text(" \u{00B7} \(String(format: "%.1f", indexingSpeed)) img/s")
+                        }
+                    }
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(p.ink2)
+                }
+
                 Spacer()
-                Button(action: { addNewDirectory() }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(DesignSystem.Colors.accent)
+
+                Button(action: { cancelIndexing() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pause")
+                            .font(.system(size: 12))
+                        Text("Cancel")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundColor(p.ink2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(p.line, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
+            .padding(.bottom, 18)
 
-            Divider()
-
-            // Directory List
-            if dirManager.watchedDirectories.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 32, weight: .light))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
-                    Text("No directories added")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DesignSystem.Spacing.xl)
-            } else {
-                VStack(spacing: DesignSystem.Spacing.sm) {
-                    ForEach(dirManager.watchedDirectories) { directory in
-                        SetupDirectoryRow(directory: directory) {
-                            dirManager.removeDirectory(directory)
-                        }
-                    }
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(p.line)
+                        .frame(height: 6)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(p.accent)
+                        .frame(width: geo.size.width * (indexingPercent / 100), height: 6)
+                        .animation(.easeInOut(duration: 0.3), value: indexingPercent)
                 }
             }
+            .frame(height: 6)
+            .padding(.bottom, 18)
 
-            // Quick add button
-            Button(action: { addNewDirectory() }) {
-                HStack {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Add Directory")
-                        .font(DesignSystem.Typography.caption.weight(.medium))
+            Divider().background(p.line).padding(.bottom, 18)
+
+            HStack(spacing: 24) {
+                atelierStatLabel("Estimated", value: indexingETA.isEmpty ? "\u{2014}" : indexingETA)
+                atelierStatLabel("Embeddings", value: "\(modelSettings.currentEmbeddingDim)-dim")
+                atelierStatLabel("Model", value: modelSettings.currentModelDisplayName)
+                atelierStatLabel("Device", value: modelSettings.currentDevice)
+            }
+        }
+        .padding(28)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(p.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(p.line, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.07), radius: 15, x: 0, y: 8)
+    }
+
+    private func atelierStatLabel(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1)
+                .foregroundColor(p.ink3)
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(p.ink)
+        }
+    }
+
+    // MARK: - Setup Summary Cards (compact dashboard)
+    private var setupSummaryCards: some View {
+        HStack(spacing: 14) {
+            // Directories summary card
+            setupSummaryCard(
+                eyebrow: "DIRECTORIES",
+                icon: "folder",
+                title: dirManager.watchedDirectories.isEmpty
+                    ? "No folders"
+                    : "\(dirManager.watchedDirectories.count) watched",
+                detail: dirManager.watchedDirectories.isEmpty
+                    ? "Add a folder to start indexing"
+                    : dirManager.watchedDirectories.prefix(2).map { ($0.path as NSString).lastPathComponent }.joined(separator: ", ")
+                      + (dirManager.watchedDirectories.count > 2 ? " +\(dirManager.watchedDirectories.count - 2)" : ""),
+                actionLabel: "Manage in Settings",
+                action: { isShowingSettings = true }
+            )
+
+            // Model summary card
+            setupSummaryCard(
+                eyebrow: "MODEL",
+                icon: "cpu",
+                title: modelSettings.currentModelDisplayName.isEmpty ? "No model" : modelSettings.currentModelDisplayName,
+                detail: modelSettings.currentModelName.isEmpty
+                    ? "Configure a CLIP model"
+                    : "\(modelSettings.currentEmbeddingDim)-dim \u{00B7} \(modelSettings.currentDevice)",
+                actionLabel: "Manage in Settings",
+                action: { isShowingSettings = true }
+            )
+        }
+    }
+
+    private func setupSummaryCard(eyebrow: String, icon: String, title: String, detail: String, actionLabel: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(p.accent)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(p.accent.opacity(0.1))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(eyebrow)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundColor(p.ink3)
+                    Text(title)
+                        .font(.system(size: 17, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
                 }
-                .foregroundColor(DesignSystem.Colors.accent)
-                .padding(.horizontal, DesignSystem.Spacing.md)
-                .padding(.vertical, DesignSystem.Spacing.sm)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
-                        .background(DesignSystem.Colors.accent.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                )
+
+                Spacer()
+            }
+            .padding(.bottom, 12)
+
+            Text(detail)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(p.ink2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.bottom, 14)
+
+            Divider().background(p.line).padding(.bottom, 12)
+
+            Button(action: action) {
+                HStack(spacing: 5) {
+                    Text(actionLabel)
+                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(p.accent)
             }
             .buttonStyle(PlainButtonStyle())
         }
-        .padding(DesignSystem.Spacing.lg)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(p.card)
         )
-        .frame(maxWidth: .infinity)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(p.line, lineWidth: 1)
+        )
     }
 
-    private var setupStatsCard: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            // Card Header
+    // MARK: - Atelier Stats + Actions Section
+    private var setupStatsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Image(systemName: "chart.bar")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                Text("Index Stats")
-                    .font(.system(size: 16, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("INDEX")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.5)
+                    .foregroundColor(p.ink3)
                 Spacer()
                 Button(action: { loadIndexStats() }) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 14))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
 
-            Divider()
-
-            if let stats = indexStats {
-                VStack(spacing: DesignSystem.Spacing.md) {
-                    // Total Images
-                    SetupStatRow(
-                        icon: "photo.stack",
-                        label: "Total Images",
-                        value: "\(stats.totalImages.formatted())",
-                        color: DesignSystem.Colors.accent
-                    )
-
-                    // Index Size
-                    SetupStatRow(
-                        icon: "externaldrive",
-                        label: "Index Size",
-                        value: stats.fileSize,
-                        color: DesignSystem.Colors.warning
-                    )
-
-                    // Last Updated
+            VStack(spacing: 0) {
+                if let stats = indexStats {
+                    // Stats rows
+                    atelierIndexRow(icon: "photo.stack", label: "Total Images", value: stats.totalImages.formatted())
+                    Divider().background(p.line)
+                    atelierIndexRow(icon: "externaldrive", label: "Index Size", value: stats.fileSize)
                     if let lastMod = stats.lastModified {
-                        SetupStatRow(
-                            icon: "clock",
-                            label: "Last Updated",
-                            value: formatRelativeDate(lastMod),
-                            color: DesignSystem.Colors.success
+                        Divider().background(p.line)
+                        atelierIndexRow(icon: "clock", label: "Last Updated", value: formatRelativeDate(lastMod))
+                    }
+                    Divider().background(p.line)
+                    atelierIndexRow(icon: "folder", label: "Directories", value: "\(dirManager.watchedDirectories.count)")
+                } else {
+                    HStack {
+                        Spacer()
+                        ProgressView().scaleEffect(0.8)
+                        Text("Loading\u{2026}")
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                }
+
+                Divider().background(p.line)
+
+                // Quick actions
+                HStack(spacing: 12) {
+                    Button(action: { if !isIndexing { selectAndIndexFolder() } }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Add to Index")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(p.accent))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(isIndexing)
+
+                    Button(action: { if !isIndexing { rebuildIndex() } }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11))
+                            Text("Rebuild")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .overlay(
+                            Capsule().stroke(p.line, lineWidth: 1)
                         )
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(isIndexing)
 
-                    // Directories Count
-                    SetupStatRow(
-                        icon: "folder",
-                        label: "Directories",
-                        value: "\(dirManager.watchedDirectories.count)",
-                        color: DesignSystem.Colors.accent
-                    )
+                    Spacer()
                 }
-            } else {
-                VStack(spacing: 8) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Loading stats...")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DesignSystem.Spacing.xl)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
             }
-
-            Divider()
-
-            // Quick Actions
-            VStack(spacing: DesignSystem.Spacing.sm) {
-                Button(action: { if !isIndexing { selectAndIndexFolder() } }) {
-                    HStack {
-                        Image(systemName: "plus.circle")
-                        Text("Add to Index")
-                        Spacer()
-                    }
-                    .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .padding(DesignSystem.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(DesignSystem.Colors.accent.opacity(0.08))
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(isIndexing)
-
-                Button(action: { if !isIndexing { rebuildIndex() } }) {
-                    HStack {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text("Rebuild Index")
-                        Spacer()
-                    }
-                    .font(DesignSystem.Typography.caption.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.warning)
-                    .padding(DesignSystem.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(DesignSystem.Colors.warning.opacity(0.08))
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(isIndexing)
-            }
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(p.card)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(p.line, lineWidth: 1)
+            )
         }
-        .padding(DesignSystem.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
-        )
-        .frame(maxWidth: .infinity)
+    }
+
+    private func atelierIndexRow(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(p.accent)
+                .frame(width: 20)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(p.ink2)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(p.ink)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
     }
 
     private func formatRelativeDate(_ date: Date) -> String {
@@ -2663,68 +3021,42 @@ struct ContentView: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
-    private func addNewDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a directory to watch for images"
-
-        if panel.runModal() == .OK, let url = panel.url {
-            let newDir = WatchedDirectory(path: url.path)
-            dirManager.addDirectory(newDir)
-        }
-    }
-
-    @State private var showingModelChangeAlert = false
-    @State private var pendingModelChange: (id: String, dim: Int)?
-
-    private func changeModelFromSetup(to modelId: String, newDim: Int) {
-        guard modelId != modelSettings.currentModelName else { return }
-
-        // Check if embedding dimension changes (requires reindex)
-        if newDim != modelSettings.currentEmbeddingDim {
-            pendingModelChange = (modelId, newDim)
-            showingModelChangeAlert = true
-        } else {
-            modelSettings.changeModel(to: modelId) { _, _ in }
-        }
-    }
 
     // MARK: - Search Tab Content
     private var searchTabContent: some View {
-        VStack(spacing: 0) {
-            // Show indexing progress or search greeting + bar
-            if isIndexing {
-                indexingProgressView
-                    .padding(.horizontal, DesignSystem.Spacing.xl)
-                    .padding(.top, 12)
-            } else if let report = indexingReport {
-                indexingReportView(report)
-                    .padding(.horizontal, DesignSystem.Spacing.xl)
-                    .padding(.top, 12)
-            } else if searchText.isEmpty && searchManager.results.isEmpty {
-                // Atelier editorial greeting
-                atelierGreeting
-            }
+        HStack(spacing: 0) {
+            // Main content column
+            VStack(spacing: 0) {
+                // Show indexing progress or search greeting + bar
+                if isIndexing {
+                    indexingProgressView
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                } else if let report = indexingReport {
+                    indexingReportView(report)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                } else if searchText.isEmpty && searchManager.results.isEmpty {
+                    // Atelier editorial greeting
+                    atelierGreeting
+                }
 
-            // Search bar (always visible when not indexing)
-            if !isIndexing && indexingReport == nil {
-                modernSearchBar
-                    .padding(.horizontal, DesignSystem.Spacing.xxl)
-                    .padding(.top, searchText.isEmpty && searchManager.results.isEmpty ? 0 : 16)
-            }
+                // Search bar (always visible when not indexing)
+                if !isIndexing && indexingReport == nil {
+                    modernSearchBar
+                        .padding(.horizontal, 32)
+                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty ? 0 : 16)
+                }
 
-            // Filter bar
-            if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
-                filterBar
-                    .padding(.top, 12)
-            }
+                // Filter bar
+                if (!searchManager.results.isEmpty || !recentImages.isEmpty) && !searchManager.isSearching && !isIndexing {
+                    filterBar
+                        .padding(.top, 12)
+                }
 
-            errorView
+                errorView
 
-            // Results area with optional preview panel
-            HStack(alignment: .top, spacing: 16) {
+                // Results area
                 Group {
                     if searchManager.isSearching {
                         VStack {
@@ -2739,7 +3071,7 @@ struct ContentView: View {
                     } else if !searchManager.results.isEmpty {
                         ScrollView {
                             filteredResultsList
-                                .padding(.horizontal, DesignSystem.Spacing.xl)
+                                .padding(.horizontal, 24)
                         }
                     } else if searchText.isEmpty {
                         recentImagesSection
@@ -2748,25 +3080,26 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 12)
+            }
+            .padding(.horizontal, 12)
 
-                if showPreviewPanel, let result = previewResult {
-                    ResizablePreviewPanel(
-                        result: result,
-                        width: $previewPanelWidth,
-                        isVisible: $showPreviewPanel,
-                        style: .app
-                    )
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .onChange(of: showPreviewPanel) { _, newValue in
-                        if !newValue {
-                            previewResult = nil
-                        }
+            // Inspector panel — full height, edge to edge
+            if showPreviewPanel, let result = previewResult {
+                ResizablePreviewPanel(
+                    result: result,
+                    width: $previewPanelWidth,
+                    isVisible: $showPreviewPanel,
+                    style: .app
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .onChange(of: showPreviewPanel) { _, newValue in
+                    if !newValue {
+                        previewResult = nil
                     }
                 }
             }
-            .padding(.top, 12)
         }
-        .padding(.horizontal, DesignSystem.Spacing.md)
     }
 
     // MARK: - Atelier Greeting
@@ -2872,49 +3205,8 @@ struct ContentView: View {
             result.similarity >= SearchPreferences.shared.similarityThreshold
         }
 
-        return VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
-            // Stats header
-            if SearchPreferences.shared.showStats, let stats = searchManager.searchStats {
-                HStack(spacing: DesignSystem.Spacing.lg) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 11))
-                        Text(stats.total_time)
-                            .font(DesignSystem.Typography.caption)
-                    }
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "photo.stack")
-                            .font(.system(size: 11))
-                        Text("\(stats.images_searched)")
-                            .font(DesignSystem.Typography.caption)
-                    }
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "speedometer")
-                            .font(.system(size: 11))
-                        Text("\(stats.images_per_second) img/s")
-                            .font(DesignSystem.Typography.caption)
-                    }
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                    if filteredResults.count != searchManager.results.count {
-                        HStack(spacing: 4) {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 11))
-                            Text("\(filteredResults.count)/\(searchManager.results.count)")
-                                .font(DesignSystem.Typography.caption)
-                        }
-                        .foregroundColor(DesignSystem.Colors.accent)
-                    }
-                    Spacer()
-                }
-                .padding(.bottom, DesignSystem.Spacing.sm)
-            }
-
-            MasonryGrid(items: results, columns: 4, spacing: 12) { result in
+        return VStack(alignment: .leading, spacing: 16) {
+            MasonryGrid(items: results, columns: showPreviewPanel ? 2 : 3, spacing: 16) { result in
                 MasonryImageCard(
                     result: result,
                     showSimilarity: true,
@@ -2929,92 +3221,51 @@ struct ContentView: View {
     }
 
     // MARK: - Filter Bar (Minimal Capsules)
+    @State private var clipBalance: Double = 0.5  // 0 = pure text, 1 = pure vision
+    @State private var filterCategory: String = "All"
+
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // Type filters
-                ForEach(["JPG", "PNG", "GIF", "HEIC"], id: \.self) { type in
+        HStack(spacing: 0) {
+            // Category filters (All / Photos / Screenshots / Documents)
+            HStack(spacing: 6) {
+                ForEach(["All", "Photos", "Screenshots", "Documents"], id: \.self) { category in
                     FilterCapsule(
-                        label: type,
-                        isActive: filterTypes.contains(type.lowercased()),
+                        label: category,
+                        isActive: filterCategory == category,
                         action: {
-                            if filterTypes.contains(type.lowercased()) {
-                                filterTypes.remove(type.lowercased())
-                            } else {
-                                filterTypes.insert(type.lowercased())
+                            filterCategory = category
+                            // Update type filters based on category
+                            switch category {
+                            case "Photos":
+                                filterTypes = Set(["jpg", "jpeg", "heic", "png", "raw", "cr2", "nef", "arw"])
+                            case "Screenshots":
+                                filterTypes = Set(["png"])
+                            case "Documents":
+                                filterTypes = Set(["pdf", "doc", "docx"])
+                            default:
+                                filterTypes.removeAll()
                             }
                         }
                     )
                 }
+            }
 
-                Divider()
-                    .frame(height: 16)
-                    .opacity(0.3)
+            Spacer()
 
-                // Size filters
-                FilterCapsule(
-                    label: "Small",
-                    isActive: filterSizeMax == 100 * 1024,
-                    action: {
-                        if filterSizeMax == 100 * 1024 {
-                            filterSizeMin = nil; filterSizeMax = nil
-                        } else {
-                            filterSizeMin = nil; filterSizeMax = 100 * 1024
-                        }
-                    }
-                )
-                FilterCapsule(
-                    label: "Large",
-                    isActive: filterSizeMin == 1024 * 1024,
-                    action: {
-                        if filterSizeMin == 1024 * 1024 {
-                            filterSizeMin = nil; filterSizeMax = nil
-                        } else {
-                            filterSizeMin = 1024 * 1024; filterSizeMax = nil
-                        }
-                    }
-                )
-
-                Divider()
-                    .frame(height: 16)
-                    .opacity(0.3)
-
-                // Date filters
-                FilterCapsule(
-                    label: "Today",
-                    isActive: filterDateFrom == Calendar.current.startOfDay(for: Date()),
-                    action: {
-                        if filterDateFrom == Calendar.current.startOfDay(for: Date()) {
-                            filterDateFrom = nil; filterDateTo = nil
-                        } else {
-                            filterDateFrom = Calendar.current.startOfDay(for: Date()); filterDateTo = nil
-                        }
-                    }
-                )
-                FilterCapsule(
-                    label: "This Week",
-                    isActive: dateFilterLabel == "This Week",
-                    action: {
-                        if dateFilterLabel == "This Week" {
-                            filterDateFrom = nil; filterDateTo = nil
-                        } else {
-                            filterDateFrom = Calendar.current.date(byAdding: .day, value: -7, to: Date()); filterDateTo = nil
-                        }
-                    }
-                )
-
-                // Clear all (only when filters active)
-                if activeFilterCount > 0 {
-                    Button(action: clearFilters) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+            // Result count + timing inline
+            if let stats = searchManager.searchStats {
+                HStack(spacing: 8) {
+                    Text("\(filteredResults.count) results")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(p.ink2)
+                    Text(stats.total_time)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(p.ink3)
                 }
             }
-            .padding(.vertical, 2)
         }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 24)
     }
 
     private var sizeFilterLabel: String {
@@ -3072,65 +3323,111 @@ struct ContentView: View {
     @State private var showMovePanel = false
     @State private var actionFeedback: String? = nil
     @State private var previewImagePath: String? = nil
+    @State private var dupSimilarityFilter: Float = 0.92
+    @State private var dupLastScanDate: Date? = nil
+
+    // MARK: - Duplicates Helpers
+    private var dupTotalPhotos: Int {
+        duplicatesManager.groups.reduce(0) { $0 + $1.images.count }
+    }
+    private var dupRecoverableBytes: Int64 {
+        // Recoverable = everything except the keeper (first) in each group
+        Int64(duplicatesManager.groups.reduce(0) { acc, group in
+            acc + group.images.dropFirst().reduce(0) { $0 + $1.size }
+        })
+    }
+    private var dupFilteredGroups: [DuplicateGroup] {
+        duplicatesManager.groups.filter { group in
+            let avgSim = group.images.isEmpty ? Float(0) : group.images.map { $0.similarity }.reduce(0, +) / Float(group.images.count)
+            return avgSim >= dupSimilarityFilter
+        }
+    }
+    private func dupWhyLabel(for group: DuplicateGroup) -> String {
+        let avgSim = group.images.isEmpty ? Float(0) : group.images.map { $0.similarity }.reduce(0, +) / Float(group.images.count)
+        if avgSim > 0.97 { return "Nearly identical" }
+        if avgSim > 0.95 { return "Same scene" }
+        if avgSim > 0.93 { return "Very similar" }
+        return "Similar"
+    }
+    private func dupFormattedBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+    private func dupImageDimensions(for path: String) -> String {
+        guard let nsImage = NSImage(contentsOfFile: path) else { return "" }
+        let w = Int(nsImage.size.width)
+        let h = Int(nsImage.size.height)
+        return "\(w)×\(h)"
+    }
 
     private var duplicatesTabContent: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Duplicates header
-                duplicatesHeader
-                    .padding(.horizontal, DesignSystem.Spacing.xl)
-                    .padding(.top, DesignSystem.Spacing.lg)
-
                 // Content
                 if duplicatesManager.isScanning {
-                    VStack(spacing: DesignSystem.Spacing.md) {
+                    VStack(spacing: 12) {
                         Spacer()
                         ProgressView()
                             .scaleEffect(1.5)
                         Text("Scanning for duplicates...")
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
                         Text("This may take a moment for large libraries")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .font(.system(size: 12))
+                            .foregroundColor(p.ink3)
                         Spacer()
                     }
                 } else if let error = duplicatesManager.errorMessage {
-                    VStack(spacing: DesignSystem.Spacing.md) {
+                    VStack(spacing: 12) {
                         Spacer()
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 40))
                             .foregroundColor(DesignSystem.Colors.warning)
                         Text("Error scanning")
-                            .font(DesignSystem.Typography.headline)
+                            .font(.system(size: 15, weight: .medium))
                         Text(error)
-                            .font(DesignSystem.Typography.callout)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
+                            .font(.system(size: 13))
+                            .foregroundColor(p.ink2)
                             .multilineTextAlignment(.center)
                         Spacer()
                     }
                     .padding()
                 } else if duplicatesManager.groups.isEmpty {
+                    // Header even when empty
+                    duplicatesHeader
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
                     duplicatesEmptyState
                 } else {
+                    duplicatesHeader
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
+                    duplicatesBulkActionBar
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+                    duplicatesFilterRail
+                        .padding(.horizontal, 24)
+                        .padding(.top, 10)
                     duplicatesResultsList
-                }
 
-                // Action bar
-                if !duplicatesManager.groups.isEmpty && duplicatesManager.totalSelected > 0 {
-                    duplicatesActionBar
+                    // Bottom action bar when items selected
+                    if duplicatesManager.totalSelected > 0 {
+                        duplicatesActionBar
+                    }
                 }
 
                 // Feedback toast
                 if let feedback = actionFeedback {
                     Text(feedback)
-                        .font(DesignSystem.Typography.callout)
+                        .font(.system(size: 13))
                         .foregroundColor(.white)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
-                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                         .background(Capsule().fill(DesignSystem.Colors.success))
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .padding(.bottom, DesignSystem.Spacing.md)
+                        .padding(.bottom, 12)
                 }
             }
 
@@ -3152,7 +3449,7 @@ struct ContentView: View {
                     }
                 }
 
-            VStack(spacing: DesignSystem.Spacing.lg) {
+            VStack(spacing: 16) {
                 // Close button
                 HStack {
                     Spacer()
@@ -3177,34 +3474,34 @@ struct ContentView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(maxWidth: 600, maxHeight: 500)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                         .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
                 }
 
                 // File info
-                VStack(spacing: DesignSystem.Spacing.xs) {
+                VStack(spacing: 4) {
                     Text(URL(fileURLWithPath: path).lastPathComponent)
-                        .font(DesignSystem.Typography.headline)
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.white)
 
                     Text(formattedFileSize(for: path))
-                        .font(DesignSystem.Typography.callout)
+                        .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.7))
                 }
 
                 // Action buttons
-                HStack(spacing: DesignSystem.Spacing.lg) {
+                HStack(spacing: 16) {
                     Button(action: {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                     }) {
-                        HStack(spacing: DesignSystem.Spacing.xs) {
+                        HStack(spacing: 4) {
                             Image(systemName: "folder")
                             Text("Reveal in Finder")
                         }
-                        .font(DesignSystem.Typography.callout)
+                        .font(.system(size: 13))
                         .foregroundColor(.white)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
-                        .padding(.vertical, DesignSystem.Spacing.md)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                         .background(Capsule().fill(Color.white.opacity(0.2)))
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -3212,15 +3509,15 @@ struct ContentView: View {
                     Button(action: {
                         NSWorkspace.shared.open(URL(fileURLWithPath: path))
                     }) {
-                        HStack(spacing: DesignSystem.Spacing.xs) {
+                        HStack(spacing: 4) {
                             Image(systemName: "arrow.up.right.square")
                             Text("Open")
                         }
-                        .font(DesignSystem.Typography.callout)
+                        .font(.system(size: 13))
                         .foregroundColor(.white)
-                        .padding(.horizontal, DesignSystem.Spacing.lg)
-                        .padding(.vertical, DesignSystem.Spacing.md)
-                        .background(Capsule().fill(DesignSystem.Colors.accent))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(p.accent))
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -3242,302 +3539,461 @@ struct ContentView: View {
         return formatter.string(fromByteCount: size)
     }
 
+    // MARK: - Duplicates Header
     private var duplicatesHeader: some View {
-        VStack(spacing: DesignSystem.Spacing.md) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.on.square.badge.person.crop")
-                            .font(.system(size: 18, weight: .medium))
-                        Text("Find Duplicates")
-                            .font(DesignSystem.Typography.title2)
-                    }
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Duplicates")
+                    .font(.system(size: 24, weight: .regular, design: .serif))
+                    .foregroundColor(p.ink)
 
-                    if !duplicatesManager.groups.isEmpty {
-                        Text("\(duplicatesManager.totalDuplicates) duplicate\(duplicatesManager.totalDuplicates == 1 ? "" : "s") in \(duplicatesManager.groups.count) group\(duplicatesManager.groups.count == 1 ? "" : "s")")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.secondaryText)
-                    }
+                if !duplicatesManager.groups.isEmpty {
+                    Text("\(duplicatesManager.groups.count) clusters \u{00b7} \(dupTotalPhotos) photos \u{00b7}")
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink2)
+                    Text("\(dupFormattedBytes(dupRecoverableBytes)) recoverable")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(p.accent)
                 }
 
                 Spacer()
 
-                // Threshold slider
-                HStack(spacing: DesignSystem.Spacing.sm) {
-                    Text("Similarity:")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
-
-                    Slider(value: $duplicatesManager.threshold, in: 0.85...0.99, step: 0.01)
-                        .frame(width: 100)
-
-                    Text("\(Int(duplicatesManager.threshold * 100))%")
-                        .font(DesignSystem.Typography.caption.monospacedDigit())
-                        .foregroundColor(DesignSystem.Colors.accent)
-                        .frame(width: 35)
-                }
-
-                Button(action: { duplicatesManager.scanForDuplicates() }) {
-                    HStack(spacing: DesignSystem.Spacing.xs) {
+                Button(action: {
+                    duplicatesManager.scanForDuplicates()
+                    dupLastScanDate = Date()
+                }) {
+                    HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 10))
                         Text("Scan")
                     }
-                    .font(DesignSystem.Typography.callout.weight(.medium))
-                    .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.vertical, DesignSystem.Spacing.sm)
-                    .background(
-                        Capsule()
-                            .fill(DesignSystem.Colors.accent)
-                    )
+                    .font(.system(size: 12).weight(.medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(p.accent))
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(duplicatesManager.isScanning)
             }
 
-            // Quick actions when groups exist
-            if !duplicatesManager.groups.isEmpty {
-                HStack {
-                    Button(action: { duplicatesManager.autoSelectAllSmaller() }) {
-                        HStack(spacing: DesignSystem.Spacing.xs) {
-                            Image(systemName: "checkmark.circle")
-                            Text("Auto-select smaller files")
-                        }
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-
-                    Spacer()
-                }
-            }
+            Text("Grouped by similarity. Searchy picks a keeper \u{2014} you confirm.")
+                .font(.system(size: 12, design: .serif).italic())
+                .foregroundColor(p.ink3)
         }
-        .padding(.bottom, DesignSystem.Spacing.md)
+        .padding(.bottom, 4)
     }
 
+    // MARK: - Bulk Action Bar
+    private var duplicatesBulkActionBar: some View {
+        let nonKeeperCount = duplicatesManager.groups.reduce(0) { $0 + max($1.images.count - 1, 0) }
+
+        return HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 12))
+                .foregroundColor(p.accent)
+
+            Text("Auto-pick all \(duplicatesManager.groups.count) clusters \u{00b7} frees ~\(dupFormattedBytes(dupRecoverableBytes))")
+                .font(.system(size: 12))
+                .foregroundColor(p.ink2)
+
+            Spacer()
+
+            Button(action: {}) {
+                Text("Review")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(p.ink2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().stroke(p.line, lineWidth: 1))
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Button(action: { duplicatesManager.autoSelectAllSmaller() }) {
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("Apply all")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(p.ink))
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(p.sidebar.opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(p.line, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Filter Rail
+    private var duplicatesFilterRail: some View {
+        HStack(spacing: 12) {
+            Text("FILTER")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.2)
+                .foregroundColor(p.ink3)
+
+            // Similarity slider pill
+            HStack(spacing: 6) {
+                Text("similarity \u{2265} \(String(format: "%.2f", dupSimilarityFilter))")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(p.ink2)
+                Slider(value: $dupSimilarityFilter, in: 0.85...0.99, step: 0.01)
+                    .frame(width: 80)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(p.sidebar))
+
+            dupFilterPill(icon: "folder", label: "All sources")
+            dupFilterPill(icon: "calendar", label: "All time")
+            dupFilterPill(icon: "doc", label: "All formats")
+
+            Spacer()
+
+            Text("\(dupFilteredGroups.count) of \(duplicatesManager.groups.count) shown")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(p.ink3)
+        }
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(p.line).frame(height: 1)
+        }
+    }
+
+    private func dupFilterPill(icon: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .semibold))
+        }
+        .foregroundColor(p.ink2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(p.sidebar))
+    }
+
+    // MARK: - Duplicates Empty State
     private var duplicatesEmptyState: some View {
-        VStack(spacing: DesignSystem.Spacing.lg) {
+        VStack(spacing: 12) {
             Spacer()
 
             Image(systemName: "square.on.square.dashed")
-                .font(.system(size: 48, weight: .light))
-                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                .font(.system(size: 32, weight: .light))
+                .foregroundColor(p.ink3)
 
-            VStack(spacing: DesignSystem.Spacing.sm) {
-                Text("No duplicates found")
-                    .font(DesignSystem.Typography.headline)
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+            Text("No duplicates found")
+                .font(.system(size: 20, weight: .regular, design: .serif))
+                .foregroundColor(p.ink)
 
-                Text("Click Scan to search your indexed images for duplicates")
-                    .font(DesignSystem.Typography.callout)
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
+            Text("Click Scan to search your indexed images")
+                .font(.system(size: 12, design: .serif).italic())
+                .foregroundColor(p.ink3)
 
             Spacer()
         }
         .padding()
     }
 
+    // MARK: - Duplicates Results List
     private var duplicatesResultsList: some View {
         ScrollView {
-            LazyVStack(spacing: DesignSystem.Spacing.lg) {
-                ForEach(duplicatesManager.groups) { group in
+            LazyVStack(spacing: 12) {
+                ForEach(dupFilteredGroups) { group in
                     duplicateGroupCard(group)
                 }
+
+                dupEndOfListCard
             }
-            .padding(DesignSystem.Spacing.xl)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 
-    private func duplicateGroupCard(_ group: DuplicateGroup) -> some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            // Group header
-            HStack {
-                Text("Group \(group.id)")
-                    .font(DesignSystem.Typography.headline)
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+    // MARK: - End-of-List Card
+    private var dupEndOfListCard: some View {
+        VStack(spacing: 6) {
+            Text("That\u{2019}s all. Your library is unusually tidy.")
+                .font(.system(size: 14, design: .serif).italic())
+                .foregroundColor(p.ink2)
+                .multilineTextAlignment(.center)
 
-                Text("\(group.images.count) images")
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+            HStack(spacing: 4) {
+                if let lastScan = dupLastScanDate {
+                    let interval = Date().timeIntervalSince(lastScan)
+                    let ago: String = {
+                        if interval < 60 { return "just now" }
+                        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+                        return "\(Int(interval / 3600))h ago"
+                    }()
+                    Text("Last scan: \(ago) \u{00b7}")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(p.ink3)
+                }
 
-                Spacer()
-
-                Button(action: { duplicatesManager.autoSelectSmaller(groupId: group.id) }) {
-                    Text("Keep largest")
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.accent)
+                Button(action: {
+                    duplicatesManager.scanForDuplicates()
+                    dupLastScanDate = Date()
+                }) {
+                    Text("Re-scan now")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(p.accent)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-
-            // Images grid
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: DesignSystem.Spacing.md)], spacing: DesignSystem.Spacing.md) {
-                ForEach(Array(group.images.enumerated()), id: \.element.path) { index, image in
-                    duplicateImageCard(image, isFirst: index == 0, groupId: group.id)
-                }
-            }
         }
-        .padding(DesignSystem.Spacing.lg)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 14)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(DesignSystem.Colors.secondaryBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(style: StrokeStyle(lineWidth: 0.5, dash: [6, 4]))
+                .foregroundColor(p.line)
         )
     }
 
-    private func duplicateImageCard(_ image: DuplicateImage, isFirst: Bool, groupId: Int) -> some View {
-        VStack(spacing: DesignSystem.Spacing.sm) {
-            // Image thumbnail
-            ZStack(alignment: .topLeading) {
-                // Clickable image area
-                ZStack {
-                    Rectangle()
-                        .fill(DesignSystem.Colors.border.opacity(0.3))
+    // MARK: - Cluster Card (Redesigned)
+    private func duplicateGroupCard(_ group: DuplicateGroup) -> some View {
+        let avgSimilarity = group.images.isEmpty ? Float(0) : group.images.map { $0.similarity }.reduce(0, +) / Float(group.images.count)
+        let avgSimPercent = Int(avgSimilarity * 100)
+        let totalBytes = group.images.reduce(0) { $0 + $1.size }
+        let reclaimBytes = Int64(group.images.dropFirst().reduce(0) { $0 + $1.size })
+        let whyLabel = dupWhyLabel(for: group)
+        let keeperReason: String = {
+            guard let first = group.images.first else { return "first in group" }
+            let maxSize = group.images.map { $0.size }.max() ?? 0
+            return first.size == maxSize ? "largest file" : "first in group"
+        }()
 
-                    AsyncThumbnailView(path: image.path, contentMode: .fit)
+        // Date from first image (best-effort)
+        let firstImageDate: String = {
+            guard let firstImage = group.images.first,
+                  let attrs = try? FileManager.default.attributesOfItem(atPath: firstImage.path),
+                  let date = attrs[.modificationDate] as? Date else { return "" }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "MMM d"
+            return fmt.string(from: date)
+        }()
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // Card Header
+            HStack(spacing: 8) {
+                Text(whyLabel)
+                    .font(.system(size: 14, weight: .regular, design: .serif).italic())
+                    .foregroundColor(p.ink)
+
+                Text("\(avgSimPercent)%")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(p.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(p.accent.opacity(0.10)))
+
+                if !firstImageDate.isEmpty {
+                    Text(firstImageDate)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(p.ink3)
                 }
-                .frame(height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md))
-                .overlay(
-                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                        .stroke(image.isSelected ? DesignSystem.Colors.error : (isFirst ? DesignSystem.Colors.success : DesignSystem.Colors.border.opacity(0.5)), lineWidth: image.isSelected || isFirst ? 2 : 1)
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        previewImagePath = image.path
+
+                Spacer()
+
+                Text("\(group.images.count) \u{00b7} \(dupFormattedBytes(Int64(totalBytes)))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(p.ink3)
+
+                Button(action: { duplicatesManager.autoSelectSmaller(groupId: group.id) }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
+                        Text("Auto-pick")
+                            .font(.system(size: 11, weight: .medium))
                     }
+                    .foregroundColor(p.accent)
                 }
+                .buttonStyle(PlainButtonStyle())
 
-                // Top row: Badge on left, checkbox on right
+                Button(action: {
+                    withAnimation {
+                        if let idx = duplicatesManager.groups.firstIndex(where: { $0.id == group.id }) {
+                            duplicatesManager.groups.remove(at: idx)
+                        }
+                    }
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(p.ink3)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(p.line).frame(height: 0.5)
+            }
+
+            // Photo Grid — adaptive sizing, max ~200px per card
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 8)], spacing: 8) {
+                ForEach(Array(group.images.enumerated()), id: \.element.path) { index, image in
+                    dupImageCard(image, isKeeper: index == 0, groupId: group.id)
+                }
+            }
+            .padding(10)
+        }
+        .background(p.card)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(p.line, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Photo Card (Nude direction)
+    private func dupImageCard(_ image: DuplicateImage, isKeeper: Bool, groupId: Int) -> some View {
+        let fileExt = URL(fileURLWithPath: image.path).pathExtension.uppercased()
+
+        return ZStack {
+            // Image fills the fixed aspect ratio frame
+            GeometryReader { geo in
+                AsyncThumbnailView(path: image.path, contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
+
+            // Top-left badge: KEEP or TRASH
+            VStack {
                 HStack {
-                    // Best quality badge
-                    if isFirst {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 8))
-                            Text("Best")
-                                .font(.system(size: 9, weight: .semibold))
+                    if isKeeper {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 7, weight: .bold))
+                            Text("KEEP")
+                                .font(.system(size: 9, weight: .bold))
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(DesignSystem.Colors.success))
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(p.accent))
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 7))
+                            Text("TRASH")
+                                .font(.system(size: 9, weight: .medium))
+                        }
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.92)))
                     }
-
                     Spacer()
+                }
+                Spacer()
+            }
+            .padding(5)
 
-                    // Selection checkbox
-                    Button(action: {
-                        duplicatesManager.toggleSelection(groupId: groupId, imagePath: image.path)
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(image.isSelected ? DesignSystem.Colors.error : Color.white.opacity(0.9))
-                                .frame(width: 24, height: 24)
-                                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+            // Bottom gradient with meta + actions
+            VStack {
+                Spacer()
+                ZStack(alignment: .bottom) {
+                    LinearGradient(
+                        colors: [.clear, Color.black.opacity(0.5)],
+                        startPoint: UnitPoint(x: 0.5, y: 0.0),
+                        endPoint: UnitPoint(x: 0.5, y: 1.0)
+                    )
+                    .frame(height: 44)
 
-                            if image.isSelected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else {
-                                Circle()
-                                    .stroke(DesignSystem.Colors.border, lineWidth: 1.5)
-                                    .frame(width: 22, height: 22)
+                    HStack(spacing: 4) {
+                        Text("\(image.formattedSize) \u{00b7} \(fileExt)")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 2)
+
+                        Button(action: {
+                            duplicatesManager.toggleSelection(groupId: groupId, imagePath: image.path)
+                        }) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(image.isSelected ? p.accent : Color.white.opacity(0.2))
+                                    .frame(width: 16, height: 16)
+                                if image.isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
                             }
                         }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(DesignSystem.Spacing.sm)
+                        .buttonStyle(PlainButtonStyle())
 
-                // Preview hint on hover
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Image(systemName: "eye.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white)
-                            .padding(6)
-                            .background(Circle().fill(Color.black.opacity(0.5)))
-                        Spacer()
+                        Button(action: {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: image.path)])
+                        }) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .padding(.bottom, DesignSystem.Spacing.sm)
-                }
-                .opacity(0.7)
-            }
-
-            // Image info
-            VStack(alignment: .leading, spacing: 3) {
-                Text(URL(fileURLWithPath: image.path).lastPathComponent)
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                HStack(spacing: 6) {
-                    // Size with icon
-                    HStack(spacing: 2) {
-                        Image(systemName: "doc")
-                            .font(.system(size: 9))
-                        Text(image.formattedSize)
-                    }
-                    .font(DesignSystem.Typography.caption2)
-                    .foregroundColor(isFirst ? DesignSystem.Colors.success : DesignSystem.Colors.secondaryText)
-
-                    // Match percentage
-                    HStack(spacing: 2) {
-                        Image(systemName: "percent")
-                            .font(.system(size: 8))
-                        Text("\(Int(image.similarity * 100))%")
-                    }
-                    .font(DesignSystem.Typography.caption2)
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(DesignSystem.Spacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md + 2)
-                .fill(image.isSelected ? DesignSystem.Colors.error.opacity(0.1) : Color.clear)
+        .aspectRatio(1.3, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isKeeper ? p.accent : Color.clear, lineWidth: isKeeper ? 1.5 : 0)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.2)) {
+                previewImagePath = image.path
+            }
+        }
     }
 
+    // MARK: - Duplicates Action Bar
     private var duplicatesActionBar: some View {
-        HStack(spacing: DesignSystem.Spacing.lg) {
+        HStack(spacing: 16) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 13))
                 Text("\(duplicatesManager.totalSelected) selected")
-                    .font(DesignSystem.Typography.callout)
+                    .font(.system(size: 13))
             }
-            .foregroundColor(DesignSystem.Colors.secondaryText)
+            .foregroundColor(p.ink2)
 
             Spacer()
 
             Button(action: {
                 showMovePanel = true
             }) {
-                HStack(spacing: DesignSystem.Spacing.xs) {
+                HStack(spacing: 4) {
                     Image(systemName: "folder")
                     Text("Move to Folder")
                 }
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.accent)
-                .padding(.horizontal, DesignSystem.Spacing.md)
-                .padding(.vertical, DesignSystem.Spacing.sm)
+                .font(.system(size: 13))
+                .foregroundColor(p.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
                     Capsule()
-                        .stroke(DesignSystem.Colors.accent, lineWidth: 1)
+                        .stroke(p.accent, lineWidth: 1)
                 )
             }
             .buttonStyle(PlainButtonStyle())
@@ -3564,34 +4020,35 @@ struct ContentView: View {
                     }
                 }
             }) {
-                HStack(spacing: DesignSystem.Spacing.xs) {
+                HStack(spacing: 4) {
                     Image(systemName: "trash")
                     Text("Move to Trash")
                 }
-                .font(DesignSystem.Typography.callout)
-                .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
-                .padding(.horizontal, DesignSystem.Spacing.md)
-                .padding(.vertical, DesignSystem.Spacing.sm)
+                .font(.system(size: 13))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
                     Capsule()
-                        .fill(DesignSystem.Colors.error)
+                        .fill(p.accent2)
                 )
             }
             .buttonStyle(PlainButtonStyle())
         }
-        .padding(DesignSystem.Spacing.lg)
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(DesignSystem.Colors.tertiaryBackground)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(p.sidebar)
         )
-        .padding(.horizontal, DesignSystem.Spacing.xl)
-        .padding(.bottom, DesignSystem.Spacing.lg)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Modern Search Bar
     @FocusState private var isSearchFocused: Bool
 
     private var modernSearchBar: some View {
+        VStack(spacing: 0) {
         HStack(spacing: 14) {
             // Pasted image preview or search icon
             if let image = pastedImage {
@@ -3634,13 +4091,13 @@ struct ContentView: View {
             } else {
                 // Magnifier icon
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundColor(p.accent)
 
                 // Text field
                 TextField("describe a moment, or drop an image...", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .font(.system(size: 18, weight: .regular, design: .serif))
                     .foregroundColor(p.ink)
                     .focused($isSearchFocused)
                     .onSubmit {
@@ -3697,8 +4154,50 @@ struct ContentView: View {
                     )
             }
         }
+
+            // Vision / Text balance slider
+            HStack(spacing: 10) {
+                Text("Text")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(clipBalance < 0.4 ? p.accent : p.ink3)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        // Track
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(p.line)
+                            .frame(height: 3)
+
+                        // Fill
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(p.accent.opacity(0.4))
+                            .frame(width: geo.size.width * clipBalance, height: 3)
+
+                        // Thumb
+                        Circle()
+                            .fill(p.accent)
+                            .frame(width: 12, height: 12)
+                            .shadow(color: p.accent.opacity(0.3), radius: 3, y: 1)
+                            .offset(x: max(0, min(geo.size.width - 12, geo.size.width * clipBalance - 6)))
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                clipBalance = max(0, min(1, value.location.x / geo.size.width))
+                            }
+                    )
+                }
+                .frame(height: 12)
+
+                Text("Vision")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(clipBalance > 0.6 ? p.accent : p.ink3)
+            }
+            .padding(.top, 10)
+        }
         .padding(.horizontal, 22)
-        .padding(.vertical, 14)
+        .padding(.vertical, 18)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(p.card)
@@ -3720,90 +4219,353 @@ struct ContentView: View {
             Group {
                 if isDropTargeted {
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(p.accent, lineWidth: 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(p.accent.opacity(0.1))
-                        )
+                        .stroke(p.accent, lineWidth: 2)
                 }
             }
         )
         .frame(maxWidth: 720)
     }
 
-    // MARK: - Indexing Progress View
-    private var indexingProgressView: some View {
-        VStack(spacing: DesignSystem.Spacing.sm) {
-            // Progress bar
-            ProgressView(value: indexingPercent, total: 100)
-                .progressViewStyle(LinearProgressViewStyle(tint: DesignSystem.Colors.accent))
-                .scaleEffect(x: 1, y: 1.5, anchor: .center)
+    // MARK: - Drop Overlay
+    private var dropOverlayView: some View {
+        ZStack {
+            // Background: palette halo with blur, behind content at 40%
+            p.halo.opacity(0.40)
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
 
-            // Top row: percentage and ETA
-            HStack {
-                Text("\(Int(indexingPercent))%")
-                    .font(DesignSystem.Typography.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(DesignSystem.Colors.accent)
-                    .monospacedDigit()
+            // Dashed accent border
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(style: StrokeStyle(lineWidth: 2.5, dash: [10, 6]))
+                .foregroundColor(p.accent)
+                .padding(16)
 
-                Spacer()
+            // Center content
+            VStack(spacing: 24) {
+                // Upload icon box
+                ZStack {
+                    RoundedRectangle(cornerRadius: 26)
+                        .fill(p.card)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 26)
+                                .stroke(p.line, lineWidth: 1)
+                        )
+                        .frame(width: 88, height: 88)
 
-                if !indexingETA.isEmpty {
-                    Text(indexingETA)
-                        .font(DesignSystem.Typography.caption)
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                    Image(systemName: "arrow.up.doc")
+                        .font(.system(size: 36))
+                        .foregroundColor(p.accent)
+                }
+
+                // Title: "drop to find visually similar"
+                HStack(spacing: 0) {
+                    Text("drop to find ")
+                        .font(.system(size: 38, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
+                    Text("visually similar")
+                        .font(.system(size: 38, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.accent)
+                }
+
+                // Subtitle
+                Text("we'll search your indexed library for matches")
+                    .font(.system(size: 17, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink2)
+
+                // Bottom hints row
+                HStack(spacing: 20) {
+                    // File types
+                    HStack(spacing: 6) {
+                        ForEach(["jpg", "png", "heic", "webp"], id: \.self) { ext in
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(p.accent)
+                                    .frame(width: 4, height: 4)
+                                Text(ext)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(p.ink3)
+                            }
+                        }
+                    }
+
+                    Text("up to 50 MB")
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
+
+                    Text("or paste from clipboard")
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
                 }
             }
+        }
+        .allowsHitTesting(false)
+    }
 
-            // Bottom row: detailed stats
-            HStack(spacing: DesignSystem.Spacing.md) {
-                // Images processed
-                if !indexingProgress.isEmpty {
-                    Label(indexingProgress, systemImage: "photo.stack")
+    // MARK: - Keyboard Overlay
+    private var keyboardOverlayView: some View {
+        ZStack {
+            // Scrim
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+                .onTapGesture { showKeyboardOverlay = false }
+
+            // Card
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "keyboard")
+                            .font(.system(size: 16))
+                            .foregroundColor(p.accent)
+                        Text("Keyboard Shortcuts")
+                            .font(.system(size: 22, weight: .regular, design: .serif))
+                            .foregroundColor(p.ink)
+                    }
+                    Spacer()
+                    Button(action: { showKeyboardOverlay = false }) {
+                        ZStack {
+                            Circle()
+                                .fill(p.paper)
+                                .overlay(Circle().stroke(p.line, lineWidth: 1))
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(p.ink3)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+                .padding(.bottom, 20)
+
+                Rectangle().fill(p.line).frame(height: 0.5)
+
+                // Two-column grid of shortcuts
+                ScrollView {
+                    HStack(alignment: .top, spacing: 40) {
+                        // Left column
+                        VStack(alignment: .leading, spacing: 24) {
+                            keyboardSection("Navigation", shortcuts: [
+                                ("⌘ K", "Focus search"),
+                                ("⌘ 1-6", "Switch tabs"),
+                                ("⌘ ,", "Settings"),
+                                ("Esc", "Close panel / overlay"),
+                                ("⌘ ?", "Toggle this overlay"),
+                            ])
+                            keyboardSection("Search", shortcuts: [
+                                ("Return", "Search"),
+                                ("⌘ V", "Paste image to search"),
+                                ("⌘ ⇧ F", "Find similar"),
+                                ("⌘ ⇧ C", "Copy result path"),
+                            ])
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Rectangle().fill(p.line).frame(width: 0.5)
+
+                        // Right column
+                        VStack(alignment: .leading, spacing: 24) {
+                            keyboardSection("Results", shortcuts: [
+                                ("Space", "Quick Look"),
+                                ("⌘ O", "Open in default app"),
+                                ("⌘ ⇧ R", "Reveal in Finder"),
+                                ("⌘ C", "Copy image"),
+                                ("⌘ ⇧ I", "Toggle inspector"),
+                            ])
+                            keyboardSection("Faces & Duplicates", shortcuts: [
+                                ("⌘ M", "Merge selected"),
+                                ("⌘ A", "Select all"),
+                                ("Delete", "Remove selection"),
+                                ("⌘ ⇧ N", "New group"),
+                            ])
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 24)
                 }
 
-                // Batch info
-                if !indexingBatchInfo.isEmpty {
-                    Label(indexingBatchInfo, systemImage: "square.stack.3d.up")
+                // Footer hint
+                HStack {
+                    Spacer()
+                    Text("Press ⌘ ? or Esc to close")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(p.ink3)
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(p.line).frame(height: 0.5)
+                }
+            }
+            .frame(width: 720, height: 520)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(p.card)
+                    .shadow(color: Color.black.opacity(0.3), radius: 40, y: 20)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(p.line, lineWidth: 1)
+            )
+        }
+    }
+
+    private func keyboardSection(_ title: String, shortcuts: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.uppercased())
+                .font(.system(size: 9.5, weight: .semibold))
+                .tracking(1.6)
+                .foregroundColor(p.ink3)
+                .padding(.bottom, 2)
+
+            ForEach(Array(shortcuts.enumerated()), id: \.offset) { _, shortcut in
+                HStack(spacing: 12) {
+                    Text(shortcut.0)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(p.ink)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(p.sidebar)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(p.line, lineWidth: 1)
+                                )
+                        )
+                        .frame(minWidth: 70, alignment: .center)
+
+                    Text(shortcut.1)
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink2)
+
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    // MARK: - Indexing Progress View
+    private var indexingProgressView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Top row: percentage + info + cancel
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("\(Int(indexingPercent))")
+                        .font(.system(size: 36, weight: .regular, design: .serif))
+                        .foregroundColor(p.accent)
+                    Text("%")
+                        .font(.system(size: 18, weight: .regular, design: .serif))
+                        .foregroundColor(p.accent)
                 }
 
-                // Speed
-                if indexingSpeed > 0 {
-                    Label(String(format: "%.1f/s", indexingSpeed), systemImage: "speedometer")
-                }
-
-                // Elapsed time
-                if indexingElapsed > 0 {
-                    Label(formatDuration(indexingElapsed), systemImage: "clock")
+                VStack(alignment: .leading, spacing: 3) {
+                    if !indexingProgress.isEmpty {
+                        Text(indexingProgress)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(p.ink)
+                    }
+                    HStack(spacing: 0) {
+                        if !indexingBatchInfo.isEmpty {
+                            Text(indexingBatchInfo)
+                        }
+                        if indexingSpeed > 0 {
+                            Text(" \u{00B7} \(String(format: "%.1f", indexingSpeed)) img/s")
+                        }
+                        if indexingElapsed > 0 {
+                            Text(" \u{00B7} \(formatDuration(indexingElapsed))")
+                        }
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(p.ink2)
                 }
 
                 Spacer()
 
-                // Cancel button
                 Button(action: { cancelIndexing() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark.circle.fill")
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .medium))
                         Text("Cancel")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.error)
+                    .foregroundColor(p.ink2)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(p.line, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .font(DesignSystem.Typography.caption)
-            .foregroundColor(DesignSystem.Colors.secondaryText)
+            .padding(.bottom, 14)
+
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(p.line)
+                        .frame(height: 5)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(p.accent)
+                        .frame(width: geo.size.width * (indexingPercent / 100), height: 5)
+                        .animation(.easeInOut(duration: 0.3), value: indexingPercent)
+                }
+            }
+            .frame(height: 5)
+            .padding(.bottom, 14)
+
+            // Bottom stats row
+            HStack(spacing: 20) {
+                if !indexingETA.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("ETA")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundColor(p.ink3)
+                        Text(indexingETA)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(p.ink)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("MODEL")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundColor(p.ink3)
+                    Text(modelSettings.currentModelDisplayName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(p.ink)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("DEVICE")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundColor(p.ink3)
+                    Text(modelSettings.currentDevice)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(p.ink)
+                }
+                Spacer()
+            }
         }
-        .padding(DesignSystem.Spacing.md)
+        .padding(22)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .fill(DesignSystem.Colors.accent.opacity(0.1))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(p.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(p.line, lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
     }
 
     private func cancelIndexing() {
@@ -3828,50 +4590,59 @@ struct ContentView: View {
 
     // MARK: - Indexing Report View
     private func indexingReportView(_ report: IndexingReport) -> some View {
-        HStack(spacing: DesignSystem.Spacing.lg) {
-            // Success icon
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 24))
-                .foregroundColor(DesignSystem.Colors.success)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("COMPLETE")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundColor(DesignSystem.Colors.success)
 
-            // Stats
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Indexing Complete")
-                    .font(DesignSystem.Typography.callout)
-                    .fontWeight(.medium)
-                    .foregroundColor(DesignSystem.Colors.primaryText)
-
-                HStack(spacing: DesignSystem.Spacing.md) {
-                    Label("\(report.newImages) images", systemImage: "photo.stack")
-                    Label(formatDuration(report.totalTime), systemImage: "clock")
-                    Label(String(format: "%.1f/s", report.imagesPerSec), systemImage: "speedometer")
+                    Text("Indexing finished")
+                        .font(.system(size: 20, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink)
                 }
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
-            }
 
-            Spacer()
+                Spacer()
 
-            // Dismiss button
-            Button(action: { indexingReport = nil }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                Button(action: { indexingReport = nil }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(p.ink3)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle()
+                                .fill(p.paper)
+                                .overlay(Circle().stroke(p.line, lineWidth: 1))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(.plain)
+            .padding(.bottom, 16)
+
+            Divider().background(p.line).padding(.bottom, 16)
+
+            // Stats row
+            HStack(spacing: 24) {
+                atelierStatLabel("Images", value: "\(report.newImages)")
+                atelierStatLabel("Duration", value: formatDuration(report.totalTime))
+                atelierStatLabel("Speed", value: String(format: "%.1f img/s", report.imagesPerSec))
+                atelierStatLabel("Model", value: modelSettings.currentModelDisplayName)
+            }
         }
-        .padding(DesignSystem.Spacing.md)
-        .frame(maxWidth: .infinity)
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .fill(DesignSystem.Colors.success.opacity(0.1))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(p.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                .stroke(DesignSystem.Colors.success.opacity(0.3), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(DesignSystem.Colors.success.opacity(0.4), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
         .onAppear {
-            // Auto-dismiss after 8 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
                 withAnimation {
                     indexingReport = nil
@@ -3883,24 +4654,29 @@ struct ContentView: View {
 
     // MARK: - Index Stats View
     private func indexStatsView(_ stats: IndexStats) -> some View {
-        // Minimal inline stats with icons
-        HStack(spacing: 16) {
-            HStack(spacing: 5) {
+        HStack(spacing: 18) {
+            HStack(spacing: 6) {
                 Image(systemName: "photo.stack")
+                    .font(.system(size: 10))
+                    .foregroundColor(p.ink3)
+                Text("\(stats.totalImages)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(p.ink2)
+                Text("indexed")
                     .font(.system(size: 11))
-                Text("\(stats.totalImages) indexed")
-                    .font(.system(size: 12))
+                    .foregroundColor(p.ink3)
             }
-            .foregroundColor(DesignSystem.Colors.tertiaryText)
 
             if let lastMod = stats.lastModified {
                 HStack(spacing: 5) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 10))
-                    Text(formatRelativeDate(lastMod))
-                        .font(.system(size: 12))
+                    Circle()
+                        .fill(DesignSystem.Colors.success)
+                        .frame(width: 5, height: 5)
+                    Text("updated \(formatRelativeDate(lastMod))")
+                        .font(.system(size: 11, design: .default))
+                        .italic()
+                        .foregroundColor(p.ink3)
                 }
-                .foregroundColor(DesignSystem.Colors.tertiaryText.opacity(0.7))
             }
 
             Spacer()
@@ -3908,7 +4684,7 @@ struct ContentView: View {
             Button(action: { loadIndexStats() }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11))
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .foregroundColor(p.ink3)
             }
             .buttonStyle(.plain)
             .opacity(0.6)
@@ -4060,7 +4836,7 @@ struct ContentView: View {
     @State private var emptyStateIconRotation: Double = 0
 
     private var emptyStateView: some View {
-        VStack(spacing: DesignSystem.Spacing.xl) {
+        VStack(spacing: 24) {
             Spacer()
 
             VStack(spacing: 28) {
@@ -4128,7 +4904,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding(DesignSystem.Spacing.xxl)
+            .padding(32)
 
             Spacer()
         }
@@ -4191,11 +4967,11 @@ struct ContentView: View {
                                 .buttonStyle(PlainButtonStyle())
                             }
                         }
-                        .padding(.horizontal, DesignSystem.Spacing.xl)
+                        .padding(.horizontal, 24)
                         .padding(.bottom, 16)
                     }
 
-                    MasonryGrid(items: filteredRecentImages, columns: 4, spacing: 12) { result in
+                    MasonryGrid(items: filteredRecentImages, columns: showPreviewPanel ? 2 : 3, spacing: 16) { result in
                         MasonryImageCard(
                             result: result,
                             onFindSimilar: { path in
@@ -4205,7 +4981,7 @@ struct ContentView: View {
                             onHoverEnd: handlePreviewHoverEnd
                         )
                     }
-                    .padding(.horizontal, DesignSystem.Spacing.xl)
+                    .padding(.horizontal, 24)
                 }
             }
         }
@@ -4223,14 +4999,14 @@ struct ContentView: View {
     private var errorView: some View {
         Group {
             if let error = searchManager.errorMessage {
-                HStack(spacing: DesignSystem.Spacing.md) {
+                HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 14))
                         .foregroundColor(DesignSystem.Colors.error)
 
                     Text(error)
-                        .font(DesignSystem.Typography.callout)
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 13))
+                        .foregroundColor(p.ink)
 
                     Spacer()
 
@@ -4239,17 +5015,17 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .foregroundColor(p.ink3)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
-                .padding(DesignSystem.Spacing.md)
+                .padding(12)
                 .background(
-                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    RoundedRectangle(cornerRadius: 10)
                         .fill(DesignSystem.Colors.error.opacity(0.1))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    RoundedRectangle(cornerRadius: 10)
                         .stroke(DesignSystem.Colors.error.opacity(0.3), lineWidth: 1)
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -4261,7 +5037,7 @@ struct ContentView: View {
     private var statsView: some View {
         Group {
             if let stats = searchManager.searchStats {
-                HStack(spacing: DesignSystem.Spacing.xl) {
+                HStack(spacing: 24) {
                     StatItem(
                         icon: "clock.fill",
                         label: "Search Time",
@@ -4286,17 +5062,17 @@ struct ContentView: View {
                         value: stats.images_per_second
                     )
                 }
-                .padding(DesignSystem.Spacing.lg)
+                .padding(16)
                 .frame(maxWidth: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                    RoundedRectangle(cornerRadius: 10)
                         .fill(colorScheme == .dark ?
-                            DesignSystem.Colors.darkSecondaryBackground :
-                            DesignSystem.Colors.secondaryBackground)
+                            p.card :
+                            p.card)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
-                        .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(p.line, lineWidth: 1)
                 )
             }
         }
@@ -4304,30 +5080,30 @@ struct ContentView: View {
 
     // MARK: - Results List
     private var resultsList: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.lg) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header with info and stats
             if !searchManager.isSearching || !searchManager.results.isEmpty {
-                VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        HStack(spacing: DesignSystem.Spacing.xs) {
+                        HStack(spacing: 4) {
                             Image(systemName: "info.circle.fill")
                                 .font(.system(size: 12))
-                                .foregroundColor(DesignSystem.Colors.accent)
+                                .foregroundColor(p.accent)
                             Text("Double-click any image to copy")
-                                .font(DesignSystem.Typography.caption)
-                                .foregroundColor(DesignSystem.Colors.secondaryText)
+                                .font(.system(size: 12))
+                                .foregroundColor(p.ink2)
                         }
 
                         Spacer()
 
                         if !searchManager.results.isEmpty {
-                            HStack(spacing: DesignSystem.Spacing.xs) {
+                            HStack(spacing: 4) {
                                 Image(systemName: "photo.on.rectangle.angled")
                                     .font(.system(size: 10))
-                                    .foregroundColor(DesignSystem.Colors.accent)
+                                    .foregroundColor(p.accent)
                                 Text("\(searchManager.results.count) results")
-                                    .font(DesignSystem.Typography.caption.weight(.medium))
-                                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                                    .font(.system(size: 12).weight(.medium))
+                                    .foregroundColor(p.ink2)
                             }
                             .transition(.opacity)
                         }
@@ -4379,6 +5155,16 @@ struct ContentView: View {
     
     private func performSearch() {
         guard !searchText.isEmpty, !searchManager.isSearching else { return }
+        // Save to recent searches
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        if !query.isEmpty {
+            recentSearchQueries.removeAll { $0 == query }
+            recentSearchQueries.insert(query, at: 0)
+            if recentSearchQueries.count > 8 {
+                recentSearchQueries = Array(recentSearchQueries.prefix(8))
+            }
+            UserDefaults.standard.set(recentSearchQueries, forKey: "recentSearchQueries")
+        }
         searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
     }
 
@@ -4392,6 +5178,22 @@ struct ContentView: View {
                     self.searchManager.clearResults()
                 }
                 return nil // Consume the event
+            }
+
+            // Check for Cmd+? (keyboard overlay toggle)
+            if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "/" {
+                DispatchQueue.main.async {
+                    withAnimation { self.showKeyboardOverlay.toggle() }
+                }
+                return nil
+            }
+
+            // Check for Escape to close overlay
+            if event.keyCode == 53 && self.showKeyboardOverlay {
+                DispatchQueue.main.async {
+                    withAnimation { self.showKeyboardOverlay = false }
+                }
+                return nil
             }
 
             // Check for Cmd+V

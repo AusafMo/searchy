@@ -5,15 +5,16 @@ import AppKit
 struct SkeletonView: View {
     @State private var isAnimating = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.sm)
+        RoundedRectangle(cornerRadius: 8)
             .fill(
                 LinearGradient(
                     colors: [
-                        DesignSystem.Colors.border.opacity(0.3),
-                        DesignSystem.Colors.border.opacity(0.5),
-                        DesignSystem.Colors.border.opacity(0.3)
+                        pal.line.opacity(0.3),
+                        pal.line.opacity(0.5),
+                        pal.line.opacity(0.3)
                     ],
                     startPoint: isAnimating ? .leading : .trailing,
                     endPoint: isAnimating ? .trailing : .leading
@@ -29,6 +30,7 @@ struct SkeletonView: View {
 
 struct ResultCardSkeleton: View {
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +46,7 @@ struct ResultCardSkeleton: View {
                 .padding(.vertical, 14)
         }
         .frame(height: 200)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .background(pal.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(
             color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
@@ -61,20 +63,21 @@ struct StatItem: View {
     let label: String
     let value: String
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(DesignSystem.Colors.accent)
+                .foregroundColor(pal.accent)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(DesignSystem.Typography.caption2)
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .font(.system(size: 11))
+                    .foregroundColor(pal.ink3)
                 Text(value)
-                    .font(DesignSystem.Typography.callout.weight(.semibold))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .font(.system(size: 13).weight(.semibold))
+                    .foregroundColor(pal.ink)
             }
         }
     }
@@ -85,20 +88,21 @@ struct ExampleQueryChip: View {
     let text: String
     @State private var isHovered = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         Text(text)
-            .font(DesignSystem.Typography.caption)
-            .foregroundColor(isHovered ? .white : DesignSystem.Colors.accent)
-            .padding(.horizontal, DesignSystem.Spacing.md)
-            .padding(.vertical, DesignSystem.Spacing.xs)
+            .font(.system(size: 12))
+            .foregroundColor(isHovered ? .white : pal.accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(isHovered ? DesignSystem.Colors.accent : DesignSystem.Colors.accent.opacity(0.1))
+                    .fill(isHovered ? pal.accent : pal.accent.opacity(0.1))
             )
             .overlay(
                 Capsule()
-                    .stroke(DesignSystem.Colors.accent.opacity(0.3), lineWidth: 1)
+                    .stroke(pal.accent.opacity(0.3), lineWidth: 1)
             )
             .scaleEffect(isHovered ? 1.05 : 1.0)
             .onHover { hovering in
@@ -117,18 +121,19 @@ struct FilterCapsule: View {
 
     @State private var isHovered = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
-                .foregroundColor(isActive ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                .foregroundColor(isActive ? pal.accent : pal.ink3)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
                     Capsule()
                         .fill(isActive ?
-                            DesignSystem.Colors.accent.opacity(0.12) :
+                            pal.accent.opacity(0.12) :
                             (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.04))
                         )
                 )
@@ -169,10 +174,10 @@ struct ActionButton: View {
                 Image(systemName: icon)
                     .font(.system(size: 9))
                 Text(title)
-                    .font(DesignSystem.Typography.caption2.weight(.medium))
+                    .font(.system(size: 11).weight(.medium))
             }
             .foregroundColor(isHovered ? color : color.opacity(0.8))
-            .padding(.horizontal, DesignSystem.Spacing.sm)
+            .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
                 Capsule()
@@ -193,28 +198,27 @@ struct KeyboardHint: View {
     let key: String
     let description: String
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        HStack(spacing: DesignSystem.Spacing.xs) {
+        HStack(spacing: 4) {
             Text(key)
-                .font(DesignSystem.Typography.caption2.weight(.semibold))
-                .foregroundColor(DesignSystem.Colors.primaryText)
-                .padding(.horizontal, DesignSystem.Spacing.sm)
+                .font(.system(size: 11).weight(.semibold))
+                .foregroundColor(pal.ink)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(colorScheme == .dark ?
-                            DesignSystem.Colors.darkTertiaryBackground :
-                            DesignSystem.Colors.tertiaryBackground)
+                        .fill(pal.sidebar)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                        .stroke(pal.line, lineWidth: 1)
                 )
 
             Text(description)
-                .font(DesignSystem.Typography.caption2)
-                .foregroundColor(DesignSystem.Colors.tertiaryText)
+                .font(.system(size: 11))
+                .foregroundColor(pal.ink3)
         }
     }
 }
@@ -251,31 +255,32 @@ struct ModernButton: View {
 
     @State private var isHovered = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: DesignSystem.Spacing.xs) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: title == nil ? 16 : 14, weight: .medium))
 
                 if let title = title {
                     Text(title)
-                        .font(DesignSystem.Typography.callout.weight(.medium))
+                        .font(.system(size: 13).weight(.medium))
                 }
             }
             .foregroundColor(foregroundColor)
-            .padding(.horizontal, title == nil ? DesignSystem.Spacing.sm : DesignSystem.Spacing.md)
-            .padding(.vertical, DesignSystem.Spacing.sm)
+            .padding(.horizontal, title == nil ? 8 : 12)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(backgroundColor)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.md)
+                RoundedRectangle(cornerRadius: 10)
                     .stroke(borderColor, lineWidth: 1)
             )
             .scaleEffect(isHovered && !isDisabled ? 1.02 : 1.0)
-            .shadow(color: isHovered && !isDisabled ? DesignSystem.Shadows.small(colorScheme) : .clear,
+            .shadow(color: isHovered && !isDisabled ? Color.black.opacity(0.06) : .clear,
                    radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
@@ -291,15 +296,11 @@ struct ModernButton: View {
     private var backgroundColor: Color {
         switch style {
         case .primary:
-            return DesignSystem.Colors.accent
+            return pal.accent
         case .secondary:
-            return colorScheme == .dark ?
-                DesignSystem.Colors.darkTertiaryBackground :
-                DesignSystem.Colors.tertiaryBackground
+            return pal.sidebar
         case .tertiary:
-            return (colorScheme == .dark ?
-                DesignSystem.Colors.darkSecondaryBackground :
-                DesignSystem.Colors.secondaryBackground).opacity(isHovered ? 1.0 : 0.5)
+            return (pal.card).opacity(isHovered ? 1.0 : 0.5)
         }
     }
 
@@ -308,44 +309,69 @@ struct ModernButton: View {
         case .primary:
             return .white
         case .secondary, .tertiary:
-            return DesignSystem.Colors.primaryText
+            return pal.ink
         }
     }
 
     private var borderColor: Color {
         if isHovered {
-            return DesignSystem.Colors.borderHover
+            return pal.line.opacity(0.8)
         }
-        return style == .tertiary ? DesignSystem.Colors.border : .clear
+        return style == .tertiary ? pal.line : .clear
     }
 }
 
 struct CopyNotification: View {
     @Binding var isShowing: Bool
+    var filename: String = ""
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
+
+    private let toastBackground = Color(red: 0x1A/255, green: 0x18/255, blue: 0x14/255)
 
     var body: some View {
-        HStack(spacing: DesignSystem.Spacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(DesignSystem.Colors.success)
-                .font(.system(size: 14, weight: .semibold))
+        HStack(spacing: 12) {
+            // Accent circle with checkmark
+            ZStack {
+                Circle()
+                    .fill(pal.accent)
+                    .frame(width: 26, height: 26)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+            }
 
-            Text("Copied!")
-                .font(DesignSystem.Typography.callout.weight(.semibold))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+            // Middle column: title + filename
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Copied to clipboard")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Color(red: 0.96, green: 0.94, blue: 0.90))
+
+                if !filename.isEmpty {
+                    Text(filename)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
+
+            // Right: paste hint pill
+            Text("⌘ V to paste")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.55))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
         }
-        .padding(.horizontal, DesignSystem.Spacing.lg)
-        .padding(.vertical, DesignSystem.Spacing.md)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .fill(colorScheme == .dark ?
-                    DesignSystem.Colors.darkSecondaryBackground :
-                    DesignSystem.Colors.secondaryBackground)
-                .shadow(color: DesignSystem.Shadows.medium(colorScheme), radius: 12, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignSystem.CornerRadius.lg)
-                .stroke(DesignSystem.Colors.success.opacity(0.3), lineWidth: 1.5)
+            Capsule()
+                .fill(toastBackground)
+                .shadow(color: Color(red: 20/255, green: 18/255, blue: 15/255).opacity(0.5), radius: 20, x: 0, y: 18)
         )
         .offset(y: isShowing ? 0 : 20)
         .opacity(isShowing ? 1 : 0)
@@ -362,6 +388,7 @@ struct DoubleClickImageView: View {
     let onDoubleClick: () -> Void
     @State private var image: NSImage?
     @StateObject private var prefs = SearchPreferences.shared
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         Group {
@@ -371,7 +398,7 @@ struct DoubleClickImageView: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Rectangle()
-                    .fill(DesignSystem.Colors.border.opacity(0.3))
+                    .fill(pal.line.opacity(0.3))
             }
         }
         .onTapGesture(count: 2) {
@@ -405,6 +432,7 @@ struct AsyncThumbnailView: View {
     var maxSize: Int = 200
     var contentMode: ContentMode = .fill
     @State private var image: NSImage?
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         Group {
@@ -414,7 +442,7 @@ struct AsyncThumbnailView: View {
                     .aspectRatio(contentMode: contentMode)
             } else {
                 Rectangle()
-                    .fill(DesignSystem.Colors.border.opacity(0.3))
+                    .fill(pal.line.opacity(0.3))
                     .overlay(
                         ProgressView()
                             .scaleEffect(0.7)

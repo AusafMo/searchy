@@ -420,164 +420,261 @@ class SetupManager: ObservableObject {
 // MARK: - Setup View
 struct SetupView: View {
     @ObservedObject var setupManager = SetupManager.shared
+    @ObservedObject var themeManager = ThemeManager.shared
     @Environment(\.colorScheme) var colorScheme
 
-    private var accentGreen: Color {
-        DesignSystem.Colors.accent
+    private var pal: AtelierPalette { themeManager.palette }
+
+    private var steps: [(label: String, status: String)] {
+        let current = setupManager.currentStep
+        let total = setupManager.totalSteps
+        let items = [
+            "python + virtual environment",
+            "CLIP model + dependencies (~2 GB)",
+            "face-recognition model",
+            "OCR engine",
+            "verification"
+        ]
+        return items.enumerated().map { i, label in
+            if !setupManager.isSettingUp { return (label, "pending") }
+            let stepThreshold = total > 0 ? (Double(i) / Double(items.count)) * Double(total) : Double(i)
+            if Double(current) > stepThreshold + Double(total) / Double(items.count) {
+                return (label, "done")
+            } else if Double(current) > stepThreshold {
+                return (label, "active")
+            } else {
+                return (label, "pending")
+            }
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 48)
-
-            // App name — simple, no icon
-            Text("searchy")
-                .font(.system(size: 32, weight: .semibold, design: .serif))
-                .tracking(-0.5)
-
-            Text("on-device image search")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
-
             Spacer()
 
-            if setupManager.isSettingUp {
-                // Installing state
+            VStack(spacing: 0) {
+                // Centered logo + title
                 VStack(spacing: 16) {
-                    // Package name as the hero element
-                    Text(setupManager.setupProgress)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundColor(.primary.opacity(0.7))
+                    // "S" logo
+                    Text("S")
+                        .font(.system(size: 32, weight: .regular, design: .serif))
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(pal.accent)
+                                .shadow(color: pal.accent.opacity(0.3), radius: 14, x: 0, y: 8)
+                        )
 
-                    // Progress bar
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06))
-                                .frame(height: 6)
+                    // Welcome heading
+                    HStack(spacing: 0) {
+                        Text("Welcome to ")
+                            .font(.system(size: 44, weight: .regular, design: .serif))
+                            .foregroundColor(pal.ink)
+                        Text("Searchy")
+                            .font(.system(size: 44, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(pal.accent)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(accentGreen)
-                                .frame(
-                                    width: geo.size.width * (Double(setupManager.currentStep) / Double(max(setupManager.totalSteps, 1))),
-                                    height: 6
-                                )
-                                .animation(.easeInOut(duration: 0.3), value: setupManager.currentStep)
+                    Text("on-device image search \u{00B7} everything stays on your mac")
+                        .font(.system(size: 17, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink2)
+                }
+                .padding(.bottom, 36)
+
+                // Progress card
+                VStack(alignment: .leading, spacing: 0) {
+                    if setupManager.isSettingUp {
+                        // Card header
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("preparing your library")
+                                .font(.system(size: 18, weight: .regular, design: .serif))
+                                .italic()
+                                .foregroundColor(pal.ink)
+                            Spacer()
+                            Text("\(setupManager.currentStep) / \(setupManager.totalSteps)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(pal.ink3)
                         }
-                    }
-                    .frame(width: 320, height: 6)
+                        .padding(.bottom, 14)
 
-                    // Step counter
-                    Text("\(setupManager.currentStep) / \(setupManager.totalSteps)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
+                        // Progress bar
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(pal.line)
+                                    .frame(height: 6)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(pal.accent)
+                                    .frame(
+                                        width: geo.size.width * (Double(setupManager.currentStep) / Double(max(setupManager.totalSteps, 1))),
+                                        height: 6
+                                    )
+                                    .shadow(color: pal.accent.opacity(0.3), radius: 7)
+                                    .animation(.easeInOut(duration: 0.3), value: setupManager.currentStep)
+                            }
+                        }
+                        .frame(height: 6)
+                        .padding(.bottom, 22)
 
-                    if setupManager.currentStep >= 4 && setupManager.currentStep <= 17 {
-                        Text("first run — this takes a few minutes")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary.opacity(0.7))
-                            .padding(.top, 4)
+                        // Step checklist
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                                HStack(alignment: .top, spacing: 12) {
+                                    // Circle indicator
+                                    ZStack {
+                                        Circle()
+                                            .fill(step.status == "done" ? pal.accent : Color.clear)
+                                            .frame(width: 18, height: 18)
+                                        Circle()
+                                            .stroke(step.status == "pending" ? pal.ink3 : pal.accent, lineWidth: 1.5)
+                                            .frame(width: 18, height: 18)
+                                        if step.status == "done" {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.white)
+                                        }
+                                        if step.status == "active" {
+                                            Circle()
+                                                .fill(pal.accent)
+                                                .frame(width: 6, height: 6)
+                                        }
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(step.label)
+                                            .font(.system(size: 13, weight: step.status == "active" ? .semibold : .regular))
+                                            .foregroundColor(pal.ink)
+                                        if step.status == "active" {
+                                            Text(setupManager.setupProgress)
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundColor(pal.ink3)
+                                        }
+                                    }
+                                }
+                                .opacity(step.status == "pending" ? 0.45 : 1)
+                            }
+                        }
+
+                        // Footer
+                        Divider()
+                            .background(pal.line)
+                            .padding(.top, 22)
+                            .padding(.bottom, 16)
+
+                        Text("first run takes a few minutes \u{00B7} models will not download again")
+                            .font(.system(size: 11, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(pal.ink3)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                    } else if let error = setupManager.setupError {
+                        // Error state
+                        VStack(spacing: 14) {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 28, weight: .light))
+                                .foregroundColor(DesignSystem.Colors.error)
+
+                            Text("setup failed")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(pal.ink)
+
+                            ScrollView {
+                                Text(error)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(pal.ink2)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(maxHeight: 100)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(pal.line.opacity(0.5))
+                            )
+
+                            Button(action: {
+                                Task { await setupManager.runSetup() }
+                            }) {
+                                Text("retry")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 120, height: 36)
+                                    .background(RoundedRectangle(cornerRadius: 10).fill(pal.accent))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+
+                    } else {
+                        // Initial "set up" state
+                        VStack(spacing: 10) {
+                            ForEach(Array([
+                                ("checkmark.circle", "python + virtual environment"),
+                                ("arrow.down.circle", "CLIP model + dependencies (~2 GB)"),
+                                ("lock.circle", "everything stays on your mac")
+                            ].enumerated()), id: \.offset) { _, item in
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .stroke(pal.ink3, lineWidth: 1.5)
+                                            .frame(width: 18, height: 18)
+                                    }
+                                    Text(item.1)
+                                        .font(.system(size: 13))
+                                        .foregroundColor(pal.ink2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.bottom, 20)
+
+                        Button(action: {
+                            Task { await setupManager.runSetup() }
+                        }) {
+                            Text("set up")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(pal.accent))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Text("requires internet")
+                            .font(.system(size: 11, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(pal.ink3)
+                            .padding(.top, 8)
                     }
                 }
-                .padding(.horizontal, 40)
-
-            } else if let error = setupManager.setupError {
-                // Error state
-                VStack(spacing: 14) {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundColor(.red.opacity(0.7))
-
-                    Text("setup failed")
-                        .font(.system(size: 14, weight: .medium))
-
-                    ScrollView {
-                        Text(error)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxWidth: 340, maxHeight: 100)
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.03))
-                    )
-
-                    Button(action: {
-                        Task { await setupManager.runSetup() }
-                    }) {
-                        Text("retry")
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 100, height: 28)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accentGreen)
-                    .padding(.top, 4)
-                }
-                .padding(.horizontal, 40)
-
-            } else {
-                // Initial state
-                VStack(spacing: 20) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SetupStepRow(icon: "checkmark.circle", text: "python + virtual environment")
-                        SetupStepRow(icon: "arrow.down.circle", text: "CLIP model + dependencies (~2 GB)")
-                        SetupStepRow(icon: "lock.circle", text: "everything stays on your mac")
-                    }
-                    .padding(.vertical, 16)
-                    .padding(.horizontal, 20)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.04) : Color.black.opacity(0.025))
-                    )
-
-                    Button(action: {
-                        Task { await setupManager.runSetup() }
-                    }) {
-                        Text("set up")
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(width: 140, height: 32)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accentGreen)
-
-                    Text("requires internet")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary.opacity(0.6))
-                }
+                .padding(24)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(DesignSystem.Colors.secondaryBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(pal.line, lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 15, x: 0, y: 8)
             }
+            .frame(maxWidth: 560)
 
             Spacer()
 
             // Footer
-            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
+            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "\u{2014}")")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary.opacity(0.4))
+                .foregroundColor(pal.ink3)
                 .padding(.bottom, 16)
         }
-        .frame(width: 420, height: 460)
-        .background(colorScheme == .dark ? Color(NSColor.windowBackgroundColor) : Color(NSColor.windowBackgroundColor))
-    }
-}
-
-struct SetupStepRow: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-                .frame(width: 18)
-
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-        }
+        .padding(.horizontal, 48)
+        .frame(width: 620, height: 640)
+        .background(pal.paper)
     }
 }
 
@@ -610,7 +707,7 @@ class WindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(rootView: contentView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 650),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -928,12 +1025,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.2"
-        NSApplication.shared.orderFrontStandardAboutPanel(options: [
-            NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
-            NSApplication.AboutPanelOptionKey.applicationVersion: version,
-            NSApplication.AboutPanelOptionKey.version: version
-        ])
+        AtelierAboutWindow.show()
     }
 
     @objc private func quitApp() {
@@ -948,7 +1040,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         print("📍 createMainWindow: NSHostingView created, creating NSWindow...")
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 650),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -1402,12 +1494,7 @@ struct SearchApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Searchy") {
-                    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.2"
-                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
-                        NSApplication.AboutPanelOptionKey.applicationName: "Searchy",
-                        NSApplication.AboutPanelOptionKey.applicationVersion: version,
-                        NSApplication.AboutPanelOptionKey.version: version
-                    ])
+                    AtelierAboutWindow.show()
                 }
             }
 
@@ -1419,5 +1506,140 @@ struct SearchApp: App {
                 .keyboardShortcut("q", modifiers: .command)
             }
         }
+    }
+}
+
+// MARK: - Atelier About Window
+class AtelierAboutWindow {
+    static var window: NSWindow?
+
+    static func show() {
+        if let existing = window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let aboutView = AtelierAboutView()
+        let hostingView = NSHostingView(rootView: aboutView)
+
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        w.title = "About Searchy"
+        w.contentView = hostingView
+        w.center()
+        w.isReleasedWhenClosed = false
+        w.makeKeyAndOrderFront(nil)
+        window = w
+    }
+}
+
+struct AtelierAboutView: View {
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
+    private var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.2"
+    }
+
+    var body: some View {
+        ZStack {
+            pal.paper.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer().frame(height: 40)
+
+                // Logo
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22)
+                        .fill(pal.accent)
+                        .frame(width: 80, height: 80)
+                        .shadow(color: pal.accent.opacity(0.3), radius: 20, y: 8)
+                    Text("S")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                Spacer().frame(height: 24)
+
+                // Title
+                Text("Searchy")
+                    .font(.system(size: 36, weight: .regular, design: .serif))
+                    .foregroundColor(pal.ink)
+
+                Spacer().frame(height: 6)
+
+                Text("Visual search for your photo library")
+                    .font(.system(size: 14, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink2)
+
+                Spacer().frame(height: 20)
+
+                // Version pill
+                HStack(spacing: 8) {
+                    Text("v\(version)")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(pal.accent)
+                    Circle()
+                        .fill(pal.line)
+                        .frame(width: 3, height: 3)
+                    Text("CLIP-powered")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(pal.ink3)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(pal.card)
+                        .overlay(Capsule().stroke(pal.line, lineWidth: 0.5))
+                )
+
+                Spacer().frame(height: 32)
+
+                // Info grid
+                VStack(spacing: 0) {
+                    aboutInfoRow(label: "Built with", value: "SwiftUI + Python")
+                    Rectangle().fill(pal.line).frame(height: 0.5).padding(.horizontal, 16)
+                    aboutInfoRow(label: "Model", value: ModelSettings.shared.currentModelName.components(separatedBy: "/").last ?? "CLIP")
+                    Rectangle().fill(pal.line).frame(height: 0.5).padding(.horizontal, 16)
+                    aboutInfoRow(label: "macOS", value: ProcessInfo.processInfo.operatingSystemVersionString)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(pal.card)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(pal.line, lineWidth: 0.5))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 40)
+
+                Spacer()
+
+                // Footer
+                Text("Made with care")
+                    .font(.system(size: 11, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink3)
+                    .padding(.bottom, 24)
+            }
+        }
+        .frame(width: 420, height: 480)
+    }
+
+    private func aboutInfoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(pal.ink2)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundColor(pal.ink)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 }

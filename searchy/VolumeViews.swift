@@ -9,6 +9,7 @@ struct VolumeStatCard: View {
     let icon: String
     let color: Color
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -17,16 +18,16 @@ struct VolumeStatCard: View {
                 .foregroundColor(color)
             Text(value)
                 .font(.system(size: 24, weight: .bold, design: .monospaced))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+                .foregroundColor(pal.ink)
             Text(title)
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .font(.system(size: 12))
+                .foregroundColor(pal.ink2)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, DesignSystem.Spacing.lg)
+        .padding(.vertical, 16)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
+                .fill(pal.card)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
     }
@@ -38,48 +39,54 @@ struct VolumeCard: View {
     @State private var showingOptions = false
     @State private var isIndexing = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
-            // Header
-            HStack {
-                // Volume icon based on type
+        VStack(alignment: .leading, spacing: 10) {
+            // Header: icon box + name + toggle
+            HStack(spacing: 12) {
                 Image(systemName: volumeIcon)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(volume.isOnline ? DesignSystem.Colors.accent : DesignSystem.Colors.secondaryText)
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 20))
+                    .foregroundColor(pal.accent)
+                    .frame(width: 40, height: 40)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(DesignSystem.Colors.accentSubtle)
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(pal.paper)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(pal.line, lineWidth: 1)
                     )
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(volume.name)
-                            .font(.system(size: 14, weight: .semibold, design: .serif))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
-                            .lineLimit(1)
-                        if !volume.isOnline {
-                            Text("Offline")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(DesignSystem.Colors.warning)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    Capsule()
-                                        .fill(DesignSystem.Colors.warning.opacity(0.15))
-                                )
-                        }
-                    }
-                    Text(volume.path)
-                        .font(DesignSystem.Typography.caption2)
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(volume.name)
+                        .font(.system(size: 19, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink)
                         .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        // Online/offline dot
+                        Circle()
+                            .fill(volume.isOnline ? DesignSystem.Colors.success : pal.ink3)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: volume.isOnline ? DesignSystem.Colors.success.opacity(0.5) : .clear, radius: 3)
+
+                        Text(volume.isOnline ? "online" : "offline")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(pal.ink3)
+
+                        Text("\u{00B7}")
+                            .foregroundColor(pal.ink3)
+
+                        Text(volume.indexStorage == .onVolume ? "portable index" : "centralized")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(pal.ink3)
+                    }
                 }
 
                 Spacer()
 
-                // Enable/Disable toggle
                 Toggle("", isOn: Binding(
                     get: { volume.isEnabled },
                     set: { _ in volumeManager.toggleVolume(volume) }
@@ -89,95 +96,68 @@ struct VolumeCard: View {
                 .scaleEffect(0.8)
             }
 
-            Divider()
-                .background(DesignSystem.Colors.border)
-
-            // Stats row
-            HStack(spacing: DesignSystem.Spacing.xl) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(volume.imageCount)")
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
-                    Text("Images")
-                        .font(DesignSystem.Typography.caption2)
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+            // Status row
+            HStack(spacing: 10) {
+                if volume.imageCount > 0 {
+                    Text("\(volume.imageCount.formatted()) photos")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(pal.ink)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    if let lastIndexed = volume.lastIndexed {
-                        Text(lastIndexed, style: .relative)
-                            .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(DesignSystem.Colors.primaryText)
-                    } else {
-                        Text("Never")
-                            .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
-                    }
-                    Text("Last Indexed")
-                        .font(DesignSystem.Typography.caption2)
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                if let lastIndexed = volume.lastIndexed {
+                    Text("indexed ")
+                        .font(.system(size: 12, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink3)
+                    + Text(lastIndexed, style: .relative)
+                        .font(.system(size: 12, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink3)
+                } else if volume.imageCount == 0 {
+                    Text("not yet indexed")
+                        .font(.system(size: 12, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink3)
                 }
 
                 Spacer()
 
-                // Storage location badge
-                Text(volume.indexStorage == .onVolume ? "On Volume" : "Centralized")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(volume.indexStorage == .onVolume ? DesignSystem.Colors.success : DesignSystem.Colors.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(volume.indexStorage == .onVolume ? DesignSystem.Colors.success.opacity(0.12) : DesignSystem.Colors.accentSubtle)
-                    )
-            }
-
-            // Action buttons
-            HStack(spacing: DesignSystem.Spacing.sm) {
-                Button(action: { indexVolume() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: isIndexing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                            .font(.system(size: 10, weight: .medium))
-                        Text(isIndexing ? "Indexing..." : "Index")
-                            .font(.system(size: 11, weight: .medium))
+                // Action buttons
+                if isIndexing {
+                    Text("indexing\u{2026}")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(pal.accent)
+                } else if volume.isOnline {
+                    Button(action: { indexVolume() }) {
+                        Text(volume.imageCount == 0 ? "Index now" : "Re-index")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(pal.accent))
                     }
-                    .foregroundColor(volume.isOnline && !isIndexing ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(volume.isOnline && !isIndexing ? DesignSystem.Colors.accentSubtle : DesignSystem.Colors.border.opacity(0.3))
-                    )
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(!volume.isOnline || isIndexing)
 
                 Button(action: { showingOptions = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 10, weight: .medium))
-                        Text("Options")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                    )
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12))
+                        .foregroundColor(pal.ink3)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(pal.line, lineWidth: 1)
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
                 .popover(isPresented: $showingOptions) {
                     VolumeOptionsPopover(volume: volume, isPresented: $showingOptions)
                 }
 
-                Spacer()
-
                 if volume.type == .manual {
                     Button(action: { volumeManager.removeVolume(volume) }) {
                         Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 11))
                             .foregroundColor(DesignSystem.Colors.error)
                             .padding(6)
                             .background(
@@ -189,12 +169,16 @@ struct VolumeCard: View {
                 }
             }
         }
-        .padding(DesignSystem.Spacing.md)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
-                .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(pal.card)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(pal.line, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 9, x: 0, y: 4)
         .opacity(volume.isOnline ? 1.0 : 0.7)
     }
 
@@ -251,17 +235,19 @@ struct VolumeOptionsPopover: View {
     @Binding var isPresented: Bool
     @ObservedObject private var volumeManager = VolumeManager.shared
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
                 Image(systemName: "gearshape")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(DesignSystem.Colors.accent)
+                    .foregroundColor(pal.accent)
                 Text("Volume Options")
-                    .font(.system(size: 14, weight: .semibold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                    .font(.system(size: 14, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink)
             }
 
             Divider()
@@ -270,7 +256,7 @@ struct VolumeOptionsPopover: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Index Storage")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .foregroundColor(pal.ink2)
 
                 Picker("", selection: Binding(
                     get: { volume.indexStorage },
@@ -291,11 +277,11 @@ struct VolumeOptionsPopover: View {
                 HStack {
                     Text("Index Size:")
                         .font(.system(size: 12))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .foregroundColor(pal.ink)
                     Spacer()
                     Text(volumeManager.formatBytes(size))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .foregroundColor(pal.ink2)
                 }
 
                 Button(action: {
@@ -319,8 +305,8 @@ struct VolumeOptionsPopover: View {
                 .buttonStyle(PlainButtonStyle())
             } else {
                 Text("No index exists for this volume")
-                    .font(DesignSystem.Typography.caption)
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    .font(.system(size: 12))
+                    .foregroundColor(pal.ink3)
             }
 
             Divider()
@@ -336,18 +322,18 @@ struct VolumeOptionsPopover: View {
                     Text("Reveal in Finder")
                         .font(.system(size: 11, weight: .medium))
                 }
-                .foregroundColor(volume.isOnline ? DesignSystem.Colors.accent : DesignSystem.Colors.tertiaryText)
+                .foregroundColor(volume.isOnline ? pal.accent : pal.ink3)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(volume.isOnline ? DesignSystem.Colors.accentSubtle : DesignSystem.Colors.border.opacity(0.3))
+                        .fill(volume.isOnline ? pal.halo : pal.line.opacity(0.3))
                 )
             }
             .buttonStyle(PlainButtonStyle())
             .disabled(!volume.isOnline)
         }
-        .padding(DesignSystem.Spacing.md)
+        .padding(12)
         .frame(width: 260)
     }
 }
@@ -359,35 +345,47 @@ struct AddVolumeSheet: View {
     @State private var indexStorage: IndexStorageLocation = .centralized
     @ObservedObject private var volumeManager = VolumeManager.shared
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        VStack(spacing: DesignSystem.Spacing.lg) {
+        VStack(spacing: 16) {
             // Header
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "externaldrive.badge.plus")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(DesignSystem.Colors.accent)
-                    Text("Add Manual Path")
-                        .font(.system(size: 16, weight: .semibold, design: .serif))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ADD VOLUME")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .tracking(1.6)
+                        .foregroundColor(pal.ink3)
+                    Text("Add a volume")
+                        .font(.system(size: 22, weight: .regular, design: .serif))
+                        .foregroundColor(pal.ink)
+                    Text("Index an external drive or network path")
+                        .font(.system(size: 13, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(pal.ink2)
                 }
                 Spacer()
                 Button(action: { isPresented = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(DesignSystem.Colors.tertiaryText)
+                    ZStack {
+                        Circle()
+                            .fill(pal.paper)
+                            .overlay(Circle().stroke(pal.line, lineWidth: 1))
+                            .frame(width: 28, height: 28)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(pal.ink3)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
             }
 
-            Divider()
+            Rectangle().fill(pal.line).frame(height: 0.5)
 
             // Name field
             VStack(alignment: .leading, spacing: 6) {
                 Text("Name")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .foregroundColor(pal.ink2)
                 TextField("My Network Drive", text: $volumeName)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
@@ -398,7 +396,7 @@ struct AddVolumeSheet: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                            .stroke(pal.line, lineWidth: 1)
                     )
             }
 
@@ -406,7 +404,7 @@ struct AddVolumeSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Path")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .foregroundColor(pal.ink2)
                 HStack(spacing: 8) {
                     TextField("/Volumes/MyDrive or smb://server/share", text: $volumePath)
                         .textFieldStyle(.plain)
@@ -418,18 +416,18 @@ struct AddVolumeSheet: View {
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(DesignSystem.Colors.border, lineWidth: 1)
+                                .stroke(pal.line, lineWidth: 1)
                         )
 
                     Button(action: { browseForFolder() }) {
                         Text("Browse")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(DesignSystem.Colors.accent)
+                            .foregroundColor(pal.accent)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(DesignSystem.Colors.accentSubtle)
+                                    .fill(pal.halo)
                             )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -440,23 +438,23 @@ struct AddVolumeSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Index Storage")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .foregroundColor(pal.ink2)
 
                 Picker("", selection: $indexStorage) {
                     VStack(alignment: .leading) {
                         Text("On Volume")
                             .font(.system(size: 13))
                         Text("Portable - index travels with the drive")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .font(.system(size: 12))
+                            .foregroundColor(pal.ink3)
                     }.tag(IndexStorageLocation.onVolume)
 
                     VStack(alignment: .leading) {
                         Text("Centralized")
                             .font(.system(size: 13))
                         Text("Stored in app data folder")
-                            .font(DesignSystem.Typography.caption)
-                            .foregroundColor(DesignSystem.Colors.tertiaryText)
+                            .font(.system(size: 12))
+                            .foregroundColor(pal.ink3)
                     }.tag(IndexStorageLocation.centralized)
                 }
                 .pickerStyle(.radioGroup)
@@ -469,7 +467,7 @@ struct AddVolumeSheet: View {
                 Button(action: { isPresented = false }) {
                     Text("Cancel")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.secondaryText)
+                        .foregroundColor(pal.ink2)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
@@ -484,19 +482,19 @@ struct AddVolumeSheet: View {
                 Button(action: { addVolume() }) {
                     Text("Add Volume")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(DesignSystem.Colors.palette.isDark ? .white : .white)
+                        .foregroundColor(pal.isDark ? .white : .white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(volumeName.isEmpty || volumePath.isEmpty ? DesignSystem.Colors.tertiaryText : DesignSystem.Colors.accent)
+                                .fill(volumeName.isEmpty || volumePath.isEmpty ? pal.ink3 : pal.accent)
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(volumeName.isEmpty || volumePath.isEmpty)
             }
         }
-        .padding(DesignSystem.Spacing.lg)
+        .padding(16)
         .frame(width: 420, height: 380)
     }
 
@@ -532,29 +530,31 @@ struct AddVolumeSheet: View {
 struct DeviceCard: View {
     let device: MobileDevice
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
     @ObservedObject private var deviceManager = MobileDeviceManager.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignSystem.Spacing.md) {
+        VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
                 Image(systemName: device.icon)
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(DesignSystem.Colors.accent)
+                    .foregroundColor(pal.accent)
                     .frame(width: 36, height: 36)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(DesignSystem.Colors.accentSubtle)
+                            .fill(pal.halo)
                     )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name)
-                        .font(.system(size: 14, weight: .semibold, design: .serif))
-                        .foregroundColor(DesignSystem.Colors.primaryText)
+                        .font(.system(size: 14, weight: .regular, design: .serif))
+                    .italic()
+                        .foregroundColor(pal.ink)
                         .lineLimit(1)
 
                     Text("Connected")
-                        .font(DesignSystem.Typography.caption)
+                        .font(.system(size: 12))
                         .foregroundColor(DesignSystem.Colors.success)
                 }
 
@@ -568,8 +568,8 @@ struct DeviceCard: View {
 
             // Info text
             Text("Use Image Capture to import photos, then add the folder to Searchy for indexing.")
-                .font(DesignSystem.Typography.caption)
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .font(.system(size: 12))
+                .foregroundColor(pal.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Open Image Capture button
@@ -585,15 +585,15 @@ struct DeviceCard: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(DesignSystem.Colors.accent)
+                        .fill(pal.accent)
                 )
             }
             .buttonStyle(PlainButtonStyle())
         }
-        .padding(DesignSystem.Spacing.md)
+        .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(DesignSystem.Colors.secondaryBackground)
+                .fill(pal.card)
                 .shadow(color: Color.black.opacity(0.06), radius: 12, y: 4)
         )
     }

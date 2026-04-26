@@ -7,6 +7,9 @@ struct PersonCard: View {
     var isPinned: Bool = false
     var isHidden: Bool = false
     var isSelected: Bool = false
+    var isUnknown: Bool = false
+    var showPhotosLabel: Bool = true
+    var circleSize: CGFloat = 106
     var onRename: ((String) -> Void)?
     var onSelect: (() -> Void)?
     var onTogglePin: (() -> Void)?
@@ -21,91 +24,92 @@ struct PersonCard: View {
     @FocusState private var isNameFieldFocused: Bool
     @Environment(\.colorScheme) var colorScheme
 
-    private let cardSize: CGFloat = 120
     private let hoverDelay: Double = 0.5
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        ZStack {
-            // Full bleed face image
-            imageContent
+        VStack(spacing: 6) {
+            // Circular face photo with overlays
+            ZStack(alignment: .topTrailing) {
+                // Circular face image
+                imageContent
+                    .frame(width: circleSize, height: circleSize)
+                    .clipShape(Circle())
+                    .saturation(isUnknown ? 0.8 : 1.0)
+                    .opacity(isUnknown ? 0.85 : 1.0)
+                    .shadow(
+                        color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12),
+                        radius: isHovered ? 10 : 5,
+                        y: isHovered ? 4 : 2
+                    )
 
-            // Bottom gradient with name
-            VStack {
-                Spacer()
-                nameOverlay
-            }
-
-            // Top right - selection checkbox (always visible)
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { onToggleSelection?() }) {
-                        ZStack {
+                // Selection checkbox - top right
+                Button(action: { onToggleSelection?() }) {
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? pal.accent : Color.black.opacity(0.4))
+                            .frame(width: 22, height: 22)
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                        } else {
                             Circle()
-                                .fill(isSelected ? DesignSystem.Colors.accent : Color.black.opacity(0.4))
+                                .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
                                 .frame(width: 22, height: 22)
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else {
-                                Circle()
-                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
-                                    .frame(width: 22, height: 22)
-                            }
                         }
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .padding(6)
                 }
-                Spacer()
-            }
+                .buttonStyle(PlainButtonStyle())
+                .offset(x: 2, y: 2)
 
-            // Top left - pin button (visible when pinned or hovering)
-            if isPinned || (isHovered && !isEditing) {
-                VStack {
-                    HStack {
+                // Pin badge - bottom right of circle (accent circle with star)
+                if isPinned {
+                    ZStack {
+                        Circle()
+                            .fill(pal.accent)
+                            .frame(width: 26, height: 26)
+                        Circle()
+                            .stroke(pal.paper, lineWidth: 3)
+                            .frame(width: 26, height: 26)
+                        Text("★")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    .offset(x: 2, y: circleSize - 28)
+                }
+
+                // Unverified badge - bottom left of circle
+                if person.unverifiedCount > 0 {
+                    unverifiedBadge
+                        .offset(x: -(circleSize - 30), y: circleSize - 26)
+                }
+
+                // Edit button on hover - top left
+                if isHovered && !isEditing {
+                    HStack(spacing: 4) {
                         pinButton
-                        Spacer()
-                    }
-                    Spacer()
-                }
-            }
-
-            // Edit button on hover (next to pin)
-            if isHovered && !isEditing {
-                VStack {
-                    HStack {
-                        // Spacer for pin button width
-                        Color.clear.frame(width: 30, height: 1)
                         editButton
-                        Spacer()
                     }
-                    Spacer()
+                    .offset(x: -(circleSize - 52), y: 2)
                 }
             }
+            .frame(width: circleSize + 8, height: circleSize + 8)
 
-            // Bottom right - unverified badge (only when unverified > 0)
-            if person.unverifiedCount > 0 {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        unverifiedBadge
-                    }
-                }
-            }
+            // Name below image - serif italic
+            nameOverlay
+
+            // Photo count - monospace
+            Text(showPhotosLabel ? "\(person.faceCount) photos" : "\(person.faceCount)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(pal.ink3)
+                .lineLimit(1)
         }
-        .frame(width: cardSize, height: cardSize)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .frame(width: circleSize + 20)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
         .opacity(isHidden ? 0.5 : 1.0)
-        .shadow(
-            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
-            radius: isHovered ? 12 : 6,
-            y: isHovered ? 6 : 3
-        )
-        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .scaleEffect(isHovered ? 1.04 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) {
@@ -132,15 +136,58 @@ struct PersonCard: View {
             }
         }
         .contextMenu {
-            Button(action: { onTogglePin?() }) {
-                Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin")
-            }
-            Button(action: { onToggleHide?() }) {
-                Label(isHidden ? "Unhide" : "Hide", systemImage: isHidden ? "eye" : "eye.slash")
-            }
-            Divider()
             Button(action: { startEditing() }) {
                 Label("Rename", systemImage: "pencil")
+            }
+            Button(action: { onSelect?() }) {
+                Label("View Photos", systemImage: "photo.on.rectangle")
+            }
+
+            Divider()
+
+            Button(action: { onTogglePin?() }) {
+                Label(isPinned ? "Unpin" : "Pin to Top", systemImage: isPinned ? "pin.slash" : "pin")
+            }
+            Button(action: { onToggleHide?() }) {
+                Label(isHidden ? "Show" : "Hide Person", systemImage: isHidden ? "eye" : "eye.slash")
+            }
+
+            Divider()
+
+            Button(action: { onToggleSelection?() }) {
+                Label(isSelected ? "Deselect" : "Select for Merge", systemImage: isSelected ? "minus.circle" : "checkmark.circle")
+            }
+
+            Divider()
+
+            if isUnknown {
+                Button(action: { startEditing() }) {
+                    Label("Name This Person", systemImage: "person.badge.plus")
+                }
+            }
+
+            Button(action: {
+                // Copy the person's name
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(person.name, forType: .string)
+            }) {
+                Label("Copy Name", systemImage: "doc.on.doc")
+            }
+
+            Button(action: {
+                // Export face thumbnail
+                if let thumb = thumbnail {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([thumb])
+                }
+            }) {
+                Label("Copy Photo", systemImage: "photo")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: { onToggleHide?() }) {
+                Label("Remove Person", systemImage: "trash")
             }
         }
         .onAppear { loadThumbnail() }
@@ -152,14 +199,12 @@ struct PersonCard: View {
                 Image(nsImage: thumb)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: cardSize, height: cardSize)
-                    .clipped()
             } else {
-                Rectangle()
+                Circle()
                     .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
                     .overlay(
                         Image(systemName: "person.fill")
-                            .font(.system(size: 40, weight: .light))
+                            .font(.system(size: 36, weight: .light))
                             .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
                     )
             }
@@ -171,30 +216,27 @@ struct PersonCard: View {
             if isEditing {
                 TextField("Name", text: $editedName)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.7))
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(pal.card)
+                            .shadow(color: pal.line, radius: 2)
+                    )
                     .focused($isNameFieldFocused)
                     .onSubmit { commitRename() }
                     .onExitCommand { cancelRename() }
             } else {
                 Text(person.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.clear, Color.black.opacity(0.6)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .onTapGesture(count: 2) { startEditing() }
             }
         }
@@ -221,29 +263,114 @@ struct PersonCard: View {
         .padding(.horizontal, 5)
         .padding(.vertical, 3)
         .background(Capsule().fill(DesignSystem.Colors.warning))
-        .padding(6)
-        .padding(.bottom, 28) // Above the name overlay
     }
 
     private var hoverPreviewContent: some View {
-        VStack(spacing: 8) {
-            Text(person.name)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+        VStack(spacing: 0) {
+            // Header row
+            HStack(spacing: 10) {
+                // Face thumbnail 38x38
+                if let thumbPath = person.thumbnailPath {
+                    FaceThumbnail(imagePath: thumbPath, size: 38, cornerRadius: 10)
+                } else if let firstFace = person.faces.first {
+                    FaceThumbnail(imagePath: firstFace.imagePath, boundingBox: firstFace.boundingBox, size: 38, cornerRadius: 10)
+                }
 
-            // Show up to 4 sample faces
-            HStack(spacing: 6) {
-                ForEach(Array(person.faces.prefix(4).enumerated()), id: \.offset) { index, face in
-                    FaceThumbnail(imagePath: face.imagePath)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(person.name)
+                            .font(.system(size: 20, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(pal.ink)
+
+                        if isPinned {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(pal.accent)
+                        }
+                    }
+
+                    HStack(spacing: 4) {
+                        Text("\(person.faceCount) photos")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(pal.ink3)
+                        if person.unverifiedCount > 0 && person.unverifiedCount < person.faceCount {
+                            Text("·")
+                                .foregroundColor(pal.ink3)
+                            Text("\(person.unverifiedCount) suggestions")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(pal.ink3)
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.bottom, 12)
+
+            // Photo grid: 4 columns, fixed 64px cells
+            let gridColumns = Array(repeating: GridItem(.fixed(64), spacing: 4), count: 4)
+            LazyVGrid(columns: gridColumns, spacing: 4) {
+                ForEach(Array(person.faces.prefix(8).enumerated()), id: \.offset) { _, face in
+                    FaceThumbnail(imagePath: face.imagePath, boundingBox: face.boundingBox, size: 64, cornerRadius: 6)
                 }
             }
 
-            Text("\(person.faces.count) photos")
-                .font(.system(size: 11))
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+            // Footer
+            VStack(spacing: 0) {
+                Divider()
+                    .background(pal.line)
+                    .padding(.top, 12)
+
+                HStack {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 11))
+                            .foregroundColor(pal.ink3)
+                        Text(mostRecentLabel)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(pal.ink3)
+                    }
+
+                    Spacer()
+
+                    KeyboardHint(key: "\u{21A9}", description: "open")
+                }
+                .padding(.top, 8)
+            }
         }
-        .padding(12)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .padding(18)
+        .frame(width: 304)
+        .background(pal.card)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(pal.line, lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.25), radius: 20, y: 10)
+    }
+
+    /// Computes a human-readable "most recent: X days ago" label from face image file dates
+    private var mostRecentLabel: String {
+        let fm = FileManager.default
+        var latest: Date?
+        for face in person.faces {
+            if let attrs = try? fm.attributesOfItem(atPath: face.imagePath),
+               let mod = attrs[.modificationDate] as? Date {
+                if latest == nil || mod > latest! {
+                    latest = mod
+                }
+            }
+        }
+        guard let date = latest else { return "most recent: unknown" }
+        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
+        if days == 0 {
+            return "most recent: today"
+        } else if days == 1 {
+            return "most recent: 1 day ago"
+        } else {
+            return "most recent: \(days) days ago"
+        }
     }
 
     private var editButton: some View {
@@ -251,11 +378,10 @@ struct PersonCard: View {
             Image(systemName: "pencil")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.white)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.black.opacity(0.5)))
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(.top, 6)
         .transition(.opacity)
     }
 
@@ -264,17 +390,16 @@ struct PersonCard: View {
             Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(isPinned ? .yellow : .white)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.black.opacity(isPinned ? 0.7 : 0.5)))
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(6)
         .transition(.opacity)
     }
 
     private func loadThumbnail() {
         guard let path = person.thumbnailPath else { return }
-        let size = Int(cardSize) * 2
+        let size = Int(circleSize) * 2
         if let cached = ThumbnailService.shared.cachedThumbnail(for: path, size: size) {
             self.thumbnail = cached
             return
@@ -317,10 +442,10 @@ struct FaceVerificationView: View {
     @State private var verificationResults: [String: Bool] = [:]
     @Environment(\.colorScheme) var colorScheme
 
-    private var facesToReview: [(id: String, thumbnailPath: String?, imagePath: String)] {
+    private var facesToReview: [(id: String, imagePath: String, boundingBox: CGRect)] {
         person.faces.compactMap { face in
             if verificationResults[face.id.uuidString] == nil {
-                return (id: face.id.uuidString, thumbnailPath: nil, imagePath: face.imagePath)
+                return (id: face.id.uuidString, imagePath: face.imagePath, boundingBox: face.boundingBox)
             }
             return nil
         }
@@ -350,36 +475,54 @@ struct FaceVerificationView: View {
                 swipeInterface
             }
         }
-        .frame(width: 500, height: 600)
-        .background(DesignSystem.Colors.secondaryBackground)
+        .frame(width: 520, height: 680)
+        .background(pal.card)
     }
 
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
+
     private var headerView: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Review Faces")
-                    .font(.system(size: 18, weight: .bold, design: .serif))
-                    .foregroundColor(DesignSystem.Colors.primaryText)
+                Text("FACE REVIEW")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .tracking(1.6)
+                    .foregroundColor(pal.ink3)
                 Text("Reviewing \(person.name)")
-                    .font(.system(size: 13))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
+                    .font(.system(size: 22, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink)
+                HStack(spacing: 8) {
+                    Text("\(verificationResults.count)/\(person.faces.count)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(pal.ink2)
+                    Text("\(confirmedCount) kept")
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.success)
+                    Text("\(rejectedCount) removed")
+                        .font(.system(size: 11))
+                        .foregroundColor(DesignSystem.Colors.error)
+                }
             }
             Spacer()
-            HStack(spacing: 8) {
-                Text("\(verificationResults.count)/\(person.faces.count)")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundColor(DesignSystem.Colors.secondaryText)
-                CircularProgressView(progress: progress)
-                    .frame(width: 24, height: 24)
-            }
+            CircularProgressView(progress: progress)
+                .frame(width: 36, height: 36)
             Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(DesignSystem.Colors.tertiaryText)
+                ZStack {
+                    Circle()
+                        .fill(pal.paper)
+                        .overlay(Circle().stroke(pal.line, lineWidth: 1))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(pal.ink3)
+                }
             }
             .buttonStyle(PlainButtonStyle())
         }
-        .padding()
+        .padding(.horizontal, 26)
+        .padding(.top, 28)
+        .padding(.bottom, 16)
     }
 
     private var completionView: some View {
@@ -389,18 +532,18 @@ struct FaceVerificationView: View {
                 .font(.system(size: 64))
                 .foregroundColor(DesignSystem.Colors.success)
             Text("All faces reviewed!")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(DesignSystem.Colors.primaryText)
+                .font(.system(size: 24, weight: .regular, design: .serif))
+                .foregroundColor(pal.ink)
             Text("\(confirmedCount) confirmed, \(rejectedCount) rejected")
-                .font(.system(size: 14))
-                .foregroundColor(DesignSystem.Colors.secondaryText)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundColor(pal.ink2)
             Button(action: onDismiss) {
                 Text("Done")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 32)
                     .padding(.vertical, 12)
-                    .background(Capsule().fill(DesignSystem.Colors.accent))
+                    .background(RoundedRectangle(cornerRadius: 14).fill(pal.accent))
             }
             .buttonStyle(PlainButtonStyle())
             .padding(.top, 12)
@@ -409,15 +552,25 @@ struct FaceVerificationView: View {
     }
 
     private var swipeInterface: some View {
-        VStack {
+        VStack(spacing: 0) {
             cardStack
-                .padding(32)
+                .padding(22)
             actionButtons
-                .padding(.bottom, 32)
-            Text("Swipe right to confirm, left to reject")
-                .font(.system(size: 12))
-                .foregroundColor(DesignSystem.Colors.tertiaryText)
-                .padding(.bottom, 16)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 22)
+            // Keyboard hints footer
+            HStack(spacing: 16) {
+                KeyboardHint(key: "\u{2190}", description: "reject")
+                KeyboardHint(key: "\u{2192}", description: "confirm")
+                KeyboardHint(key: "\u{2191}", description: "skip")
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .top) {
+                Divider().background(pal.line)
+            }
         }
     }
 
@@ -425,32 +578,30 @@ struct FaceVerificationView: View {
         ZStack {
             ForEach(Array(facesToReview.prefix(3).enumerated().reversed()), id: \.element.id) { index, face in
                 if index > 0 {
-                    FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
+                    FaceReviewCard(imagePath: face.imagePath, boundingBox: face.boundingBox)
+                        .id(face.id)
                         .scaleEffect(1.0 - CGFloat(index) * 0.05)
                         .offset(y: CGFloat(index) * 8)
                         .opacity(1.0 - Double(index) * 0.2)
                 }
             }
             if let currentFace = facesToReview.first {
-                currentCardView(face: currentFace)
+                FaceReviewCard(imagePath: currentFace.imagePath, boundingBox: currentFace.boundingBox)
+                    .id(currentFace.id)
+                    .offset(x: offset)
+                    .rotationEffect(.degrees(Double(offset / 20)))
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if !isAnimating { offset = value.translation.width }
+                            }
+                            .onEnded { value in
+                                handleSwipe(value: value, faceId: currentFace.id)
+                            }
+                    )
+                    .overlay(swipeIndicators)
             }
         }
-    }
-
-    private func currentCardView(face: (id: String, thumbnailPath: String?, imagePath: String)) -> some View {
-        FaceReviewCard(imagePath: face.imagePath, thumbnailPath: face.thumbnailPath)
-            .offset(x: offset)
-            .rotationEffect(.degrees(Double(offset / 20)))
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        if !isAnimating { offset = value.translation.width }
-                    }
-                    .onEnded { value in
-                        handleSwipe(value: value, faceId: face.id)
-                    }
-            )
-            .overlay(swipeIndicators)
     }
 
     private var swipeIndicators: some View {
@@ -485,22 +636,45 @@ struct FaceVerificationView: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 40) {
+        HStack(spacing: 14) {
             Button(action: { if let f = facesToReview.first { swipeLeft(faceId: f.id) } }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 60, height: 60)
-                    .background(Circle().fill(DesignSystem.Colors.error))
+                HStack(spacing: 10) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .medium))
+                    Text("not them")
+                        .font(.system(size: 17, weight: .regular, design: .serif))
+                        .italic()
+                }
+                .foregroundColor(DesignSystem.Colors.error)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(pal.paper)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(pal.line, lineWidth: 1)
+                )
             }
             .buttonStyle(PlainButtonStyle())
 
             Button(action: { if let f = facesToReview.first { swipeRight(faceId: f.id) } }) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 60, height: 60)
-                    .background(Circle().fill(DesignSystem.Colors.success))
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .medium))
+                    Text("yes, that\u{2019}s them")
+                        .font(.system(size: 17, weight: .regular, design: .serif))
+                        .italic()
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(pal.accent)
+                )
+                .shadow(color: pal.accent.opacity(0.3), radius: 11, x: 0, y: 4)
             }
             .buttonStyle(PlainButtonStyle())
         }
@@ -521,9 +695,12 @@ struct FaceVerificationView: View {
         isAnimating = true
         withAnimation(.easeOut(duration: 0.3)) { offset = 500 }
         Task { await verifyFace(faceId: faceId, isCorrect: true) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            verificationResults[faceId] = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            // Reset offset without animation before removing the card
             offset = 0
+            withAnimation(.easeInOut(duration: 0.2)) {
+                verificationResults[faceId] = true
+            }
             isAnimating = false
         }
     }
@@ -532,9 +709,11 @@ struct FaceVerificationView: View {
         isAnimating = true
         withAnimation(.easeOut(duration: 0.3)) { offset = -500 }
         Task { await verifyFace(faceId: faceId, isCorrect: false) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            verificationResults[faceId] = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             offset = 0
+            withAnimation(.easeInOut(duration: 0.2)) {
+                verificationResults[faceId] = false
+            }
             isAnimating = false
         }
     }
@@ -562,6 +741,10 @@ struct FaceVerificationView: View {
 // Small face thumbnail for hover preview
 struct FaceThumbnail: View {
     let imagePath: String
+    var boundingBox: CGRect? = nil
+    var size: CGFloat? = 50
+    var cornerRadius: CGFloat = 6
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
     @State private var image: NSImage?
 
     var body: some View {
@@ -570,12 +753,12 @@ struct FaceThumbnail: View {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 50, height: 50)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(DesignSystem.Colors.border.opacity(0.3))
-                    .frame(width: 50, height: 50)
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(pal.line.opacity(0.3))
+                    .frame(width: size, height: size)
             }
         }
         .onAppear { loadImage() }
@@ -583,10 +766,31 @@ struct FaceThumbnail: View {
 
     private func loadImage() {
         DispatchQueue.global(qos: .userInitiated).async {
-            if let nsImage = NSImage(contentsOfFile: imagePath) {
-                DispatchQueue.main.async {
-                    self.image = nsImage
+            guard let nsImage = NSImage(contentsOfFile: imagePath) else { return }
+
+            let cropped: NSImage
+            if let bbox = boundingBox, let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                let imgW = CGFloat(cgImage.width)
+                let imgH = CGFloat(cgImage.height)
+                // bbox is in pixel coords; add 20% padding for context
+                let pad = max(bbox.width, bbox.height) * 0.2
+                let cropRect = CGRect(
+                    x: max(0, bbox.origin.x - pad),
+                    y: max(0, bbox.origin.y - pad),
+                    width: min(bbox.width + pad * 2, imgW - max(0, bbox.origin.x - pad)),
+                    height: min(bbox.height + pad * 2, imgH - max(0, bbox.origin.y - pad))
+                )
+                if cropRect.width > 0, cropRect.height > 0, let croppedCG = cgImage.cropping(to: cropRect) {
+                    cropped = NSImage(cgImage: croppedCG, size: NSSize(width: croppedCG.width, height: croppedCG.height))
+                } else {
+                    cropped = nsImage
                 }
+            } else {
+                cropped = nsImage
+            }
+
+            DispatchQueue.main.async {
+                self.image = cropped
             }
         }
     }
@@ -595,7 +799,7 @@ struct FaceThumbnail: View {
 // Face review card for the swipe interface
 struct FaceReviewCard: View {
     let imagePath: String
-    let thumbnailPath: String?
+    let boundingBox: CGRect
     @State private var image: NSImage?
     @Environment(\.colorScheme) var colorScheme
 
@@ -618,22 +822,33 @@ struct FaceReviewCard: View {
                 }
             )
             .onAppear { loadImage() }
+            .id(imagePath)
     }
 
     private func loadImage() {
-        // Try thumbnail first, then full image
-        let pathToLoad = thumbnailPath ?? imagePath
-
         DispatchQueue.global(qos: .userInitiated).async {
-            if let nsImage = NSImage(contentsOfFile: pathToLoad) {
-                DispatchQueue.main.async {
-                    self.image = nsImage
-                }
-            } else if thumbnailPath != nil, let nsImage = NSImage(contentsOfFile: imagePath) {
-                // Fallback to full image if thumbnail fails
-                DispatchQueue.main.async {
-                    self.image = nsImage
-                }
+            guard let nsImage = NSImage(contentsOfFile: imagePath),
+                  let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+
+            let imgW = CGFloat(cgImage.width)
+            let imgH = CGFloat(cgImage.height)
+            let pad = max(boundingBox.width, boundingBox.height) * 0.5
+            let cropRect = CGRect(
+                x: max(0, boundingBox.origin.x - pad),
+                y: max(0, boundingBox.origin.y - pad),
+                width: min(boundingBox.width + pad * 2, imgW - max(0, boundingBox.origin.x - pad)),
+                height: min(boundingBox.height + pad * 2, imgH - max(0, boundingBox.origin.y - pad))
+            )
+
+            let cropped: NSImage
+            if cropRect.width > 0, cropRect.height > 0, let croppedCG = cgImage.cropping(to: cropRect) {
+                cropped = NSImage(cgImage: croppedCG, size: NSSize(width: croppedCG.width, height: croppedCG.height))
+            } else {
+                cropped = nsImage
+            }
+
+            DispatchQueue.main.async {
+                self.image = cropped
             }
         }
     }
@@ -642,15 +857,16 @@ struct FaceReviewCard: View {
 // Circular progress indicator
 struct CircularProgressView: View {
     let progress: Double
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(DesignSystem.Colors.border, lineWidth: 3)
+                .stroke(pal.line, lineWidth: 3)
 
             Circle()
                 .trim(from: 0, to: progress)
-                .stroke(DesignSystem.Colors.success, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(pal.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut, value: progress)
         }
@@ -672,136 +888,128 @@ struct PersonFaceCard: View {
     @State private var thumbnail: NSImage?
     @State private var isVerifying = false
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
-        ZStack {
+        VStack(spacing: 0) {
             // Image content
-            if let img = thumbnail {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(height: cardHeight)
-                    .clipped()
-            } else {
-                Rectangle()
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.03))
-                    .frame(height: cardHeight)
-                    .overlay(
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    )
-            }
+            ZStack {
+                if let img = thumbnail {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(height: cardHeight)
+                        .clipped()
+                } else {
+                    Rectangle()
+                        .fill(pal.card)
+                        .frame(height: cardHeight)
+                        .overlay(
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        )
+                }
 
-            // Selection overlay
-            if isSelected {
-                Color.blue.opacity(0.3)
-            }
+                // Selection overlay
+                if isSelected {
+                    pal.accent.opacity(0.25)
+                }
 
-            // Top indicators row
-            VStack {
-                HStack {
-                    // Verified badge (left)
-                    if face.verified {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(DesignSystem.Colors.success)
-                            .padding(6)
-                            .background(Circle().fill(Color.black.opacity(0.5)))
-                    }
-
-                    Spacer()
-
-                    // Selection checkbox (right) - show in selection mode or on hover
-                    if isSelectionMode || isHovered {
-                        Button(action: { onSelect?() }) {
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(isSelected ? .blue : .white)
+                // Top indicators row
+                VStack {
+                    HStack {
+                        // Verified badge (left) - accent checkmark
+                        if face.verified {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(pal.accent)
                                 .padding(6)
                                 .background(Circle().fill(Color.black.opacity(0.5)))
                         }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                Spacer()
-            }
-            .padding(8)
 
-            // Hover overlay with verify/reject buttons (only when not in selection mode)
-            if isHovered && !face.verified && !isSelectionMode {
-                ZStack {
-                    // Semi-transparent overlay
-                    Color.black.opacity(0.4)
+                        Spacer()
 
-                    // Verify/Reject buttons
-                    HStack(spacing: 24) {
-                        // Reject button
-                        Button(action: {
-                            verifyFace(isCorrect: false)
-                        }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Circle().fill(DesignSystem.Colors.error))
-                                .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
+                        // Selection checkbox (right) - show in selection mode or on hover
+                        if isSelectionMode || isHovered {
+                            Button(action: { onSelect?() }) {
+                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(isSelected ? pal.accent : .white)
+                                    .padding(6)
+                                    .background(Circle().fill(Color.black.opacity(0.5)))
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .disabled(isVerifying)
-                        .help("Not this person")
-
-                        // Verify button
-                        Button(action: {
-                            verifyFace(isCorrect: true)
-                        }) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Circle().fill(DesignSystem.Colors.success))
-                                .shadow(color: Color.black.opacity(0.3), radius: 4, y: 2)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .disabled(isVerifying)
-                        .help("Confirm this is correct")
                     }
-
-                    if isVerifying {
-                        ProgressView()
-                            .scaleEffect(1.2)
-                    }
-                }
-            }
-
-            // Bottom gradient with filename
-            VStack {
-                Spacer()
-                HStack {
-                    Text(URL(fileURLWithPath: result.path).lastPathComponent)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                     Spacer()
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: [.clear, .black.opacity(0.6)]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .padding(8)
+
+                // Hover overlay with verify/reject buttons (only when not in selection mode)
+                if isHovered && !face.verified && !isSelectionMode {
+                    ZStack {
+                        // Semi-transparent overlay
+                        Color.black.opacity(0.4)
+
+                        // Verify/Reject buttons - serif italic style
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                verifyFace(isCorrect: false)
+                            }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(DesignSystem.Colors.error.opacity(0.85)))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .disabled(isVerifying)
+                            .help("Not this person")
+
+                            Button(action: {
+                                verifyFace(isCorrect: true)
+                            }) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(pal.accent))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .disabled(isVerifying)
+                            .help("Confirm this is correct")
+                        }
+
+                        if isVerifying {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                        }
+                    }
+                }
             }
+            .frame(height: cardHeight)
+            .clipped()
+
+            // Bottom filename bar
+            HStack {
+                Text(URL(fileURLWithPath: result.path).lastPathComponent)
+                    .font(.system(size: 11, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(pal.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
         }
-        .frame(height: cardHeight)
+        .background(pal.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                .stroke(isSelected ? pal.accent : pal.line.opacity(0.5), lineWidth: isSelected ? 3 : 1)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.1), radius: 8, y: 4)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 6, y: 3)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
@@ -840,8 +1048,35 @@ struct PersonFaceCard: View {
     }
 
     private func loadThumbnail() {
-        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: 400) { image in
-            self.thumbnail = image
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let nsImage = NSImage(contentsOfFile: result.path) else { return }
+            guard let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                DispatchQueue.main.async { self.thumbnail = nsImage }
+                return
+            }
+
+            let bbox = face.boundingBox
+            let imgW = CGFloat(cgImage.width)
+            let imgH = CGFloat(cgImage.height)
+            // Expand crop area by 40% for more context around face
+            let pad = max(bbox.width, bbox.height) * 0.4
+            let cropRect = CGRect(
+                x: max(0, bbox.origin.x - pad),
+                y: max(0, bbox.origin.y - pad),
+                width: min(bbox.width + pad * 2, imgW - max(0, bbox.origin.x - pad)),
+                height: min(bbox.height + pad * 2, imgH - max(0, bbox.origin.y - pad))
+            )
+
+            let cropped: NSImage
+            if cropRect.width > 0, cropRect.height > 0, let croppedCG = cgImage.cropping(to: cropRect) {
+                cropped = NSImage(cgImage: croppedCG, size: NSSize(width: croppedCG.width, height: croppedCG.height))
+            } else {
+                cropped = nsImage
+            }
+
+            DispatchQueue.main.async {
+                self.thumbnail = cropped
+            }
         }
     }
 
