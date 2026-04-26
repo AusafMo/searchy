@@ -3113,7 +3113,7 @@ struct ContentView: View {
                     indexingReportView(report)
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
-                } else if searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil {
+                } else if searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil && !searchManager.isSearching {
                     // Atelier editorial greeting
                     atelierGreeting
                 }
@@ -3122,7 +3122,7 @@ struct ContentView: View {
                 if !isIndexing && indexingReport == nil {
                     modernSearchBar
                         .padding(.horizontal, 32)
-                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil ? 0 : 16)
+                        .padding(.top, searchText.isEmpty && searchManager.results.isEmpty && pastedImage == nil && !searchManager.isSearching ? 0 : 16)
                 }
 
                 // Filter bar — don't hide during search transitions to prevent layout jump
@@ -3142,26 +3142,47 @@ struct ContentView: View {
                 }
 
                 // Results area
-                Group {
-                    if searchManager.isSearching {
+                ZStack {
+                    Group {
+                        if !searchManager.results.isEmpty {
+                            ScrollView {
+                                filteredResultsList
+                                    .padding(.horizontal, 24)
+                            }
+                            .opacity(searchManager.isSearching ? 0.4 : 1.0)
+                            .animation(.easeOut(duration: 0.15), value: searchManager.isSearching)
+                        } else if searchManager.isSearching {
+                            VStack {
+                                Spacer()
+                                ProgressView()
+                                Text("Searching...")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(p.ink3)
+                                    .padding(.top, 8)
+                                Spacer()
+                            }
+                        } else if searchText.isEmpty && pastedImage == nil {
+                            recentImagesSection
+                        } else {
+                            emptyStateView
+                        }
+                    }
+
+                    // Subtle loading indicator when re-searching with existing results
+                    if searchManager.isSearching && !searchManager.results.isEmpty {
                         VStack {
-                            Spacer()
                             ProgressView()
-                            Text("Searching...")
-                                .font(.system(size: 13))
-                                .foregroundColor(p.ink3)
-                                .padding(.top, 8)
+                                .scaleEffect(0.8)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(p.card)
+                                        .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                                )
                             Spacer()
                         }
-                    } else if !searchManager.results.isEmpty {
-                        ScrollView {
-                            filteredResultsList
-                                .padding(.horizontal, 24)
-                        }
-                    } else if searchText.isEmpty && pastedImage == nil {
-                        recentImagesSection
-                    } else {
-                        emptyStateView
+                        .padding(.top, 20)
+                        .transition(.opacity)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
