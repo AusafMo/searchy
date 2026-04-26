@@ -1567,7 +1567,7 @@ struct SetupModelRow: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected ?
                         pal.accent.opacity(0.08) :
-                        (colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02)))
+                        (pal.isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.02)))
             )
         }
         .buttonStyle(PlainButtonStyle())
@@ -1632,7 +1632,7 @@ struct SetupDirectoryRow: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+                .fill(pal.isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
@@ -1671,7 +1671,7 @@ struct SetupStatRow: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(colorScheme == .dark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
+                .fill(pal.isDark ? Color.white.opacity(0.03) : Color.black.opacity(0.02))
         )
     }
 }

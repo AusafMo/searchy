@@ -38,7 +38,7 @@ struct PersonCard: View {
                     .saturation(isUnknown ? 0.8 : 1.0)
                     .opacity(isUnknown ? 0.85 : 1.0)
                     .shadow(
-                        color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.12),
+                        color: Color.black.opacity(pal.isDark ? 0.35 : 0.12),
                         radius: isHovered ? 10 : 5,
                         y: isHovered ? 4 : 2
                     )
@@ -201,11 +201,11 @@ struct PersonCard: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Circle()
-                    .fill(colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
+                    .fill(pal.isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
                     .overlay(
                         Image(systemName: "person.fill")
                             .font(.system(size: 36, weight: .light))
-                            .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
+                            .foregroundColor(pal.isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
                     )
             }
         }
@@ -802,10 +802,11 @@ struct FaceReviewCard: View {
     let boundingBox: CGRect
     @State private var image: NSImage?
     @Environment(\.colorScheme) var colorScheme
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     var body: some View {
         RoundedRectangle(cornerRadius: 20)
-            .fill(colorScheme == .dark ? Color.white.opacity(0.08) : Color.white)
+            .fill(pal.isDark ? Color.white.opacity(0.08) : Color.white)
             .frame(width: 320, height: 400)
             .shadow(color: Color.black.opacity(0.2), radius: 20, y: 10)
             .overlay(
@@ -1008,7 +1009,7 @@ struct PersonFaceCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isSelected ? pal.accent : pal.line.opacity(0.5), lineWidth: isSelected ? 3 : 1)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.08), radius: 6, y: 3)
+        .shadow(color: Color.black.opacity(pal.isDark ? 0.4 : 0.08), radius: 6, y: 3)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering

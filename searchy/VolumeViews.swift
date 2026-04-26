@@ -392,7 +392,7 @@ struct AddVolumeSheet: View {
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                            .fill(pal.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -412,7 +412,7 @@ struct AddVolumeSheet: View {
                         .padding(10)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                                .fill(pal.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
@@ -472,7 +472,7 @@ struct AddVolumeSheet: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                                .fill(pal.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -482,7 +482,7 @@ struct AddVolumeSheet: View {
                 Button(action: { addVolume() }) {
                     Text("Add Volume")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(pal.isDark ? .white : .white)
+                        .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(

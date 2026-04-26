@@ -49,7 +49,7 @@ struct ResultCardSkeleton: View {
         .background(pal.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(
-            color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08),
+            color: Color.black.opacity(pal.isDark ? 0.3 : 0.08),
             radius: 6,
             x: 0,
             y: 3
@@ -134,7 +134,7 @@ struct FilterCapsule: View {
                     Capsule()
                         .fill(isActive ?
                             pal.accent.opacity(0.12) :
-                            (colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.04))
+                            (pal.isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.04))
                         )
                 )
         }
@@ -328,8 +328,8 @@ struct CopyNotification: View {
     @Environment(\.colorScheme) var colorScheme
     private var pal: AtelierPalette { ThemeManager.shared.palette }
 
-    private let toastBackground = Color(red: 0x1A/255, green: 0x18/255, blue: 0x14/255)
-    private let toastText = Color(red: 0xF5/255, green: 0xF4/255, blue: 0xEE/255)
+    private var toastBackground: Color { pal.isDark ? pal.card : Color(red: 0x1A/255, green: 0x18/255, blue: 0x14/255) }
+    private var toastText: Color { pal.isDark ? pal.ink : Color(red: 0xF5/255, green: 0xF4/255, blue: 0xEE/255) }
 
     var body: some View {
         HStack(spacing: 12) {

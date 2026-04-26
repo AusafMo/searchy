@@ -684,7 +684,7 @@ struct ContentView: View {
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
+                                .stroke(p.isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -743,7 +743,7 @@ struct ContentView: View {
                     } label: {
                         ZStack {
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
+                                .stroke(p.isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
                                 .frame(width: 32, height: 32)
                             HStack(spacing: 3) {
                                 ForEach(0..<3, id: \.self) { _ in
@@ -859,11 +859,11 @@ struct ContentView: View {
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                        .fill(p.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
+                        .stroke(p.isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
                 )
                 .padding(.bottom, 8)
             }
@@ -880,7 +880,7 @@ struct ContentView: View {
                     // Left: face icon in accent circle
                     ZStack {
                         Circle()
-                            .fill(p.accent.opacity(colorScheme == .dark ? 0.15 : 0.1))
+                            .fill(p.accent.opacity(p.isDark ? 0.15 : 0.1))
                             .frame(width: 30, height: 30)
                         Image(systemName: "faceid")
                             .font(.system(size: 14, weight: .medium))
@@ -902,7 +902,7 @@ struct ContentView: View {
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 1.5)
-                                    .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
+                                    .fill(p.isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
                                     .frame(height: 3)
 
                                 RoundedRectangle(cornerRadius: 1.5)
@@ -938,7 +938,7 @@ struct ContentView: View {
                             .padding(.vertical, 3)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
+                                    .stroke(p.isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.12), lineWidth: 1)
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -951,7 +951,7 @@ struct ContentView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), lineWidth: 1)
+                        .stroke(p.isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08), lineWidth: 1)
                 )
                 .padding(.bottom, 12)
             }
@@ -968,8 +968,8 @@ struct ContentView: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        p.accent.opacity(colorScheme == .dark ? 0.25 : 0.15),
-                                        p.accent.opacity(colorScheme == .dark ? 0.1 : 0.05)
+                                        p.accent.opacity(p.isDark ? 0.25 : 0.15),
+                                        p.accent.opacity(p.isDark ? 0.1 : 0.05)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -979,7 +979,7 @@ struct ContentView: View {
 
                         Image(systemName: "person.2.crop.square.stack")
                             .font(.system(size: 48, weight: .light))
-                            .foregroundColor(p.accent.opacity(colorScheme == .dark ? 0.8 : 0.7))
+                            .foregroundColor(p.accent.opacity(p.isDark ? 0.8 : 0.7))
                     }
 
                     VStack(spacing: 8) {
@@ -1325,7 +1325,7 @@ struct ContentView: View {
                         .padding(.vertical, 6)
                         .background(
                             Capsule()
-                                .fill(faceManager.selectedGroupFilter == nil ? p.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                                .fill(faceManager.selectedGroupFilter == nil ? p.accent : (p.isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -1344,7 +1344,7 @@ struct ContentView: View {
                             .padding(.vertical, 6)
                             .background(
                                 Capsule()
-                                    .fill(faceManager.selectedGroupFilter == group ? p.accent : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
+                                    .fill(faceManager.selectedGroupFilter == group ? p.accent : (p.isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)))
                             )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -1358,7 +1358,7 @@ struct ContentView: View {
                         .frame(width: 26, height: 26)
                         .background(
                             Circle()
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
+                                .fill(p.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -1773,7 +1773,7 @@ struct ContentView: View {
                             .padding(.vertical, 5)
                             .background(
                                 Capsule()
-                                    .fill(DesignSystem.Colors.warning.opacity(colorScheme == .dark ? 0.2 : 0.1))
+                                    .fill(DesignSystem.Colors.warning.opacity(p.isDark ? 0.2 : 0.1))
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -5656,7 +5656,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(colorScheme == .dark ?
+                        .fill(p.isDark ?
                             p.card :
                             p.card)
                 )
