@@ -4442,8 +4442,14 @@ struct ContentView: View {
                     ProgressView()
                         .scaleEffect(0.65)
                         .transition(.opacity)
-                } else if !searchText.isEmpty {
-                    Button(action: { searchText = "" }) {
+                } else if !searchText.isEmpty || !searchManager.results.isEmpty || pastedImage != nil {
+                    Button(action: {
+                        searchText = ""
+                        pastedImage = nil
+                        searchDebounceTimer?.invalidate()
+                        searchDebounceTimer = nil
+                        searchManager.clearResults()
+                    }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
                             .foregroundColor(p.ink3)
