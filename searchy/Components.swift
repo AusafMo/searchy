@@ -324,10 +324,12 @@ struct ModernButton: View {
 struct CopyNotification: View {
     @Binding var isShowing: Bool
     var filename: String = ""
+    var fileSize: String = ""
     @Environment(\.colorScheme) var colorScheme
     private var pal: AtelierPalette { ThemeManager.shared.palette }
 
     private let toastBackground = Color(red: 0x1A/255, green: 0x18/255, blue: 0x14/255)
+    private let toastText = Color(red: 0xF5/255, green: 0xF4/255, blue: 0xEE/255)
 
     var body: some View {
         HStack(spacing: 12) {
@@ -337,7 +339,7 @@ struct CopyNotification: View {
                     .fill(pal.accent)
                     .frame(width: 26, height: 26)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.white)
             }
 
@@ -345,29 +347,32 @@ struct CopyNotification: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Copied to clipboard")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color(red: 0.96, green: 0.94, blue: 0.90))
+                    .foregroundColor(toastText)
 
                 if !filename.isEmpty {
-                    Text(filename)
+                    let detail = fileSize.isEmpty ? filename : "\(filename) \u{00B7} \(fileSize)"
+                    Text(detail)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(toastText.opacity(0.55))
                         .lineLimit(1)
                 }
             }
 
-            // Right: paste hint pill
-            Text("⌘ V to paste")
+            // Right: ⌘V to paste key hint
+            Text("⌘V to paste")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.white.opacity(0.55))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .foregroundColor(toastText.opacity(0.55))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
                 .overlay(
-                    Capsule()
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(toastText.opacity(0.18), lineWidth: 1)
                 )
+                .padding(.leading, 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .padding(.vertical, 12)
         .background(
             Capsule()
                 .fill(toastBackground)

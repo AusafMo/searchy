@@ -67,6 +67,9 @@ struct ContentView: View {
     @State private var showKeyboardOverlay = false
     @State private var showCopyToast = false
     @State private var copyToastFilename = ""
+    @State private var lightboxResult: SearchResult? = nil
+    @State private var lightboxResults: [SearchResult] = []
+    @State private var lightboxIndex: Int = 0
     @State private var recentSearchQueries: [String] = {
         UserDefaults.standard.stringArray(forKey: "recentSearchQueries") ?? []
     }()
@@ -153,6 +156,13 @@ struct ContentView: View {
                 keyboardOverlayView
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .animation(.spring(response: 0.25, dampingFraction: 0.85), value: showKeyboardOverlay)
+            }
+
+            // MARK: - Detail Lightbox
+            if lightboxResult != nil {
+                atelierLightbox
+                    .transition(.opacity)
+                    .animation(.easeOut(duration: 0.25), value: lightboxResult != nil)
             }
 
             // MARK: - Copy Toast
@@ -2422,32 +2432,6 @@ struct ContentView: View {
     // MARK: - Favorites Tab Content
     private var favoritesTabContent: some View {
         VStack(spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Favorites")
-                        .font(.system(size: 38, weight: .regular, design: .serif))
-                        .foregroundColor(p.ink)
-
-                    Text("\(favoritesManager.favoriteImages.count) photos")
-                        .font(.system(size: 17, weight: .regular, design: .serif))
-                        .italic()
-                        .foregroundColor(p.ink2)
-                        .padding(.leading, 14)
-
-                    Spacer()
-                }
-
-                Text("Star anything from search. They stay searchable like everything else.")
-                    .font(.system(size: 14, weight: .regular, design: .serif))
-                    .italic()
-                    .foregroundColor(p.ink3)
-                    .padding(.top, 6)
-            }
-            .padding(.horizontal, 32)
-            .padding(.top, 32)
-            .padding(.bottom, 20)
-
             if favoritesManager.isLoading {
                 Spacer()
                 ProgressView()
@@ -2473,24 +2457,84 @@ struct ContentView: View {
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20),
-                        GridItem(.flexible(), spacing: 20)
-                    ], spacing: 24) {
-                        ForEach(favoritesManager.favoriteImages) { result in
-                            ImageCard(
-                                result: result,
-                                showSimilarity: false,
-                                onFindSimilar: { path in
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Header
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Favorites")
+                                .font(.system(size: 38, weight: .regular, design: .serif))
+                                .tracking(-0.4)
+                                .foregroundColor(p.ink)
+
+                            Text("\(favoritesManager.favoriteImages.count) photos")
+                                .font(.system(size: 17, weight: .regular, design: .serif))
+                                .italic()
+                                .foregroundColor(p.ink2)
+                                .padding(.leading, 14)
+
+                            Spacer()
+                        }
+
+                        Text("Star anything from search. Group into collections by drag — they stay searchable like everything else.")
+                            .font(.system(size: 14, weight: .regular, design: .serif))
+                            .italic()
+                            .foregroundColor(p.ink3)
+                            .padding(.top, 6)
+                            .padding(.bottom, 28)
+
+                        // Collections row
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                favoritesCollectionCard(name: "All Favorites", icon: "heart.fill", iconColor: p.accent, count: favoritesManager.favoriteImages.count, isSelected: true)
+
+                                // Dashed "new collection" button
+                                Button(action: {}) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(p.ink3)
+                                        Text("new collection")
+                                            .font(.system(size: 14, design: .serif))
+                                            .italic()
+                                            .foregroundColor(p.ink3)
+                                    }
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 14)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [5, 3]))
+                                            .foregroundColor(p.line)
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.bottom, 28)
+
+                        // Recently starred label
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 11))
+                                .foregroundColor(p.ink3)
+                            Text("RECENTLY STARRED")
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(1)
+                                .foregroundColor(p.ink3)
+                        }
+                        .padding(.bottom, 14)
+
+                        // 4-column grid with heart overlays
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
+                            ForEach(favoritesManager.favoriteImages) { result in
+                                FavoriteImageTile(result: result, onFindSimilar: { path in
                                     activeTab = .search
                                     searchManager.findSimilar(imagePath: path)
-                                }
-                            )
+                                })
+                            }
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 32)
+                    .padding(.bottom, 24)
                 }
             }
         }
@@ -2498,6 +2542,40 @@ struct ContentView: View {
         .onAppear {
             favoritesManager.refreshFavoriteImages()
         }
+    }
+
+    private func favoritesCollectionCard(name: String, icon: String, iconColor: Color, count: Int, isSelected: Bool) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(iconColor.opacity(0.9))
+                    .frame(width: 34, height: 34)
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.system(size: 16, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink)
+                    .lineLimit(1)
+                Text("\(count) photos")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(p.ink3)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(p.card)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isSelected ? p.accent : p.line, lineWidth: 1)
+                )
+                .shadow(color: isSelected ? p.halo : .clear, radius: 10, y: 6)
+        )
     }
 
     // MARK: - Volumes Tab Content
@@ -3056,6 +3134,13 @@ struct ContentView: View {
 
                 errorView
 
+                // Drag search reference card
+                if pastedImage != nil && !searchManager.results.isEmpty {
+                    dragSearchReferenceCard
+                        .padding(.horizontal, 32)
+                        .padding(.top, 12)
+                }
+
                 // Results area
                 Group {
                     if searchManager.isSearching {
@@ -3070,10 +3155,26 @@ struct ContentView: View {
                         }
                     } else if !searchManager.results.isEmpty {
                         ScrollView {
+                            // Visual similarity results header
+                            if pastedImage != nil {
+                                HStack(spacing: 16) {
+                                    HStack(spacing: 0) {
+                                        Text("\(searchManager.results.count) visually similar")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundColor(p.ink)
+                                    }
+                                    Spacer()
+                                    Text("sorted by cosine similarity \u{2193}")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(p.ink3)
+                                }
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 4)
+                            }
                             filteredResultsList
                                 .padding(.horizontal, 24)
                         }
-                    } else if searchText.isEmpty {
+                    } else if searchText.isEmpty && pastedImage == nil {
                         recentImagesSection
                     } else {
                         emptyStateView
@@ -3136,6 +3237,97 @@ struct ContentView: View {
         .padding(.top, 40)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Drag Search Reference Card
+    private var dragSearchReferenceCard: some View {
+        HStack(spacing: 18) {
+            // Thumbnail of the dropped/pasted image
+            if let image = pastedImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 130, height: 95)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.doc")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(p.accent)
+                    Text("VISUAL REFERENCE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(1.5)
+                        .foregroundColor(p.accent)
+                }
+
+                Text("find images like this one")
+                    .font(.system(size: 26, weight: .regular, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink)
+                    .lineLimit(1)
+                    .padding(.top, 6)
+
+                Text("CLIP embedding cached")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(p.ink2)
+                    .padding(.top, 4)
+
+                Spacer(minLength: 0)
+
+                // Vision / text balance indicator (read-only)
+                HStack(spacing: 10) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 14))
+                        .foregroundColor(p.ink2)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(p.line)
+                                .frame(height: 4)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(p.accent)
+                                .frame(width: geo.size.width * CGFloat(1.0 - clipBalance), height: 4)
+                        }
+                    }
+                    .frame(maxWidth: 140)
+                    .frame(height: 4)
+                    Image(systemName: "textformat")
+                        .font(.system(size: 14))
+                        .foregroundColor(p.ink3)
+
+                    Spacer()
+
+                    Button(action: {
+                        withAnimation { pastedImage = nil }
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Clear")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(p.ink2)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(p.paper)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(p.card)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(p.line, lineWidth: 1))
+                .shadow(color: p.halo, radius: 8, y: 0)
+        )
     }
 
     // MARK: - Preview Hover Handling
@@ -3212,6 +3404,9 @@ struct ContentView: View {
                     showSimilarity: true,
                     onFindSimilar: { path in
                         searchManager.findSimilar(imagePath: path)
+                    },
+                    onOpen: {
+                        openLightbox(result: result, allResults: results)
                     },
                     onHoverStart: handlePreviewHoverStart,
                     onHoverEnd: handlePreviewHoverEnd
@@ -4234,15 +4429,15 @@ struct ContentView: View {
                 .background(.ultraThinMaterial)
                 .ignoresSafeArea()
 
-            // Dashed accent border
+            // Dashed accent border inset 16
             RoundedRectangle(cornerRadius: 22)
                 .stroke(style: StrokeStyle(lineWidth: 2.5, dash: [10, 6]))
                 .foregroundColor(p.accent)
                 .padding(16)
 
             // Center content
-            VStack(spacing: 24) {
-                // Upload icon box
+            VStack(spacing: 16) {
+                // Upload icon box — rotated -2deg per spec
                 ZStack {
                     RoundedRectangle(cornerRadius: 26)
                         .fill(p.card)
@@ -4250,48 +4445,55 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 26)
                                 .stroke(p.line, lineWidth: 1)
                         )
+                        .shadow(color: p.halo, radius: 20, y: 14)
                         .frame(width: 88, height: 88)
 
                     Image(systemName: "arrow.up.doc")
-                        .font(.system(size: 36))
+                        .font(.system(size: 36, weight: .light))
                         .foregroundColor(p.accent)
                 }
+                .rotationEffect(.degrees(-2))
 
-                // Title: "drop to find visually similar"
-                HStack(spacing: 0) {
-                    Text("drop to find ")
-                        .font(.system(size: 38, weight: .regular, design: .serif))
-                        .foregroundColor(p.ink)
-                    Text("visually similar")
-                        .font(.system(size: 38, weight: .regular, design: .serif))
+                // Title
+                VStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        Text("drop to find ")
+                            .font(.system(size: 38, weight: .regular, design: .serif))
+                            .tracking(-0.4)
+                            .foregroundColor(p.ink)
+                        Text("visually similar")
+                            .font(.system(size: 38, weight: .regular, design: .serif))
+                            .tracking(-0.4)
+                            .italic()
+                            .foregroundColor(p.accent)
+                    }
+
+                    // Subtitle
+                    Text("Searchy will match colour, composition, subject — your library, calmly.")
+                        .font(.system(size: 17, design: .serif))
                         .italic()
-                        .foregroundColor(p.accent)
+                        .foregroundColor(p.ink2)
                 }
-
-                // Subtitle
-                Text("we'll search your indexed library for matches")
-                    .font(.system(size: 17, design: .serif))
-                    .italic()
-                    .foregroundColor(p.ink2)
 
                 // Bottom hints row
-                HStack(spacing: 20) {
-                    // File types
+                HStack(spacing: 14) {
                     HStack(spacing: 6) {
-                        ForEach(["jpg", "png", "heic", "webp"], id: \.self) { ext in
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(p.accent)
-                                    .frame(width: 4, height: 4)
-                                Text(ext)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(p.ink3)
-                            }
-                        }
+                        Circle()
+                            .fill(p.accent)
+                            .frame(width: 8, height: 8)
+                        Text("jpg \u{00B7} png \u{00B7} heic \u{00B7} webp")
+                            .font(.system(size: 12))
+                            .foregroundColor(p.ink3)
                     }
+
+                    Text("\u{00B7}")
+                        .foregroundColor(p.ink3)
 
                     Text("up to 50 MB")
                         .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
+
+                    Text("\u{00B7}")
                         .foregroundColor(p.ink3)
 
                     Text("or paste from clipboard")
@@ -4447,6 +4649,218 @@ struct ContentView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    // MARK: - Detail Lightbox (AtelierDetail)
+    private var atelierLightbox: some View {
+        let result = lightboxResult ?? lightboxResults.first
+        let darkBg = Color(red: 0x0E/255, green: 0x0C/255, blue: 0x09/255)
+        let sidebarBg = Color(red: 0x15/255, green: 0x12/255, blue: 0x0D/255)
+        let dimWhite = Color.white.opacity(0.85)
+        let dimWhite2 = Color.white.opacity(0.45)
+        let dimWhite3 = Color.white.opacity(0.4)
+        let divider = Color.white.opacity(0.08)
+
+        return ZStack {
+            darkBg.ignoresSafeArea()
+
+            HStack(spacing: 0) {
+                // Main image area
+                ZStack {
+                    if let r = result {
+                        LightboxImage(path: r.path)
+                    }
+
+                    // Counter top-left
+                    VStack {
+                        HStack {
+                            if lightboxResults.count > 1 {
+                                Text("\(lightboxIndex + 1) of \(lightboxResults.count)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                            Spacer()
+                            // Close button
+                            Button(action: { withAnimation { lightboxResult = nil } }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.08))
+                                        .frame(width: 32, height: 32)
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        .padding(20)
+                        Spacer()
+                    }
+
+                    // Filmstrip at bottom
+                    if lightboxResults.count > 1 {
+                        VStack {
+                            Spacer()
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(Array(lightboxResults.prefix(20).enumerated()), id: \.element.id) { idx, r in
+                                        Button(action: {
+                                            lightboxIndex = idx
+                                            lightboxResult = lightboxResults[idx]
+                                        }) {
+                                            AsyncThumbnailView(path: r.path, maxSize: 100, contentMode: .fill)
+                                                .frame(width: 44, height: 30)
+                                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                                .opacity(idx == lightboxIndex ? 1 : 0.4)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .stroke(idx == lightboxIndex ? p.accent : Color.clear, lineWidth: 1)
+                                                )
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                            }
+                            .padding(.bottom, 20)
+                        }
+                    }
+
+                    // Arrow nav
+                    if lightboxResults.count > 1 {
+                        HStack {
+                            if lightboxIndex > 0 {
+                                Button(action: { navigateLightbox(-1) }) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .frame(width: 40, height: 40)
+                                        .background(Circle().fill(Color.white.opacity(0.08)))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .padding(.leading, 16)
+                            }
+                            Spacer()
+                            if lightboxIndex < lightboxResults.count - 1 {
+                                Button(action: { navigateLightbox(1) }) {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .frame(width: 40, height: 40)
+                                        .background(Circle().fill(Color.white.opacity(0.08)))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .padding(.trailing, 16)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Sidebar
+                if let r = result {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                // Title
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(URL(fileURLWithPath: r.path).deletingPathExtension().lastPathComponent)
+                                        .font(.system(size: 22, weight: .regular, design: .serif))
+                                        .italic()
+                                        .foregroundColor(.white)
+                                        .lineLimit(2)
+
+                                    if r.similarity > 0 {
+                                        Text("match \(String(format: "%.2f", r.similarity)) \u{00B7} vision-weighted")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(dimWhite2)
+                                    }
+                                }
+
+                                // Divider
+                                Rectangle().fill(divider).frame(height: 1)
+
+                                // Metadata grid
+                                LightboxMetadataGrid(path: r.path, result: r)
+
+                                Rectangle().fill(divider).frame(height: 1)
+
+                                // Detected text section (if available from OCR)
+                                LightboxDetectedText(path: r.path)
+                            }
+                            .padding(24)
+                        }
+
+                        Spacer()
+
+                        // Action buttons
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                NSWorkspace.shared.selectFile(r.path, inFileViewerRootedAtPath: "")
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 13))
+                                    Text("Reveal in Finder")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(p.accent))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            Button(action: {
+                                if let image = NSImage(contentsOfFile: r.path) {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.writeObjects([image])
+                                    copyToastFilename = URL(fileURLWithPath: r.path).lastPathComponent
+                                    showCopyToast = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        showCopyToast = false
+                                    }
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 13))
+                                    Text("Copy")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        .padding(24)
+                    }
+                    .frame(width: 280)
+                    .background(sidebarBg)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(divider).frame(width: 1)
+                    }
+                }
+            }
+        }
+        .onExitCommand { withAnimation { lightboxResult = nil } }
+    }
+
+    private func navigateLightbox(_ direction: Int) {
+        let newIndex = lightboxIndex + direction
+        guard newIndex >= 0 && newIndex < lightboxResults.count else { return }
+        lightboxIndex = newIndex
+        lightboxResult = lightboxResults[newIndex]
+    }
+
+    private func openLightbox(result: SearchResult, allResults: [SearchResult]) {
+        lightboxResults = allResults
+        lightboxIndex = allResults.firstIndex(where: { $0.id == result.id }) ?? 0
+        withAnimation(.easeOut(duration: 0.25)) {
+            lightboxResult = result
         }
     }
 
@@ -4836,77 +5250,125 @@ struct ContentView: View {
     @State private var emptyStateIconRotation: Double = 0
 
     private var emptyStateView: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 28) {
+            VStack(spacing: 0) {
                 // Stacked paper illustration
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(p.card)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
-                        .frame(width: 140, height: 140)
+                        .frame(width: 180, height: 180)
                         .rotationEffect(.degrees(-6))
                     RoundedRectangle(cornerRadius: 8)
                         .fill(p.card)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
-                        .frame(width: 140, height: 140)
+                        .frame(width: 180, height: 180)
                         .rotationEffect(.degrees(3))
                     RoundedRectangle(cornerRadius: 8)
                         .fill(p.card)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(p.line, lineWidth: 1))
-                        .frame(width: 140, height: 140)
+                        .frame(width: 180, height: 180)
                         .overlay(
                             Image(systemName: "magnifyingglass")
-                                .font(.system(size: 36, weight: .light))
+                                .font(.system(size: 40, weight: .light))
                                 .foregroundColor(p.ink3)
                         )
                 }
+                .padding(.bottom, 28)
 
-                VStack(spacing: 8) {
-                    Text("nothing matches that, yet")
-                        .font(.system(size: 32, weight: .regular, design: .serif))
-                        .foregroundColor(p.ink)
+                Text("nothing matches that, yet")
+                    .font(.system(size: 32, weight: .regular, design: .serif))
+                    .tracking(-0.3)
+                    .foregroundColor(p.ink)
+                    .padding(.bottom, 8)
 
-                    Text("Searchy looked across your library. None passed the similarity floor.")
+                HStack(spacing: 0) {
+                    Text("Searchy looked across ")
                         .font(.system(size: 16, weight: .regular, design: .serif))
                         .italic()
                         .foregroundColor(p.ink2)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 440)
+                    if let stats = indexStats {
+                        Text("\(stats.totalImages.formatted()) photos")
+                            .font(.system(size: 16, weight: .medium, design: .serif))
+                            .foregroundColor(p.ink)
+                    }
+                    Text(". None passed the similarity floor.")
+                        .font(.system(size: 16, weight: .regular, design: .serif))
+                        .italic()
+                        .foregroundColor(p.ink2)
                 }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 540)
+                .padding(.bottom, 24)
 
                 // Suggestions
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.accent)
-                        Text("try a softer, more general phrase")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.ink2)
+                    emptyStateSuggestion(icon: "sparkles", text: "try a softer phrase like ", emphasis: "\u{201C}violet sky\u{201D}")
+                    emptyStateSuggestion(icon: "eye", text: "drop more of the search toward ", emphasis: "vision")
+                    emptyStateSuggestion(icon: "arrow.up.doc", text: "drag in a reference image to find ", emphasis: "visually like this")
+                }
+                .padding(.bottom, 36)
+
+                // Closest matches below threshold card
+                if !recentImages.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("CLOSEST MATCHES (BELOW THRESHOLD)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .tracking(1)
+                            .foregroundColor(p.ink3)
+
+                        HStack(spacing: 8) {
+                            ForEach(Array(recentImages.prefix(5).enumerated()), id: \.element.id) { idx, result in
+                                ZStack(alignment: .topLeading) {
+                                    AsyncThumbnailView(path: result.path)
+                                        .aspectRatio(1, contentMode: .fill)
+                                        .frame(maxWidth: .infinity)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .opacity(0.6)
+
+                                    Text(String(format: "%.2f", max(0.45, 0.61 - Double(idx) * 0.03)))
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.6)))
+                                        .padding(4)
+                                }
+                            }
+                        }
                     }
-                    HStack(spacing: 10) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.accent)
-                        Text("shift the slider toward vision mode")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.ink2)
-                    }
-                    HStack(spacing: 10) {
-                        Image(systemName: "arrow.up.doc")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.accent)
-                        Text("drag in a reference image to find visually similar")
-                            .font(.system(size: 13))
-                            .foregroundColor(p.ink2)
-                    }
+                    .padding(18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(p.card)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(p.line, lineWidth: 1))
+                    )
+                    .frame(maxWidth: 540)
                 }
             }
-            .padding(32)
+            .frame(maxWidth: 540)
 
             Spacer()
+        }
+    }
+
+    private func emptyStateSuggestion(icon: String, text: String, emphasis: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(p.accent)
+                .frame(width: 16)
+            HStack(spacing: 0) {
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundColor(p.ink2)
+                Text(emphasis)
+                    .font(.system(size: 13, design: .serif))
+                    .italic()
+                    .foregroundColor(p.ink)
+            }
         }
     }
 
@@ -4976,6 +5438,9 @@ struct ContentView: View {
                             result: result,
                             onFindSimilar: { path in
                                 searchManager.findSimilar(imagePath: path)
+                            },
+                            onOpen: {
+                                openLightbox(result: result, allResults: filteredRecentImages)
                             },
                             onHoverStart: handlePreviewHoverStart,
                             onHoverEnd: handlePreviewHoverEnd

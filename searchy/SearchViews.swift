@@ -1,6 +1,133 @@
 import SwiftUI
 import Foundation
 
+// MARK: - Lightbox Image (full-size loading)
+struct LightboxImage: View {
+    let path: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image = image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .shadow(color: Color.black.opacity(0.6), radius: 30, y: 30)
+                    .padding(32)
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+                    .colorScheme(.dark)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { loadImage() }
+        .onChange(of: path) { _, _ in loadImage() }
+    }
+
+    private func loadImage() {
+        image = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let img = NSImage(contentsOfFile: path) {
+                DispatchQueue.main.async { self.image = img }
+            }
+        }
+    }
+}
+
+// MARK: - Lightbox Metadata Grid
+struct LightboxMetadataGrid: View {
+    let path: String
+    let result: SearchResult
+    @State private var metadata: [(String, String)] = []
+
+    private let labelColor = Color.white.opacity(0.4)
+    private let valueColor = Color.white.opacity(0.85)
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
+            ForEach(metadata, id: \.0) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.0)
+                        .font(.system(size: 9, weight: .medium))
+                        .tracking(1)
+                        .textCase(.uppercase)
+                        .foregroundColor(labelColor)
+                    Text(item.1)
+                        .font(.system(size: 11))
+                        .foregroundColor(valueColor)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .onAppear { loadMetadata() }
+        .onChange(of: path) { _, _ in loadMetadata() }
+    }
+
+    private func loadMetadata() {
+        DispatchQueue.global(qos: .utility).async {
+            var items: [(String, String)] = []
+            let url = URL(fileURLWithPath: path)
+
+            // Date
+            if let date = result.date {
+                items.append(("Date", date))
+            } else if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                      let modDate = attrs[.modificationDate] as? Date {
+                let fmt = DateFormatter()
+                fmt.dateStyle = .medium
+                items.append(("Date", fmt.string(from: modDate)))
+            }
+
+            // Size
+            if let size = result.size {
+                items.append(("Size", ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))
+            } else if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                      let fileSize = attrs[.size] as? Int64 {
+                items.append(("Size", ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)))
+            }
+
+            // Dimensions
+            if let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+               let props = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+               let w = props[kCGImagePropertyPixelWidth] as? Int,
+               let h = props[kCGImagePropertyPixelHeight] as? Int {
+                items.append(("Dimensions", "\(w)\u{00D7}\(h)"))
+            }
+
+            // Format
+            items.append(("Format", url.pathExtension.uppercased()))
+
+            DispatchQueue.main.async { self.metadata = items }
+        }
+    }
+}
+
+// MARK: - Lightbox Detected Text (OCR)
+struct LightboxDetectedText: View {
+    let path: String
+    @State private var detectedText: String?
+
+    private let labelColor = Color.white.opacity(0.4)
+
+    var body: some View {
+        if let text = detectedText, !text.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("DETECTED TEXT")
+                    .font(.system(size: 10, weight: .medium))
+                    .tracking(1)
+                    .foregroundColor(labelColor)
+                Text("\u{201C}\(text)\u{201D}")
+                    .font(.system(size: 14, design: .serif))
+                    .italic()
+                    .foregroundColor(Color.white.opacity(0.7))
+                    .lineLimit(4)
+            }
+        }
+    }
+}
+
 // MARK: - Masonry Grid (Bento Layout)
 struct MasonryGrid<Content: View, Item: Identifiable>: View {
     let items: [Item]
@@ -231,6 +358,7 @@ struct MasonryImageCard: View {
     let result: SearchResult
     var showSimilarity: Bool = false
     var onFindSimilar: ((String) -> Void)? = nil
+    var onOpen: (() -> Void)? = nil
     var onHoverStart: ((SearchResult) -> Void)? = nil
     var onHoverEnd: (() -> Void)? = nil
 
@@ -277,7 +405,13 @@ struct MasonryImageCard: View {
                     onHoverEnd?()
                 }
             }
-            .onTapGesture(count: 2) { handleCopy() }
+            .onTapGesture(count: 2) {
+                if let onOpen = onOpen {
+                    onOpen()
+                } else {
+                    handleCopy()
+                }
+            }
             .contextMenu { masonryContextMenu }
             .onAppear {
                 loadMasonryThumbnail()
@@ -2527,6 +2661,7 @@ struct ImageCard: View {
     var showSimilarity: Bool = false
     var cardHeight: CGFloat = 200
     var onFindSimilar: ((String) -> Void)? = nil
+    var onOpen: (() -> Void)? = nil
     @State private var isFavorite: Bool = false
 
     @State private var isHovered = false
@@ -2563,7 +2698,13 @@ struct ImageCard: View {
                     isHovered = hovering
                 }
             }
-            .onTapGesture(count: 2) { gridHandleCopy() }
+            .onTapGesture(count: 2) {
+                if let onOpen = onOpen {
+                    onOpen()
+                } else {
+                    gridHandleCopy()
+                }
+            }
             .contextMenu { gridContextMenu }
             .onAppear {
                 isFavorite = FavoritesManager.shared.isFavorite(result.path)
@@ -2825,6 +2966,122 @@ struct ImageCard: View {
             withApplicationAt: URL(fileURLWithPath: "/System/Applications/Preview.app"),
             configuration: NSWorkspace.OpenConfiguration()
         )
+    }
+}
+
+// MARK: - Favorite Image Tile (heart overlay, for Favorites grid)
+struct FavoriteImageTile: View {
+    let result: SearchResult
+    var onFindSimilar: ((String) -> Void)? = nil
+    @State private var thumbnail: NSImage?
+    @State private var isHovered = false
+    private var pal: AtelierPalette { ThemeManager.shared.palette }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            // Image
+            GeometryReader { geo in
+                if let image = thumbnail {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                } else {
+                    Rectangle()
+                        .fill(pal.line.opacity(0.3))
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            // Heart overlay
+            ZStack {
+                Circle()
+                    .fill(Color.black.opacity(0.55))
+                    .frame(width: 26, height: 26)
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(pal.accent)
+            }
+            .padding(8)
+
+            // Hover overlay with actions
+            if isHovered {
+                VStack {
+                    Spacer()
+                    ZStack(alignment: .bottom) {
+                        LinearGradient(colors: [.clear, Color.black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent)
+                                .font(.system(size: 14, design: .serif).italic())
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+
+                            HStack(spacing: 8) {
+                                Button(action: {
+                                    NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+                                }) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
+                                if let findSimilar = onFindSimilar {
+                                    Button(action: { findSimilar(result.path) }) {
+                                        Image(systemName: "sparkle.magnifyingglass")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.85))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+
+                                Spacer()
+
+                                Button(action: {
+                                    FavoritesManager.shared.toggleFavorite(result.path)
+                                }) {
+                                    Image(systemName: "heart.slash")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.85))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 8)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .transition(.opacity)
+            }
+        }
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.2)) { isHovered = hovering }
+        }
+        .contextMenu {
+            Button(action: {
+                NSWorkspace.shared.selectFile(result.path, inFileViewerRootedAtPath: "")
+            }) { Label("Reveal in Finder", systemImage: "folder") }
+            if let findSimilar = onFindSimilar {
+                Button(action: { findSimilar(result.path) }) {
+                    Label("Find Similar", systemImage: "sparkle.magnifyingglass")
+                }
+            }
+            Divider()
+            Button(action: {
+                FavoritesManager.shared.toggleFavorite(result.path)
+            }) { Label("Remove from Favorites", systemImage: "heart.slash") }
+        }
+        .onAppear { loadThumbnail() }
+    }
+
+    private func loadThumbnail() {
+        ThumbnailService.shared.loadThumbnail(for: result.path, maxSize: 400) { thumb in
+            self.thumbnail = thumb
+        }
     }
 }
 
