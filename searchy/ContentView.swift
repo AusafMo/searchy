@@ -17,6 +17,7 @@ struct ContentView: View {
     @ObservedObject private var searchManager = SearchManager.shared
     @ObservedObject private var duplicatesManager = DuplicatesManager.shared
     @ObservedObject private var favoritesManager = FavoritesManager.shared
+    @ObservedObject private var galleryManager = GalleryManager.shared
     @ObservedObject private var faceManager = FaceManager.shared
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var modelSettings = ModelSettings.shared
@@ -139,20 +140,29 @@ struct ContentView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
-                    // Main content area based on active tab
-                    switch activeTab {
-                    case .faces:
-                        facesTabContent
-                    case .search:
-                        searchTabContent
-                    case .volumes:
-                        volumesTabContent
-                    case .duplicates:
-                        duplicatesTabContent
-                    case .favorites:
-                        favoritesTabContent
-                    case .setup:
-                        setupTabContent
+                    // Main content area based on active tab, with global search overlay
+                    ZStack {
+                        switch activeTab {
+                        case .faces:
+                            facesTabContent
+                        case .search:
+                            searchTabContent
+                        case .volumes:
+                            volumesTabContent
+                        case .duplicates:
+                            duplicatesTabContent
+                        case .gallery:
+                            galleryTabContent
+                        case .setup:
+                            setupTabContent
+                        }
+
+                        // Global search results overlay (non-search tabs)
+                        if showGlobalSearchOverlay {
+                            globalSearchOverlay
+                                .transition(.opacity)
+                                .animation(.easeInOut(duration: 0.15), value: showGlobalSearchOverlay)
+                        }
                     }
                 }
             }
@@ -206,6 +216,14 @@ struct ContentView: View {
             modelPollTimer?.invalidate()
             modelPollTimer = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: .galleryOpenLightbox)) { notification in
+            if let path = notification.userInfo?["path"] as? String {
+                let result = SearchResult(path: path, similarity: 1.0)
+                // Build the results list from current gallery items for arrow navigation
+                let allResults = galleryManager.allItems.map { $0.toSearchResult() }
+                openLightbox(result: result, allResults: allResults)
+            }
+        }
     }
 
     // MARK: - Atelier Sidebar
@@ -215,7 +233,7 @@ struct ContentView: View {
             (.search,     "Searchy",    "magnifyingglass",     indexStats?.totalImages, false),
             (.volumes,    "Volumes",    "externaldrive",       nil, false),
             (.duplicates, "Duplicates", "doc.on.doc",          duplicatesManager.groups.count > 0 ? duplicatesManager.groups.count : nil, duplicatesManager.groups.count > 0),
-            (.favorites,  "Favorites",  "heart",               favoritesManager.favorites.count > 0 ? favoritesManager.favorites.count : nil, false),
+            (.gallery,    "Gallery",    "photo.on.rectangle",  galleryManager.totalItemCount > 0 ? galleryManager.totalItemCount : nil, false),
             (.setup,      "Setup",      "slider.horizontal.3", nil, false),
         ]
 
@@ -378,6 +396,9 @@ struct ContentView: View {
     // MARK: - Compact Header (replaces old modernHeader)
     private var atelierHeader: some View {
         HStack(spacing: 8) {
+            // Global search bar — always visible
+            globalSearchBar
+
             Spacer()
 
             // Model loading indicator
@@ -501,6 +522,150 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Global Search Bar (Header)
+    @FocusState private var isGlobalSearchFocused: Bool
+
+    /// Whether the global search overlay should show results (non-search tabs only)
+    private var showGlobalSearchOverlay: Bool {
+        activeTab != .search && (!searchText.isEmpty || !searchManager.results.isEmpty)
+    }
+
+    private var globalSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(isGlobalSearchFocused || !searchText.isEmpty ? p.accent : p.ink3)
+
+            TextField("search across everything...", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.system(size: 13, weight: .regular, design: .serif))
+                .foregroundColor(p.ink)
+                .focused($isGlobalSearchFocused)
+                .onSubmit {
+                    if !searchManager.isSearching && !searchText.isEmpty {
+                        performSearch()
+                    }
+                }
+                .onChange(of: searchText) { oldValue, newValue in
+                    // Only handle search debounce from global bar when NOT on search tab
+                    // (search tab's modernSearchBar handles its own onChange)
+                    guard activeTab != .search else { return }
+
+                    if pastedImage != nil && !newValue.isEmpty {
+                        pastedImage = nil
+                    }
+                    searchDebounceTimer?.invalidate()
+                    searchDebounceTimer = nil
+                    if newValue.isEmpty {
+                        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+                            DispatchQueue.main.async {
+                                self.searchDebounceTimer = nil
+                                self.searchManager.clearResults()
+                            }
+                        }
+                        return
+                    }
+                    searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { _ in
+                        DispatchQueue.main.async {
+                            self.searchDebounceTimer = nil
+                        }
+                        if !searchManager.isSearching && !newValue.isEmpty {
+                            performSearch()
+                        }
+                    }
+                }
+
+            if searchManager.isSearching {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .transition(.opacity)
+            } else if !searchText.isEmpty || !searchManager.results.isEmpty {
+                Button(action: {
+                    searchText = ""
+                    pastedImage = nil
+                    searchDebounceTimer?.invalidate()
+                    searchDebounceTimer = nil
+                    searchManager.clearResults()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .transition(.opacity)
+            }
+
+            // Keyboard shortcut hint
+            if searchText.isEmpty {
+                Text("\u{2318}K")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(p.ink3)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(p.sidebar)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(p.line, lineWidth: 1))
+                    )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(p.paper)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isGlobalSearchFocused || !searchText.isEmpty ? p.accent.opacity(0.5) : p.line, lineWidth: 1)
+                )
+        )
+        .frame(maxWidth: 400)
+    }
+
+    /// Overlay that shows search results on top of any non-search tab
+    private var globalSearchOverlay: some View {
+        VStack(spacing: 0) {
+            // Filter bar
+            filterBar
+                .padding(.top, 8)
+                .opacity(searchManager.results.isEmpty ? 0 : (searchManager.isSearching ? 0.5 : 1.0))
+                .frame(height: searchManager.results.isEmpty ? 0 : nil)
+                .clipped()
+
+            // Results
+            if searchManager.isSearching && searchManager.results.isEmpty {
+                VStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            } else if searchManager.isSearching && !searchManager.results.isEmpty {
+                ScrollView {
+                    filteredResultsList
+                        .padding(.horizontal, 24)
+                }
+                .opacity(0.4)
+            } else if !searchManager.results.isEmpty {
+                ScrollView {
+                    filteredResultsList
+                        .padding(.horizontal, 24)
+                }
+            } else {
+                // Searching but no results yet — empty state
+                VStack {
+                    Spacer()
+                    Text("nothing matches that, yet")
+                        .font(.system(size: 20, weight: .regular, design: .serif))
+                        .foregroundColor(p.ink2)
+                    Spacer()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(p.paper)
+        .padding(.top, 4)
     }
 
     // MARK: - Faces Tab Content
@@ -2588,6 +2753,11 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Gallery Tab Content
+    private var galleryTabContent: some View {
+        GalleryTabContent()
+    }
+
     // MARK: - Favorites Tab Content
     private var favoritesTabContent: some View {
         VStack(spacing: 0) {
@@ -4575,7 +4745,6 @@ struct ContentView: View {
                         searchDebounceTimer?.invalidate()
                         searchDebounceTimer = nil
                         if newValue.isEmpty {
-                            // Delay clearing so layout doesn't jump immediately
                             searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
                                 DispatchQueue.main.async {
                                     self.searchDebounceTimer = nil
@@ -5916,7 +6085,7 @@ struct ContentView: View {
 
     // MARK: - Image Paste/Drop Handling
     private func setupPasteMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { (event: NSEvent) -> NSEvent? in
             // Check for Backspace/Delete to clear pasted image
             if self.pastedImage != nil && (event.keyCode == 51 || event.keyCode == 117) {
                 DispatchQueue.main.async {
@@ -5926,11 +6095,14 @@ struct ContentView: View {
                 return nil // Consume the event
             }
 
-            // Check for Cmd+K (focus search)
+            // Check for Cmd+K (focus global search bar)
             if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "k" {
                 DispatchQueue.main.async {
-                    self.activeTab = .search
-                    self.isSearchFocused = true
+                    if self.activeTab == .search {
+                        self.isSearchFocused = true
+                    } else {
+                        self.isGlobalSearchFocused = true
+                    }
                 }
                 return nil
             }
@@ -5938,7 +6110,7 @@ struct ContentView: View {
             // Check for Cmd+1-6 (switch tabs)
             if event.modifierFlags.contains(.command), let chars = event.charactersIgnoringModifiers, chars.count == 1,
                let digit = chars.first?.wholeNumberValue, digit >= 1 && digit <= 6 {
-                let tabs: [AppTab] = [.faces, .search, .volumes, .duplicates, .favorites, .setup]
+                let tabs: [AppTab] = [.faces, .search, .volumes, .duplicates, .gallery, .setup]
                 DispatchQueue.main.async {
                     self.activeTab = tabs[digit - 1]
                 }
@@ -5978,6 +6150,15 @@ struct ContentView: View {
                 if self.showPreviewPanel {
                     DispatchQueue.main.async {
                         withAnimation { self.showPreviewPanel = false }
+                    }
+                    return nil
+                }
+                // Dismiss global search overlay
+                if self.showGlobalSearchOverlay {
+                    DispatchQueue.main.async {
+                        self.searchText = ""
+                        self.searchManager.clearResults()
+                        self.isGlobalSearchFocused = false
                     }
                     return nil
                 }

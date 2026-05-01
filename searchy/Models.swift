@@ -111,22 +111,100 @@ struct IndexStats {
     let lastModified: Date?
 }
 
+// MARK: - Gallery Models
+
+enum MediaType: String, Codable {
+    case image
+    case video
+}
+
+struct GalleryItem: Identifiable, Hashable {
+    let id: String              // file path as stable ID
+    let path: String
+    let fileName: String
+    let fileExtension: String
+    let size: Int64
+    let modificationDate: Date
+    let mediaType: MediaType
+    var duration: Double?       // seconds, nil for images
+    var dateGroupKey: String    // "Today", "Yesterday", "April 2026"
+
+    static let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "heic"]
+    static let videoExtensions: Set<String> = ["mp4", "mov", "avi", "mkv"]
+    static let allExtensions: Set<String> = imageExtensions.union(videoExtensions)
+
+    func toSearchResult() -> SearchResult {
+        SearchResult(
+            path: path,
+            similarity: 1.0,
+            size: Int(size),
+            date: ISO8601DateFormatter().string(from: modificationDate),
+            type: fileExtension
+        )
+    }
+
+    static func dateGroupKey(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: date)
+    }
+}
+
+enum FolderKind: String, Codable {
+    case favorites
+    case screenshots
+    case whatsapp
+    case telegram
+    case downloads
+    case userCreated
+}
+
+struct GalleryFolder: Codable, Identifiable {
+    let id: UUID
+    var name: String
+    var icon: String
+    var kind: FolderKind
+    var paths: [String]
+    var directoryPath: String?
+    var itemCount: Int
+
+    var isAutoDetected: Bool { kind != .userCreated && kind != .favorites }
+
+    init(id: UUID = UUID(), name: String, icon: String, kind: FolderKind, paths: [String] = [], directoryPath: String? = nil, itemCount: Int = 0) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.kind = kind
+        self.paths = paths
+        self.directoryPath = directoryPath
+        self.itemCount = itemCount
+    }
+}
+
+enum GallerySubView: String {
+    case photos
+    case folders
+}
+
 // MARK: - App Tabs
 enum AppTab: String, CaseIterable {
     case faces = "Faces"
     case search = "Searchy"
     case volumes = "Volumes"
     case duplicates = "Duplicates"
-    case favorites = "Favorites"
+    case gallery = "Gallery"
     case setup = "Setup"
 
     var icon: String {
         switch self {
-        case .faces: return "person.2"
+        case .faces: return "person"
         case .search: return "magnifyingglass"
         case .volumes: return "externaldrive"
         case .duplicates: return "doc.on.doc"
-        case .favorites: return "heart.fill"
+        case .gallery: return "photo.on.rectangle"
         case .setup: return "slider.horizontal.3"
         }
     }
