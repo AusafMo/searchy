@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from constants import DEFAULT_DATA_DIR, DEFAULT_TOP_K, DEFAULT_OCR_WEIGHT, DEFAULT_SIMILARITY_THRESHOLD, OCR_TEXT_PREVIEW_LENGTH, LARGE_BATCH_SIZE
+from similarity_search import bm25_score, _build_corpus_stats
 from utils import is_user_image, load_image_index, UnionFind
 
 router = APIRouter()
@@ -182,7 +183,7 @@ def search(request: SearchRequest):
 
 @router.post("/text-search")
 def text_search(request: TextSearchRequest):
-    """Search images by OCR text only (no semantic search)."""
+    """Search images by OCR text using BM25 scoring."""
     try:
         logger.info(f"Received text search request: {request.query}")
         start_time = time.time()
@@ -194,24 +195,17 @@ def text_search(request: TextSearchRequest):
         image_paths = data['image_paths']
         ocr_texts = data.get('ocr_texts', [''] * len(image_paths))
 
-        query_lower = request.query.lower()
-        results = []
+        # Pre-compute BM25 corpus stats
+        avg_doc_len, doc_count, doc_freq = _build_corpus_stats(ocr_texts)
 
+        results = []
         for i, (path, ocr_text) in enumerate(zip(image_paths, ocr_texts)):
             if not ocr_text:
                 continue
 
-            ocr_lower = ocr_text.lower()
-            if query_lower in ocr_lower:
-                score = 1.0
-            else:
-                query_words = set(query_lower.split())
-                ocr_words = set(ocr_lower.split())
-                matches = len(query_words & ocr_words)
-                if matches > 0:
-                    score = matches / len(query_words)
-                else:
-                    continue
+            score = bm25_score(request.query, ocr_text, avg_doc_len, doc_count, doc_freq)
+            if score <= 0:
+                continue
 
             if is_user_image(path):
                 metadata = get_file_metadata(path)
@@ -225,6 +219,14 @@ def text_search(request: TextSearchRequest):
                 })
 
         results.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # Normalize BM25 scores to 0-1 for display
+        if results:
+            max_score = results[0]["similarity"]
+            if max_score > 0:
+                for r in results:
+                    r["similarity"] = r["similarity"] / max_score
+
         results = results[:request.top_k]
 
         total_time = time.time() - start_time

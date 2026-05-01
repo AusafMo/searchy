@@ -2317,7 +2317,7 @@ struct ContentView: View {
 
                     Button(action: {
                         // Load the default model
-                        modelSettings.changeModel(to: "openai/clip-vit-base-patch32") { _, _ in }
+                        modelSettings.changeModel(to: "google/siglip2-base-patch16-224") { _, _ in }
                     }) {
                         HStack(spacing: 4) {
                             Image(systemName: "play.fill")

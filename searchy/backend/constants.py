@@ -30,9 +30,46 @@ DEFAULT_TOP_K = 20
 DEFAULT_OCR_WEIGHT = 0.3
 DEFAULT_SIMILARITY_THRESHOLD = 0.95  # For duplicate detection
 
+# ─── Reciprocal Rank Fusion (Cormack et al., SIGIR 2009) ─
+RRF_K = 60  # Smoothing constant; standard value from the original paper
+
+# ─── BM25 Parameters (Robertson et al.) ─────────────────
+BM25_K1 = 1.2   # Term-frequency saturation
+BM25_B = 0.75   # Document-length normalization
+
+# ─── Prompt Ensembling (Radford et al., 2021) ───────────
+PROMPT_TEMPLATES = [
+    "{}",
+    "a photo of {}",
+    "a picture of {}",
+    "an image of {}",
+    "a photograph showing {}",
+    "a close-up photo of {}",
+    "a screenshot of {}",
+]
+
+# ─── Query Expansion ────────────────────────────────────
+VISUAL_DESCRIPTORS = {
+    "cat": ["kitten", "feline", "tabby"],
+    "dog": ["puppy", "canine", "hound"],
+    "car": ["automobile", "vehicle", "sedan"],
+    "person": ["human", "people", "man", "woman"],
+    "food": ["meal", "dish", "cuisine", "plate"],
+    "sunset": ["sunrise", "dusk", "dawn", "golden hour"],
+    "beach": ["shore", "coast", "seaside", "ocean"],
+    "mountain": ["hill", "peak", "summit", "ridge"],
+    "flower": ["blossom", "bloom", "petal", "bouquet"],
+    "building": ["architecture", "structure", "house", "tower"],
+    "tree": ["forest", "woods", "branch", "leaf"],
+    "water": ["lake", "river", "ocean", "sea", "pond"],
+    "sky": ["clouds", "horizon", "atmosphere"],
+    "snow": ["winter", "ice", "frost", "blizzard"],
+    "night": ["dark", "evening", "moonlight", "stars"],
+}
+
 # ─── Model ────────────────────────────────────────────────
 DEFAULT_EMBEDDING_DIM = 512
-DEFAULT_MODEL_NAME = "openai/clip-vit-base-patch32"
+DEFAULT_MODEL_NAME = "google/siglip2-base-patch16-224"
 
 # ─── TTL ──────────────────────────────────────────────────
 TTL_CHECK_INTERVAL = 30  # Seconds between TTL checks
