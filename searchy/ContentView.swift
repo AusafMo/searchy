@@ -1279,10 +1279,10 @@ struct ContentView: View {
                         }
                     }
                     } // ScrollViewReader
-
-                    // Floating selection action bar
-                    if !selectedPeopleIds.isEmpty {
-                        selectionActionBar
+                    .overlay(alignment: .bottom) {
+                        if !selectedPeopleIds.isEmpty {
+                            selectionActionBar
+                        }
                     }
                 }
             }
@@ -1351,9 +1351,7 @@ struct ContentView: View {
     @State private var newGroupName = ""
 
     private var selectionActionBar: some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 16) {
+        HStack(spacing: 16) {
                 // Hide/Unhide button
                 Button(action: {
                     Task {
@@ -1448,8 +1446,7 @@ struct ContentView: View {
                     .fill(Color.black.opacity(0.85))
                     .shadow(color: Color.black.opacity(0.3), radius: 10, y: 4)
             )
-            .padding(.bottom, 16)
-        }
+            .padding(.bottom, 24)
     }
 
     private var bulkMergeSheet: some View {

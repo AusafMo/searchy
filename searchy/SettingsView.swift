@@ -1381,8 +1381,10 @@ struct SettingsView: View {
                                 }) {
                                     Text(option.label)
                                         .font(.system(size: 12, weight: modelTTL == option.value ? .semibold : .regular))
+                                        .lineLimit(1)
+                                        .fixedSize()
                                         .foregroundColor(modelTTL == option.value ? .white : pal.ink2)
-                                        .padding(.horizontal, 12)
+                                        .padding(.horizontal, 14)
                                         .padding(.vertical, 6)
                                         .background(
                                             Capsule()
