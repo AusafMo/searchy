@@ -151,10 +151,19 @@ class ModelSettings: ObservableObject {
     private init() {
         // Pre-populate with known models (will be updated from server)
         availableModels = [
+            // SigLIP 2 (Google, 2025) — recommended
+            CLIPModelInfo(id: "google/siglip2-base-patch16-224", name: "SigLIP 2 B/16", description: "Recommended -- better retrieval than CLIP, same speed", embeddingDim: 768, sizeMB: 850),
+            CLIPModelInfo(id: "google/siglip2-large-patch16-256", name: "SigLIP 2 L/16", description: "High accuracy SigLIP 2, 256px input", embeddingDim: 1024, sizeMB: 1800),
+            CLIPModelInfo(id: "google/siglip2-so400m-patch14-384", name: "SigLIP 2 SO400M/14", description: "Largest SigLIP 2, best quality", embeddingDim: 1152, sizeMB: 3600),
+            // Meta PE-Core (2025) — SOTA
+            CLIPModelInfo(id: "facebook/PE-Core-B16-224", name: "PE-Core B/16", description: "Meta SOTA -- best zero-shot retrieval (requires open_clip)", embeddingDim: 512, sizeMB: 600),
+            CLIPModelInfo(id: "facebook/PE-Core-L14-336", name: "PE-Core L/14", description: "Meta SOTA large -- highest retrieval accuracy", embeddingDim: 768, sizeMB: 1700),
+            // OpenAI CLIP (2021) — baseline
             CLIPModelInfo(id: "openai/clip-vit-base-patch32", name: "CLIP ViT-B/32", description: "Fast, good balance of speed and accuracy", embeddingDim: 512, sizeMB: 605),
             CLIPModelInfo(id: "openai/clip-vit-base-patch16", name: "CLIP ViT-B/16", description: "More accurate than B/32, slower", embeddingDim: 512, sizeMB: 605),
             CLIPModelInfo(id: "openai/clip-vit-large-patch14", name: "CLIP ViT-L/14", description: "High accuracy, requires more memory", embeddingDim: 768, sizeMB: 1710),
-            CLIPModelInfo(id: "openai/clip-vit-large-patch14-336", name: "CLIP ViT-L/14@336px", description: "Highest accuracy, processes 336px images", embeddingDim: 768, sizeMB: 1710),
+            CLIPModelInfo(id: "openai/clip-vit-large-patch14-336", name: "CLIP ViT-L/14@336px", description: "Highest CLIP accuracy, processes 336px images", embeddingDim: 768, sizeMB: 1710),
+            // LAION OpenCLIP
             CLIPModelInfo(id: "laion/CLIP-ViT-B-32-laion2B-s34B-b79K", name: "LAION CLIP ViT-B/32", description: "Trained on LAION-2B dataset", embeddingDim: 512, sizeMB: 605),
             CLIPModelInfo(id: "laion/CLIP-ViT-H-14-laion2B-s32B-b79K", name: "LAION CLIP ViT-H/14", description: "Large model, very accurate", embeddingDim: 1024, sizeMB: 3940)
         ]
