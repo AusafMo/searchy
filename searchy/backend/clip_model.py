@@ -96,7 +96,7 @@ AVAILABLE_MODELS = {
     "google/siglip2-base-patch16-224": {
         "name": "SigLIP 2 B/16",
         "family": "siglip2",
-        "description": "Recommended — better retrieval than CLIP, same speed",
+        "description": "Recommended — best quality/size ratio",
         "embedding_dim": 768,
         "size_mb": 850
     },
@@ -133,7 +133,7 @@ AVAILABLE_MODELS = {
     "openai/clip-vit-base-patch32": {
         "name": "CLIP ViT-B/32",
         "family": "clip",
-        "description": "Fast, good balance of speed and accuracy",
+        "description": "Recommended — fast, good retrieval accuracy",
         "embedding_dim": 512,
         "size_mb": 605
     },
@@ -208,7 +208,18 @@ class ModelManager:
         self._model_lock = threading.Lock()  # Prevent concurrent model changes
         self._last_used_at = None  # Timestamp of last model usage
         self._ttl_minutes = 0  # 0 = never unload
+        self._logit_scale = None  # SigLIP logit scale parameter
+        self._logit_bias = None   # SigLIP logit bias parameter
         self._initialized = True
+
+        # Download progress tracking
+        self.download_status = {
+            "is_downloading": False,
+            "model_name": None,
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "phase": "",  # "downloading", "loading"
+        }
 
     def set_config_path(self, path: str):
         """Set the path for configuration persistence."""
@@ -327,11 +338,103 @@ class ModelManager:
         classes = _ensure_transformers(family)
         ModelClass, ProcessorClass = classes
 
-        self._model = ModelClass.from_pretrained(model_name, token=False)
-        self._processor = ProcessorClass.from_pretrained(model_name, token=False)
+        # Pre-download with progress tracking if not cached
+        self._download_if_needed(model_name)
+
+        self.download_status["phase"] = "loading"
+        self.download_status["is_downloading"] = False
+        # Try explicit model class first, fall back to AutoModel.
+        # SigLIP2 models need special handling since their HF configs may
+        # report model_type="siglip" causing class mismatches.
+        from transformers import AutoModel, AutoProcessor
+        try:
+            self._model = ModelClass.from_pretrained(model_name, token=False)
+            self._processor = ProcessorClass.from_pretrained(model_name, token=False)
+        except Exception:
+            # Fall back to AutoModel which reads the config's model_type
+            self._model = AutoModel.from_pretrained(model_name, token=False)
+            self._processor = AutoProcessor.from_pretrained(model_name, token=False)
         self._model = self._model.to(device)
         self._model.eval()
         self._tokenizer = None  # Not used for HF models
+
+        # Extract logit_scale and logit_bias for SigLIP models.
+        # SigLIP uses sigmoid loss: similarity = sigmoid(scale * cosine + bias)
+        # Without these, raw cosine sims are near-zero and indistinguishable.
+        self._logit_scale = None
+        self._logit_bias = None
+        if hasattr(self._model, 'logit_scale'):
+            self._logit_scale = self._model.logit_scale.detach().cpu().item()
+        if hasattr(self._model, 'logit_bias'):
+            self._logit_bias = self._model.logit_bias.detach().cpu().item()
+
+        self.download_status["phase"] = ""
+
+    def _download_if_needed(self, model_name: str):
+        """Pre-download model files with progress tracking."""
+        try:
+            from huggingface_hub import snapshot_download, try_to_load_from_cache
+            from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
+
+            # Quick check: if model.safetensors is already cached, skip
+            cached = try_to_load_from_cache(model_name, "model.safetensors")
+            if cached is not None and (not isinstance(cached, str) or os.path.exists(cached)):
+                print(f"Model {model_name} already cached", file=sys.stderr)
+                return
+
+            # Get model size from our registry
+            model_info = AVAILABLE_MODELS.get(model_name, {})
+            total_mb = model_info.get("size_mb", 0)
+            total_bytes = total_mb * 1024 * 1024
+
+            self.download_status.update({
+                "is_downloading": True,
+                "model_name": model_name,
+                "downloaded_bytes": 0,
+                "total_bytes": total_bytes,
+                "phase": "downloading",
+            })
+
+            print(f"Downloading model {model_name} (~{total_mb} MB)...", file=sys.stderr)
+
+            # Use tqdm_class to intercept download progress
+            import tqdm as tqdm_module
+
+            # Track cumulative progress across all files
+            cumulative_downloaded = {"value": 0, "current_file_done": 0}
+
+            class ProgressTracker(tqdm_module.tqdm):
+                def __init__(self_, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    # Don't override total_bytes — keep the registry value
+                    # Each tqdm instance is a single file, not the whole model
+                    cumulative_downloaded["current_file_done"] = 0
+
+                def update(self_, n=1):
+                    super().update(n)
+                    cumulative_downloaded["current_file_done"] = self_.n
+                    self.download_status["downloaded_bytes"] = (
+                        cumulative_downloaded["value"] + cumulative_downloaded["current_file_done"]
+                    )
+
+                def close(self_):
+                    cumulative_downloaded["value"] += cumulative_downloaded["current_file_done"]
+                    cumulative_downloaded["current_file_done"] = 0
+                    super().close()
+
+            snapshot_download(
+                model_name,
+                token=False,
+                tqdm_class=ProgressTracker,
+            )
+
+            self.download_status["is_downloading"] = False
+            print(f"Download complete: {model_name}", file=sys.stderr)
+
+        except Exception as e:
+            self.download_status["is_downloading"] = False
+            self.download_status["phase"] = ""
+            print(f"Download pre-check failed (will try from_pretrained): {e}", file=sys.stderr)
 
     def _load_pe_core(self, model_name: str, device: torch.device):
         """Load a Meta PE-Core model via open_clip."""
@@ -414,9 +517,11 @@ class ModelManager:
 
     def ensure_loaded(self):
         """Ensure a model is loaded, loading the default if necessary."""
-        self._touch()
-        if self._model is None:
+        if self._model is None or self._processor is None:
             self.load_model()
+        if self._model is None or self._processor is None:
+            raise RuntimeError("Failed to load model — processor unavailable")
+        self._touch()
 
     @property
     def is_loaded(self) -> bool:
@@ -435,6 +540,40 @@ class ModelManager:
             return AVAILABLE_MODELS[self._current_model_name]["embedding_dim"]
         return 512  # Default fallback
 
+    def cosine_to_display_score(self, cosine_scores: 'np.ndarray') -> 'np.ndarray':
+        """Convert raw cosine similarities to 0-1 display scores.
+
+        Combines absolute calibration (model's logit_scale) with relative
+        ranking so that:
+        - Good matches get high scores (~0.7-0.95)
+        - "Best of garbage" stays below threshold (~0.3-0.5)
+        - Scores are model-agnostic via logit_scale
+
+        The 50% blend of absolute and relative means that even when nothing
+        matches well, the absolute component keeps scores low.
+        """
+        if len(cosine_scores) == 0:
+            return cosine_scores
+
+        # Absolute component: scale * cosine, amplified to usable range
+        # SigLIP2: scale=4.72, good cosine=0.12 → absolute=0.57
+        # CLIP: scale=4.6, good cosine=0.30 → absolute=1.0 (clamped)
+        scale = self._logit_scale if self._logit_scale is not None else 3.0
+        absolute = np.clip(scale * cosine_scores, 0.0, 1.0)
+
+        # Relative component: rank within this query's results
+        top = float(np.max(cosine_scores))
+        median = float(np.median(cosine_scores))
+        spread = top - median
+        if spread > 1e-6:
+            relative = np.clip((cosine_scores - median) / spread, 0.0, 1.0)
+        else:
+            relative = np.zeros_like(cosine_scores)
+
+        # Blend: 85% absolute (prevents garbage from looking good)
+        #        15% relative (differentiates close matches)
+        return np.clip(0.85 * absolute + 0.15 * relative, 0.0, 1.0)
+
     def get_text_embedding(self, text: str) -> Optional[np.ndarray]:
         """Generate normalized embedding for text query."""
         self.ensure_loaded()
@@ -449,7 +588,11 @@ class ModelManager:
 
     def _get_text_embedding_hf(self, text: str) -> np.ndarray:
         """Text embedding via HuggingFace transformers (CLIP, SigLIP, SigLIP 2)."""
-        inputs = self._processor(text=text, return_tensors="pt", padding=True, truncation=True)
+        # SigLIP2 requires fixed-length padding (HF issues #43054, #43994)
+        if self._current_family == "siglip2":
+            inputs = self._processor(text=text, return_tensors="pt", padding="max_length", max_length=64, truncation=True)
+        else:
+            inputs = self._processor(text=text, return_tensors="pt", padding=True, truncation=True)
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
 
         with torch.no_grad():

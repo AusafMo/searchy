@@ -64,6 +64,11 @@ class GalleryManager: ObservableObject {
         setupSearchDebounce()
     }
 
+    deinit {
+        scanTask?.cancel()
+        searchTask?.cancel()
+    }
+
     // MARK: - Search Debounce
 
     private func setupSearchDebounce() {

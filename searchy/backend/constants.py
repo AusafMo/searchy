@@ -43,32 +43,20 @@ PROMPT_TEMPLATES = [
     "a photo of {}",
     "a picture of {}",
     "an image of {}",
-    "a photograph showing {}",
-    "a close-up photo of {}",
-    "a screenshot of {}",
 ]
 
 # ─── Query Expansion ────────────────────────────────────
+# Kept minimal — only synonyms that are genuinely interchangeable.
+# Aggressive expansion (sunset→sunrise, car→sedan) dilutes multi-word queries.
 VISUAL_DESCRIPTORS = {
-    "cat": ["kitten", "feline", "tabby"],
-    "dog": ["puppy", "canine", "hound"],
-    "car": ["automobile", "vehicle", "sedan"],
-    "person": ["human", "people", "man", "woman"],
-    "food": ["meal", "dish", "cuisine", "plate"],
-    "sunset": ["sunrise", "dusk", "dawn", "golden hour"],
-    "beach": ["shore", "coast", "seaside", "ocean"],
-    "mountain": ["hill", "peak", "summit", "ridge"],
-    "flower": ["blossom", "bloom", "petal", "bouquet"],
-    "building": ["architecture", "structure", "house", "tower"],
-    "tree": ["forest", "woods", "branch", "leaf"],
-    "water": ["lake", "river", "ocean", "sea", "pond"],
-    "sky": ["clouds", "horizon", "atmosphere"],
-    "snow": ["winter", "ice", "frost", "blizzard"],
-    "night": ["dark", "evening", "moonlight", "stars"],
+    "cat": ["kitten", "feline"],
+    "dog": ["puppy", "canine"],
+    "person": ["human", "people"],
+    "flower": ["blossom", "bloom"],
 }
 
 # ─── Model ────────────────────────────────────────────────
-DEFAULT_EMBEDDING_DIM = 512
+DEFAULT_EMBEDDING_DIM = 512  # CLIP ViT-B/32
 DEFAULT_MODEL_NAME = "google/siglip2-base-patch16-224"
 
 # ─── TTL ──────────────────────────────────────────────────

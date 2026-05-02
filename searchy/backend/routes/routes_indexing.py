@@ -51,6 +51,8 @@ def notify_new_image(request: NotifyNewImageRequest):
     """Notify that a new image was detected (before indexing)."""
     from server import pending_images
 
+    from server import pending_images_lock
+
     file_path = request.file_path
 
     if not os.path.exists(file_path):
@@ -60,10 +62,12 @@ def notify_new_image(request: NotifyNewImageRequest):
         return {"status": "skipped", "message": "Not a user image"}
 
     detection_time = request.detection_time or time.time()
-    pending_images[file_path] = detection_time
+    with pending_images_lock:
+        pending_images[file_path] = detection_time
+        count = len(pending_images)
 
     logger.info(f"New image detected (pending): {os.path.basename(file_path)}")
-    return {"status": "ok", "pending_count": len(pending_images)}
+    return {"status": "ok", "pending_count": count}
 
 
 @router.post("/index")
@@ -80,8 +84,10 @@ def index_files(request: IndexFilesRequest):
         return {"status": "no_files", "message": "No valid files to index"}
 
     def remove_from_pending(file_paths):
-        for path in file_paths:
-            pending_images.pop(path, None)
+        from server import pending_images_lock
+        with pending_images_lock:
+            for path in file_paths:
+                pending_images.pop(path, None)
 
     def run_indexing():
         indexing_status["is_indexing"] = True
@@ -190,9 +196,12 @@ def sync_directories(request: SyncRequest):
         filename = os.path.join(request.data_dir, 'image_index.bin')
         existing_paths = set()
         if os.path.exists(filename):
-            with open(filename, 'rb') as f:
-                data = pickle.load(f)
-            existing_paths = set(data.get('image_paths', []))
+            try:
+                with open(filename, 'rb') as f:
+                    data = pickle.load(f)
+                existing_paths = set(data.get('image_paths', []))
+            except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError):
+                logger.warning("Corrupt index file during sync, treating as empty")
 
         new_files = []
         for directory in request.directories:

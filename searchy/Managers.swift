@@ -18,7 +18,7 @@ class SearchManager: ObservableObject {
         }
     }
 
-    func search(query: String, numberOfResults: Int = 5) {
+    func search(query: String, numberOfResults: Int = 5, ocrWeight: Double = 0.5) {
         guard !isSearching else { return }
 
         DispatchQueue.main.async {
@@ -29,7 +29,7 @@ class SearchManager: ObservableObject {
 
         Task {
             do {
-                let response = try await self.performSearch(query: query, numberOfResults: numberOfResults)
+                let response = try await self.performSearch(query: query, numberOfResults: numberOfResults, ocrWeight: ocrWeight)
                 DispatchQueue.main.async {
                     let filteredResults = response.results.filter {
                         $0.similarity >= SearchPreferences.shared.similarityThreshold
@@ -48,7 +48,7 @@ class SearchManager: ObservableObject {
         }
     }
 
-    private func performSearch(query: String, numberOfResults: Int) async throws -> SearchResponse {
+    private func performSearch(query: String, numberOfResults: Int, ocrWeight: Double = 0.5) async throws -> SearchResponse {
         guard let serverURL = await self.serverURL else {
             throw NSError(domain: "Server not ready", code: 0, userInfo: [NSLocalizedDescriptionKey: "Server is still starting up. Please wait a moment."])
         }
@@ -61,7 +61,8 @@ class SearchManager: ObservableObject {
             "query": query,
             "top_k": numberOfResults,
             "data_dir": kAppSupportPath,
-            "similarity_threshold": SearchPreferences.shared.similarityThreshold
+            "similarity_threshold": SearchPreferences.shared.similarityThreshold,
+            "ocr_weight": ocrWeight
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 

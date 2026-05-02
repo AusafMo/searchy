@@ -123,12 +123,15 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     existing_ocr_texts = []
     if os.path.exists(output_file):
         print("Loading existing index...", file=sys.stderr)
-        with open(output_file, 'rb') as f:
-            data = pickle.load(f)
-            existing_embeddings = data['embeddings'].tolist()
-            existing_paths = data['image_paths']
-            existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
-            print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
+        try:
+            with open(output_file, 'rb') as f:
+                data = pickle.load(f)
+                existing_embeddings = data['embeddings'].tolist()
+                existing_paths = data['image_paths']
+                existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
+                print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
+        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError) as e:
+            print(f"Warning: corrupt index file, starting fresh: {e}", file=sys.stderr)
 
     # Ensure model is loaded (uses singleton)
     model_manager.ensure_loaded()
@@ -251,12 +254,15 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
         existing_ocr_texts = []
         if os.path.exists(output_file):
             print("Loading existing index...", file=sys.stderr)
-            with open(output_file, 'rb') as f:
-                data = pickle.load(f)
-                existing_embeddings = data['embeddings'].tolist()
-                existing_paths = data['image_paths']
-                existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
-                print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
+            try:
+                with open(output_file, 'rb') as f:
+                    data = pickle.load(f)
+                    existing_embeddings = data['embeddings'].tolist()
+                    existing_paths = data['image_paths']
+                    existing_ocr_texts = data.get('ocr_texts', [''] * len(existing_paths))
+                    print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
+            except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError) as e:
+                print(f"Warning: corrupt index file, starting fresh: {e}", file=sys.stderr)
 
         print("Loading CLIP model...", file=sys.stderr)
         model_manager.ensure_loaded()

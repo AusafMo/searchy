@@ -16,9 +16,14 @@ logger = logging.getLogger(__name__)
 @router.get("/status")
 def get_status():
     from server import _model_loading_status
-    if model_manager.is_loaded and _model_loading_status["state"] in ("unloaded", "pending"):
+    # Snapshot is_loaded first, then check state to minimize race window
+    loaded = model_manager.is_loaded
+    if loaded and _model_loading_status["state"] in ("unloaded", "pending"):
         _model_loading_status["state"] = "ready"
         _model_loading_status["message"] = "Model reloaded"
+    elif not loaded and _model_loading_status["state"] == "ready":
+        _model_loading_status["state"] = "unloaded"
+        _model_loading_status["message"] = "Model unloaded"
 
     elapsed = 0
     if _model_loading_status["started_at"] and _model_loading_status["state"] == "loading":
@@ -28,6 +33,18 @@ def get_status():
     idle_seconds = 0
     if model_manager.last_used_at and model_manager.is_loaded:
         idle_seconds = round(time.time() - model_manager.last_used_at, 1)
+    # Download progress
+    dl = model_manager.download_status
+    download_info = None
+    if dl["is_downloading"] or dl["phase"] == "downloading":
+        download_info = {
+            "is_downloading": dl["is_downloading"],
+            "downloaded_bytes": dl["downloaded_bytes"],
+            "total_bytes": dl["total_bytes"],
+            "phase": dl["phase"],
+            "model_name": dl["model_name"],
+        }
+
     return {
         "status": "Server is running",
         "model": {
@@ -35,7 +52,8 @@ def get_status():
             "message": _model_loading_status["message"],
             "elapsed_seconds": round(elapsed, 1),
             "ttl_minutes": model_manager.ttl_minutes,
-            "idle_seconds": idle_seconds
+            "idle_seconds": idle_seconds,
+            "download": download_info
         }
     }
 
@@ -43,7 +61,7 @@ def get_status():
 @router.get("/recent")
 def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
     """Get recent images sorted by modification date (newest first)."""
-    from server import pending_images
+    from server import pending_images, pending_images_lock
 
     try:
         all_images = []
@@ -61,7 +79,11 @@ def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
                     except Exception:
                         continue
 
-        for path, detection_time in list(pending_images.items()):
+        with pending_images_lock:
+            pending_snapshot = list(pending_images.items())
+            pending_count = len(pending_images)
+
+        for path, detection_time in pending_snapshot:
             if path in indexed_paths:
                 continue
             if os.path.exists(path) and is_user_image(path):
@@ -83,7 +105,7 @@ def get_recent(top_k: int = 8, data_dir: str = DEFAULT_DATA_DIR):
             "stats": {
                 "total_time": "0.00s",
                 "images_searched": len(indexed_paths),
-                "pending_count": len(pending_images),
+                "pending_count": pending_count,
                 "images_per_second": "0"
             }
         }

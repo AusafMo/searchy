@@ -802,6 +802,8 @@ struct AddDirectorySheet: View {
 
 // MARK: - Main Settings View (Tabbed Atelier Design)
 struct SettingsView: View {
+    var initialTab: SettingsTab = .display
+
     @ObservedObject private var config = AppConfig.shared
     @ObservedObject private var prefs = SearchPreferences.shared
     @ObservedObject private var indexingSettings = IndexingSettings.shared
@@ -911,7 +913,10 @@ struct SettingsView: View {
         .sheet(isPresented: $isShowingAddDirectorySheet) {
             AddDirectorySheet()
         }
-        .onAppear { fetchModelTTL() }
+        .onAppear {
+            selectedTab = initialTab
+            fetchModelTTL()
+        }
     }
 
     // MARK: - Settings Sidebar

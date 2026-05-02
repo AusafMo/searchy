@@ -95,7 +95,7 @@ class SearchPreferences: ObservableObject {
         self.imageSize = UserDefaults.standard.float(forKey: "imageSize") != 0 ?
             UserDefaults.standard.float(forKey: "imageSize") : 250
         self.similarityThreshold = UserDefaults.standard.float(forKey: "similarityThreshold") != 0 ?
-            UserDefaults.standard.float(forKey: "similarityThreshold") : 0.5
+            UserDefaults.standard.float(forKey: "similarityThreshold") : 0.25
     }
 }
 

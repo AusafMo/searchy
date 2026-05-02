@@ -108,8 +108,11 @@ def start_face_scan(request: FaceScanRequest):
         if not os.path.exists(filename):
             return {"status": "error", "message": "No images indexed yet"}
 
-        with open(filename, 'rb') as f:
-            data = pickle.load(f)
+        try:
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError):
+            return {"status": "error", "message": "Index file is corrupted"}
 
         image_paths = [p for p in data.get('image_paths', []) if is_user_image(p)]
 
@@ -394,8 +397,11 @@ def get_new_face_count(data_dir: str = DEFAULT_DATA_DIR):
         if not os.path.exists(filename):
             return {"new_count": 0, "total_indexed": 0}
 
-        with open(filename, 'rb') as f:
-            data = pickle.load(f)
+        try:
+            with open(filename, 'rb') as f:
+                data = pickle.load(f)
+        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError):
+            return {"new_count": 0, "total_indexed": 0, "error": "corrupt_index"}
 
         image_paths = [p for p in data.get('image_paths', []) if is_user_image(p)]
         new_count = face_service.get_new_images_count(image_paths)

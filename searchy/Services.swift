@@ -169,6 +169,7 @@ class VideoThumbnailService {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         diskCachePath = appSupport.appendingPathComponent("searchy/video_thumbs")
         try? FileManager.default.createDirectory(at: diskCachePath, withIntermediateDirectories: true)
+        pruneDiskCache()
     }
 
     private func cacheKey(for path: String, size: Int) -> NSString {
@@ -248,5 +249,35 @@ class VideoThumbnailService {
         cache.removeAllObjects()
         try? FileManager.default.removeItem(at: diskCachePath)
         try? FileManager.default.createDirectory(at: diskCachePath, withIntermediateDirectories: true)
+    }
+
+    /// Prune disk cache if it exceeds maxBytes (default 500 MB). Removes oldest files first.
+    func pruneDiskCache(maxBytes: Int64 = 500 * 1024 * 1024) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(at: self.diskCachePath, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]) else { return }
+
+            var entries: [(url: URL, date: Date, size: Int64)] = []
+            var totalSize: Int64 = 0
+            for file in files {
+                guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let date = values.contentModificationDate,
+                      let size = values.fileSize else { continue }
+                let s = Int64(size)
+                entries.append((file, date, s))
+                totalSize += s
+            }
+
+            guard totalSize > maxBytes else { return }
+
+            // Sort oldest first
+            entries.sort { $0.date < $1.date }
+            for entry in entries {
+                guard totalSize > maxBytes else { break }
+                try? fm.removeItem(at: entry.url)
+                totalSize -= entry.size
+            }
+        }
     }
 }

@@ -43,7 +43,9 @@ struct ContentView: View {
     @State private var elapsedTimer: Timer? = nil
     @State private var indexingStartTime: Date? = nil
     @State private var indexStats: IndexStats? = nil
+    @State private var indexStatsLoaded = false
     @State private var isShowingSettings = false
+    @State private var settingsInitialTab: SettingsTab = .display
     @State private var filterTypes: Set<String> = []
     @State private var filterSizeMin: Int? = nil
     @State private var filterSizeMax: Int? = nil
@@ -66,6 +68,10 @@ struct ContentView: View {
     @State private var modelMessage: String = ""
     @State private var modelElapsed: Double = 0
     @State private var modelPollTimer: Timer? = nil
+    @State private var modelDownloadProgress: Double = 0  // 0-1
+    @State private var modelDownloadTotal: Int64 = 0      // bytes
+    @State private var modelDownloadDone: Int64 = 0       // bytes
+    @State private var isModelDownloading: Bool = false
     @State private var updateAvailable: String? = nil  // nil = no update, else new version string
     @State private var showUpdateBanner = false
     @State private var showKeyboardOverlay = false
@@ -197,7 +203,7 @@ struct ContentView: View {
             .allowsHitTesting(false)
         }
         .sheet(isPresented: $isShowingSettings) {
-            SettingsView()
+            SettingsView(initialTab: settingsInitialTab)
                 .frame(width: 820, height: 760)
         }
         .onAppear {
@@ -360,7 +366,7 @@ struct ContentView: View {
                     .frame(width: 6, height: 6)
                     .shadow(color: modelState == "ready" ? DesignSystem.Colors.success.opacity(0.6) : .clear, radius: 3)
 
-                Text(modelState == "ready" ? "CLIP \(modelSettings.currentModelName.components(separatedBy: "/").last ?? "ready")" : (modelState == "loading" ? "loading..." : "unloaded"))
+                Text(modelState == "ready" ? "\(modelSettings.currentModelName.components(separatedBy: "/").last ?? "ready")" : (modelState == "loading" ? "loading..." : "unloaded"))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(p.ink3)
                     .lineLimit(1)
@@ -396,21 +402,35 @@ struct ContentView: View {
     // MARK: - Compact Header (replaces old modernHeader)
     private var atelierHeader: some View {
         HStack(spacing: 8) {
-            // Global search bar — always visible
-            globalSearchBar
+            // Global search bar — hidden on Search tab (it has its own)
+            if activeTab != .search {
+                globalSearchBar
+            }
 
             Spacer()
 
-            // Model loading indicator
-            if modelState == "loading" {
+            // Model download / loading indicator
+            if modelState == "loading" || isModelDownloading {
                 HStack(spacing: 7) {
                     ProgressView()
                         .scaleEffect(0.55)
-                    Text("LOADING")
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .tracking(0.8)
-                    Text(String(format: "%.0fs", modelElapsed))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    if isModelDownloading && modelDownloadTotal > 0 {
+                        Text("DOWNLOADING")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .tracking(0.8)
+                        Text("\(formatBytes(modelDownloadDone)) / \(formatBytes(modelDownloadTotal))")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    } else if isModelDownloading {
+                        Text("DOWNLOADING MODEL")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .tracking(0.8)
+                    } else {
+                        Text("LOADING")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .tracking(0.8)
+                        Text(String(format: "%.0fs", modelElapsed))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
                 }
                 .foregroundColor(DesignSystem.Colors.warning)
                 .padding(.horizontal, 11)
@@ -3245,7 +3265,7 @@ struct ContentView: View {
 
             HStack(spacing: 24) {
                 atelierStatLabel("Estimated", value: indexingETA.isEmpty ? "\u{2014}" : indexingETA)
-                atelierStatLabel("Embeddings", value: "\(modelSettings.currentEmbeddingDim)-dim")
+                atelierStatLabel("Embeddings", value: modelSettings.currentModelName.isEmpty ? "—" : "\(modelSettings.currentEmbeddingDim)-dim")
                 atelierStatLabel("Model", value: modelSettings.currentModelDisplayName)
                 atelierStatLabel("Device", value: modelSettings.currentDevice)
             }
@@ -3289,19 +3309,25 @@ struct ContentView: View {
                     : dirManager.watchedDirectories.prefix(2).map { ($0.path as NSString).lastPathComponent }.joined(separator: ", ")
                       + (dirManager.watchedDirectories.count > 2 ? " +\(dirManager.watchedDirectories.count - 2)" : ""),
                 actionLabel: "Manage in Settings",
-                action: { isShowingSettings = true }
+                action: { settingsInitialTab = .indexing; isShowingSettings = true }
             )
 
             // Model summary card
             setupSummaryCard(
                 eyebrow: "MODEL",
                 icon: "cpu",
-                title: modelSettings.currentModelDisplayName.isEmpty ? "No model" : modelSettings.currentModelDisplayName,
-                detail: modelSettings.currentModelName.isEmpty
-                    ? "Configure a CLIP model"
-                    : "\(modelSettings.currentEmbeddingDim)-dim \u{00B7} \(modelSettings.currentDevice)",
-                actionLabel: "Manage in Settings",
-                action: { isShowingSettings = true }
+                title: isModelDownloading
+                    ? "Downloading model..."
+                    : (modelSettings.currentModelName.isEmpty
+                        ? "SigLIP 2 Base"
+                        : modelSettings.currentModelDisplayName),
+                detail: isModelDownloading && modelDownloadTotal > 0
+                    ? "\(formatBytes(modelDownloadDone)) / \(formatBytes(modelDownloadTotal))"
+                    : (modelSettings.currentModelName.isEmpty
+                        ? "Downloads automatically on first index"
+                        : "\(modelSettings.currentEmbeddingDim)-dim \u{00B7} \(modelSettings.currentDevice)"),
+                actionLabel: "Change model",
+                action: { settingsInitialTab = .aiModel; isShowingSettings = true }
             )
         }
     }
@@ -3393,6 +3419,21 @@ struct ContentView: View {
                     }
                     Divider().background(p.line)
                     atelierIndexRow(icon: "folder", label: "Directories", value: "\(dirManager.watchedDirectories.count)")
+                } else if indexStatsLoaded {
+                    // No index file exists yet
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 4) {
+                            Text("No index yet")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(p.ink2)
+                            Text("Add a folder and index to get started")
+                                .font(.system(size: 11))
+                                .foregroundColor(p.ink3)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 16)
                 } else {
                     HStack {
                         Spacer()
@@ -5329,24 +5370,39 @@ struct ContentView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    if !indexingProgress.isEmpty {
-                        Text(indexingProgress)
+                    if isModelDownloading {
+                        Text("Downloading model...")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(p.ink)
+                        if modelDownloadTotal > 0 {
+                            Text("\(formatBytes(modelDownloadDone)) / \(formatBytes(modelDownloadTotal))")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(p.ink2)
+                        } else {
+                            Text("Preparing download...")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(p.ink2)
+                        }
+                    } else {
+                        if !indexingProgress.isEmpty {
+                            Text(indexingProgress)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(p.ink)
+                        }
+                        HStack(spacing: 0) {
+                            if !indexingBatchInfo.isEmpty {
+                                Text(indexingBatchInfo)
+                            }
+                            if indexingSpeed > 0 {
+                                Text(" \u{00B7} \(String(format: "%.1f", indexingSpeed)) img/s")
+                            }
+                            if indexingElapsed > 0 {
+                                Text(" \u{00B7} \(formatDuration(indexingElapsed))")
+                            }
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(p.ink2)
                     }
-                    HStack(spacing: 0) {
-                        if !indexingBatchInfo.isEmpty {
-                            Text(indexingBatchInfo)
-                        }
-                        if indexingSpeed > 0 {
-                            Text(" \u{00B7} \(String(format: "%.1f", indexingSpeed)) img/s")
-                        }
-                        if indexingElapsed > 0 {
-                            Text(" \u{00B7} \(formatDuration(indexingElapsed))")
-                        }
-                    }
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(p.ink2)
                 }
 
                 Spacer()
@@ -5403,7 +5459,7 @@ struct ContentView: View {
                         .font(.system(size: 9.5, weight: .semibold))
                         .tracking(0.8)
                         .foregroundColor(p.ink3)
-                    Text(modelSettings.currentModelDisplayName)
+                    Text(isModelDownloading ? "Downloading..." : (modelSettings.currentModelName.isEmpty ? "SigLIP 2 Base" : modelSettings.currentModelDisplayName))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(p.ink)
                 }
@@ -5412,7 +5468,7 @@ struct ContentView: View {
                         .font(.system(size: 9.5, weight: .semibold))
                         .tracking(0.8)
                         .foregroundColor(p.ink3)
-                    Text(modelSettings.currentDevice)
+                    Text(isModelDownloading ? "—" : (modelSettings.currentDevice.isEmpty ? "auto" : modelSettings.currentDevice))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(p.ink)
                 }
@@ -5565,6 +5621,7 @@ struct ContentView: View {
             guard fileManager.fileExists(atPath: indexPath) else {
                 DispatchQueue.main.async {
                     self.indexStats = nil
+                    self.indexStatsLoaded = true
                 }
                 return
             }
@@ -5604,6 +5661,7 @@ struct ContentView: View {
                     fileSize: fileSize,
                     lastModified: lastModified
                 )
+                self.indexStatsLoaded = true
             }
         }
     }
@@ -5639,13 +5697,25 @@ struct ContentView: View {
                       let state = model["state"] as? String else { return }
                 let message = model["message"] as? String ?? ""
                 let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                // Parse download info
+                let download = model["download"] as? [String: Any]
+                let dlActive = download?["is_downloading"] as? Bool ?? false
+                let dlDone = download?["downloaded_bytes"] as? Int64 ?? Int64(download?["downloaded_bytes"] as? Int ?? 0)
+                let dlTotal = download?["total_bytes"] as? Int64 ?? Int64(download?["total_bytes"] as? Int ?? 0)
+
                 await MainActor.run {
                     let oldState = self.modelState
+                    let wasDownloading = self.isModelDownloading
                     self.modelState = state
                     self.modelMessage = message
                     self.modelElapsed = elapsed
-                    // If model started loading again (after unload + new query), switch to fast polling
-                    if state == "loading" && oldState != "loading" {
+                    self.isModelDownloading = dlActive
+                    self.modelDownloadDone = dlDone
+                    self.modelDownloadTotal = dlTotal
+                    // If model started loading or downloading, switch to fast polling
+                    let wasActive = oldState == "loading" || wasDownloading
+                    let isActive = state == "loading" || dlActive
+                    if isActive && !wasActive {
                         self.modelPollTimer?.invalidate()
                         self.modelPollTimer = nil
                         self.startModelStatusPolling()
@@ -5667,11 +5737,20 @@ struct ContentView: View {
                       let state = model["state"] as? String else { return }
                 let message = model["message"] as? String ?? ""
                 let elapsed = model["elapsed_seconds"] as? Double ?? 0
+                let download = model["download"] as? [String: Any]
+                let dlActive = download?["is_downloading"] as? Bool ?? false
+                let dlDone = download?["downloaded_bytes"] as? Int64 ?? Int64(download?["downloaded_bytes"] as? Int ?? 0)
+                let dlTotal = download?["total_bytes"] as? Int64 ?? Int64(download?["total_bytes"] as? Int ?? 0)
+
                 await MainActor.run {
                     self.modelState = state
                     self.modelMessage = message
                     self.modelElapsed = elapsed
+                    self.isModelDownloading = dlActive
+                    self.modelDownloadDone = dlDone
+                    self.modelDownloadTotal = dlTotal
                     if state == "ready" || state == "error" {
+                        self.isModelDownloading = false
                         // Slow down polling once model is stable
                         self.modelPollTimer?.invalidate()
                         self.modelPollTimer = nil
@@ -5679,6 +5758,16 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        if bytes < 1024 * 1024 {
+            return "\(bytes / 1024) KB"
+        } else if bytes < 1024 * 1024 * 1024 {
+            return String(format: "%.0f MB", Double(bytes) / (1024 * 1024))
+        } else {
+            return String(format: "%.1f GB", Double(bytes) / (1024 * 1024 * 1024))
         }
     }
 
@@ -5826,15 +5915,36 @@ struct ContentView: View {
     private var recentImagesSection: some View {
         Group {
             if recentImages.isEmpty && !isLoadingRecent {
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     Spacer()
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 36, weight: .light))
                         .foregroundColor(p.ink3)
-                    Text("No photos yet")
+                    Text("No photos indexed yet")
                         .font(.system(size: 14, weight: .medium, design: .serif))
                         .italic()
                         .foregroundColor(p.ink2)
+                    Text("Add a folder and index your images to start searching")
+                        .font(.system(size: 12))
+                        .foregroundColor(p.ink3)
+                        .multilineTextAlignment(.center)
+                    Button(action: { activeTab = .setup }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 12))
+                            Text("Start Indexing")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(p.accent.opacity(0.1))
+                                .overlay(Capsule().stroke(p.accent.opacity(0.3), lineWidth: 1))
+                        )
+                        .foregroundColor(p.accent)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                     Spacer()
                 }
             } else if filteredRecentImages.isEmpty {
@@ -6080,7 +6190,9 @@ struct ContentView: View {
             }
             UserDefaults.standard.set(recentSearchQueries, forKey: "recentSearchQueries")
         }
-        searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults)
+        // clipBalance: 0 = Text-heavy, 1 = Vision-heavy → ocr_weight is inverse
+        let ocrWeight = 1.0 - clipBalance
+        searchManager.search(query: searchText, numberOfResults: SearchPreferences.shared.numberOfResults, ocrWeight: ocrWeight)
     }
 
     // MARK: - Image Paste/Drop Handling
@@ -6343,16 +6455,17 @@ struct ContentView: View {
                 }
 
                 process.terminationHandler = { _ in
+                    pipe.fileHandleForReading.readabilityHandler = nil
                     DispatchQueue.main.async {
                         self.isIndexing = false
                         self.indexingProcess = nil
                         self.stopElapsedTimer()
-                        // Reload recent images and stats after indexing
                         self.loadRecentImages()
                         self.loadIndexStats()
                     }
                 }
             } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
                 DispatchQueue.main.async {
                     self.isIndexing = false
                     self.indexingProcess = nil
@@ -6420,8 +6533,21 @@ struct ContentView: View {
                                 self.indexingETA = "Finishing..."
                             }
 
-                            if let processed = progress.images_processed, let total = progress.total_images {
-                                self.indexingProgress = "\(processed)/\(total) images"
+                            if let total = progress.total_images {
+                                if let processed = progress.images_processed, processed > 0 {
+                                    self.indexingProgress = "\(processed)/\(total) images"
+                                } else {
+                                    // Estimate from batch progress
+                                    let batchSize = max(total / totalBatches, 1)
+                                    let estimated = min(batch * batchSize, total)
+                                    self.indexingProgress = "~\(estimated)/\(total) images"
+                                }
+                            }
+
+                            // Refresh recent images every 5 batches so search works during indexing
+                            if batch % 5 == 0 {
+                                self.loadRecentImages()
+                                self.loadIndexStats()
                             }
                         }
 
@@ -6561,16 +6687,17 @@ struct ContentView: View {
                 }
 
                 process.terminationHandler = { _ in
+                    pipe.fileHandleForReading.readabilityHandler = nil
                     DispatchQueue.main.async {
                         self.isIndexing = false
                         self.indexingProcess = nil
                         self.stopElapsedTimer()
-                        // Reload recent images after re-indexing
                         self.loadRecentImages()
                         self.loadIndexStats()
                     }
                 }
             } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
                 DispatchQueue.main.async {
                     self.isIndexing = false
                     self.indexingProcess = nil

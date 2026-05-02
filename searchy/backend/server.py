@@ -6,7 +6,7 @@ import logging
 import logging.handlers
 import time
 from contextlib import asynccontextmanager
-from threading import Thread
+from threading import Thread, Lock
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +64,7 @@ indexing_status = {
 }
 
 pending_images = {}  # file path -> detection timestamp
+pending_images_lock = Lock()
 
 sync_status = {
     "is_syncing": False,

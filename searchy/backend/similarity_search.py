@@ -33,9 +33,15 @@ from utils import load_image_index
 
 # ── BM25 Scoring ────────────────────────────────────────────
 
+import re as _re
+# Split on whitespace and ASCII punctuation. Keeps Unicode scripts intact
+# (Devanagari matras, CJK characters, Arabic, etc.) since \w misses
+# combining marks (category Mc) which breaks Hindi/Bengali/etc.
+_TOKEN_SPLIT = _re.compile(r'[\s!-/:-@\[-`{-~]+', _re.UNICODE)
+
 def _tokenize(text: str) -> List[str]:
-    """Simple whitespace + lowercase tokenizer."""
-    return text.lower().split()
+    """Tokenize on whitespace/punctuation. Supports all Unicode scripts."""
+    return [t for t in _TOKEN_SPLIT.split(text.lower()) if t]
 
 
 def bm25_score(query: str, document: str, avg_doc_len: float, doc_count: int,
@@ -102,9 +108,13 @@ def _build_corpus_stats(documents: List[str]) -> Tuple[float, int, Dict[str, int
 
 # ── Reciprocal Rank Fusion ──────────────────────────────────
 
-def reciprocal_rank_fusion(ranked_lists: List[List[int]], k: int = RRF_K) -> List[Tuple[int, float]]:
+def reciprocal_rank_fusion(
+    ranked_lists: List[List[int]],
+    weights: Optional[List[float]] = None,
+    k: int = RRF_K,
+) -> List[Tuple[int, float]]:
     """
-    Combine multiple ranked lists using RRF.
+    Combine multiple ranked lists using weighted RRF.
 
     Cormack, Clarke & Buettcher, "Reciprocal Rank Fusion outperforms Condorcet
     and individual Rank Learning Methods" (SIGIR 2009).
@@ -112,16 +122,20 @@ def reciprocal_rank_fusion(ranked_lists: List[List[int]], k: int = RRF_K) -> Lis
     Args:
         ranked_lists: List of ranked lists, each containing document indices
                      ordered by relevance (best first).
+        weights: Per-list weight multipliers. Defaults to 1.0 for each list.
         k: Smoothing constant (default 60, per the original paper).
 
     Returns:
         List of (doc_index, rrf_score) tuples, sorted by score descending.
     """
+    if weights is None:
+        weights = [1.0] * len(ranked_lists)
+
     scores: Dict[int, float] = {}
 
-    for ranked_list in ranked_lists:
+    for ranked_list, weight in zip(ranked_lists, weights):
         for rank, doc_idx in enumerate(ranked_list):
-            scores[doc_idx] = scores.get(doc_idx, 0.0) + 1.0 / (k + rank + 1)
+            scores[doc_idx] = scores.get(doc_idx, 0.0) + weight / (k + rank + 1)
 
     return sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -246,8 +260,9 @@ class CLIPSearcher:
             if len(embeddings) == 0:
                 return {"error": "No images indexed yet."}
 
-            similarities = embeddings @ query_embedding
-            sorted_indices = np.argsort(similarities)[::-1]
+            cosine_scores = embeddings @ query_embedding
+            display_scores = model_manager.cosine_to_display_score(cosine_scores)
+            sorted_indices = np.argsort(cosine_scores)[::-1]
 
             results = []
             for idx in sorted_indices:
@@ -257,7 +272,7 @@ class CLIPSearcher:
                     break
                 results.append({
                     "path": image_paths[idx],
-                    "similarity": float(similarities[idx])
+                    "similarity": float(display_scores[idx])
                 })
 
             total_time = time.time() - start_time
@@ -306,24 +321,35 @@ class CLIPSearcher:
 
             print(f"Loaded {n} embeddings", file=sys.stderr)
 
-            # ── Signal 1: Semantic search with prompt ensembling ──
-            # Expand query, ensemble each variant, then average
-            expanded_queries = _expand_query(query)
-            all_semantic_scores = []
+            # ── Signal 1: Semantic search ────────────────────────
+            # Short queries (1-2 words) benefit from prompt ensembling
+            # ("cat" → average of "cat", "a photo of cat", "a picture of cat").
+            # Longer queries are already descriptive — ensembling dilutes them.
+            query_words = query.strip().split()
+            use_ensembling = len(query_words) <= 2
 
-            for q in expanded_queries:
-                q_embedding = _ensemble_text_embeddings(q, PROMPT_TEMPLATES)
-                if q_embedding is not None:
-                    scores = embeddings @ q_embedding
-                    all_semantic_scores.append(scores)
+            if use_ensembling:
+                expanded_queries = _expand_query(query)
+                all_cosine_scores = []
+                for q in expanded_queries:
+                    q_embedding = _ensemble_text_embeddings(q, PROMPT_TEMPLATES)
+                    if q_embedding is not None:
+                        scores = embeddings @ q_embedding
+                        all_cosine_scores.append(scores)
 
-            if not all_semantic_scores:
-                # Fallback to single raw query
-                raw_emb = self.generate_text_embedding(query)
-                semantic_scores = embeddings @ raw_emb
+                if all_cosine_scores:
+                    cosine_scores = np.mean(all_cosine_scores, axis=0)
+                else:
+                    raw_emb = self.generate_text_embedding(query)
+                    cosine_scores = embeddings @ raw_emb
             else:
-                # Average scores across all expanded+ensembled queries
-                semantic_scores = np.mean(all_semantic_scores, axis=0)
+                # For multi-word queries, use the raw query directly —
+                # it's already descriptive enough for CLIP/SigLIP
+                raw_emb = self.generate_text_embedding(query)
+                cosine_scores = embeddings @ raw_emb
+
+            # Use cosine scores for ranking (relative ordering is correct even for SigLIP)
+            semantic_scores = cosine_scores
 
             semantic_ranking = np.argsort(semantic_scores)[::-1].tolist()
 
@@ -352,14 +378,42 @@ class CLIPSearcher:
             fn_nonzero.sort(key=lambda x: x[1], reverse=True)
             filename_ranking = [i for i, _ in fn_nonzero]
 
-            # ── Fuse with RRF ─────────────────────────────────────
+            # ── Fuse with weighted RRF ──────────────────────────────
+            # Semantic is always the primary signal. Text signals (OCR, filename)
+            # are secondary and scaled by ocr_weight (controlled by the UI slider).
+            # This prevents text noise (e.g. "red" in filenames) from overwhelming
+            # visual understanding for scene queries like "red car in sunset".
             ranked_lists = [semantic_ranking]
+            weights = [1.0]  # semantic always full weight
             if ocr_ranking:
                 ranked_lists.append(ocr_ranking)
+                weights.append(ocr_weight * 0.4)  # OCR contribution scaled by slider
             if filename_ranking:
                 ranked_lists.append(filename_ranking)
+                weights.append(ocr_weight * 0.3)  # filename slightly less than OCR
 
-            fused = reciprocal_rank_fusion(ranked_lists)
+            fused = reciprocal_rank_fusion(ranked_lists, weights=weights)
+
+            # ── Targeted boost for high-coverage text matches ────
+            # Only boost when most query terms appear in the document text.
+            # This helps text-specific queries ("uidai", "invoice 2024")
+            # without polluting scene queries ("red car in sunset").
+            query_terms = set(_tokenize(query))
+            n_query_terms = max(len(query_terms), 1)
+
+            boosted = []
+            for idx, rrf_score in fused:
+                doc_terms = set(_tokenize(ocr_texts[idx])) | set(_tokenize(filenames[idx]))
+                coverage = len(query_terms & doc_terms) / n_query_terms
+
+                # Only boost if majority of query terms match (>50% coverage)
+                if coverage > 0.5:
+                    boost = coverage * ocr_weight * 0.5
+                    boosted.append((idx, rrf_score + boost))
+                else:
+                    boosted.append((idx, rrf_score))
+            boosted.sort(key=lambda x: x[1], reverse=True)
+            fused = boosted
 
             # ── Build results ─────────────────────────────────────
             # Fetch a larger candidate set then trim to top_k
@@ -369,13 +423,17 @@ class CLIPSearcher:
                 if len(results) >= top_k:
                     break
 
-                # Display score: normalize RRF score to 0-1 range for UI
-                # Max possible RRF score = num_signals / (k+1)
-                max_rrf = len(ranked_lists) / (RRF_K + 1)
-                display_score = min(rrf_score / max_rrf, 1.0) if max_rrf > 0 else 0.0
-                # Blend with raw semantic score for more intuitive display
+                # Display score: use model-calibrated similarity.
+                # cosine_to_display_score applies the model's logit_scale to
+                # amplify the narrow cosine range into meaningful 0-1 scores.
                 raw_semantic = float(semantic_scores[idx])
-                display_score = 0.6 * display_score + 0.4 * max(raw_semantic, 0.0)
+                display_score = float(model_manager.cosine_to_display_score(
+                    np.array([raw_semantic])
+                )[0])
+                # Small RRF bonus for text-boosted results
+                max_rrf = sum(weights) / (RRF_K + 1)
+                rrf_bonus = min(rrf_score / max_rrf, 1.0) * 0.05 if max_rrf > 0 else 0.0
+                display_score = min(display_score + rrf_bonus, 1.0)
 
                 result = {
                     "path": image_paths[idx],
@@ -395,8 +453,8 @@ class CLIPSearcher:
                     "images_per_second": f"{n/total_time:.2f}",
                     "images_with_ocr": ocr_count,
                     "signals_used": len(ranked_lists),
-                    "queries_expanded": len(expanded_queries),
-                    "prompt_templates": len(PROMPT_TEMPLATES),
+                    "queries_expanded": len(expanded_queries) if use_ensembling else 1,
+                    "prompt_templates": len(PROMPT_TEMPLATES) if use_ensembling else 1,
                 }
             }
 

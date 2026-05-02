@@ -191,6 +191,7 @@ struct PersonCard: View {
             }
         }
         .onAppear { loadThumbnail() }
+        .onDisappear { previewWorkItem?.cancel() }
     }
 
     private var imageContent: some View {

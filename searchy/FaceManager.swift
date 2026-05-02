@@ -43,6 +43,10 @@ class FaceManager: ObservableObject {
         }
     }
 
+    deinit {
+        statusPollTimer?.invalidate()
+    }
+
     // MARK: - API Calls
 
     /// Check for new indexed images that haven't been scanned

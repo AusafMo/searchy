@@ -45,12 +45,15 @@ def is_image_file(filename: str) -> bool:
 
 
 def load_image_index(data_dir: str):
-    """Load image index from data_dir. Returns dict or None if missing/invalid."""
+    """Load image index from data_dir. Returns dict or None if missing/invalid/corrupt."""
     filename = os.path.join(data_dir, 'image_index.bin')
     if not os.path.exists(filename):
         return None
-    with open(filename, 'rb') as f:
-        data = pickle.load(f)
+    try:
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+    except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError):
+        return None
     if not isinstance(data, dict) or 'embeddings' not in data or 'image_paths' not in data:
         return None
     return data

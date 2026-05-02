@@ -430,10 +430,9 @@ struct SetupView: View {
         let total = setupManager.totalSteps
         let items = [
             "python + virtual environment",
-            "CLIP model + dependencies (~2 GB)",
-            "face-recognition model",
-            "OCR engine",
-            "verification"
+            "AI libraries (PyTorch, etc.)",
+            "face recognition + OCR",
+            "final checks",
         ]
         return items.enumerated().map { i, label in
             if !setupManager.isSettingUp { return (label, "pending") }
@@ -1301,12 +1300,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let logHandle = FileHandle(forWritingAtPath: logPath)
         logHandle?.seekToEndOfFile()
 
-        pipe.fileHandleForReading.readabilityHandler = { fileHandle in
+        pipe.fileHandleForReading.readabilityHandler = { [weak logHandle] fileHandle in
             let data = fileHandle.availableData
             if let output = String(data: data, encoding: .utf8), !output.isEmpty {
                 print("FastAPI Output: \(output)")
             }
             logHandle?.write(data)
+        }
+
+        process.terminationHandler = { _ in
+            pipe.fileHandleForReading.readabilityHandler = nil
         }
 
         do {
@@ -1442,6 +1445,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 if let output = String(data: fileHandle.availableData, encoding: .utf8), !output.isEmpty {
                     print("[\(dirName)] \(output)")
                 }
+            }
+
+            process.terminationHandler = { _ in
+                pipe.fileHandleForReading.readabilityHandler = nil
             }
 
             do {
