@@ -6,13 +6,16 @@
 
 <p align="center"><a href="https://ausafmo.com/searchy.html">ausafmo.com/searchy</a></p>
 
-<p align="center"><b>Main App</b></p>
+<p align="center"><b>Current App</b></p>
 
-https://github.com/user-attachments/assets/214c1421-0893-4fac-9b18-dd4074eeb68f
+<p align="center">
+  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T102635-6c28d1e7d41d4f9d88a57db95bbb020c.png" alt="Searchy hybrid text and image search results with an inspector panel" width="900">
+</p>
 
-<p align="center"><b>Spotlight Widget</b></p>
-
-https://github.com/user-attachments/assets/d9753770-6b62-40f5-be5a-e625a81e5a1d
+<p align="center">
+  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T110144-f3f8891f68884cb2bd3e8448db069751.png" alt="Searchy dark mode interface" width="440">
+  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T102639-a24ab06cd6ff47c5b98eb59733822bf2.png" alt="Searchy face cluster review screen" width="440">
+</p>
 
 ---
 
