@@ -9,8 +9,7 @@
 <p align="center"><b>Current App</b></p>
 
 <p align="center">
-  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T115815-be337297532e4df0897671a35098e1cf.png" alt="Searchy hybrid text and image search results with an inspector panel" width="440">
-  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T102639-a24ab06cd6ff47c5b98eb59733822bf2.png" alt="Searchy face cluster review screen" width="440">
+  <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T115815-be337297532e4df0897671a35098e1cf.png" alt="Searchy hybrid text and image search results with an inspector panel" width="48%"> <img src="https://tinifyai.blob.core.windows.net/tinify/uploads/20260526T102639-a24ab06cd6ff47c5b98eb59733822bf2.png" alt="Searchy face cluster review screen" width="48%">
 </p>
 
 ---
