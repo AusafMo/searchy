@@ -116,6 +116,7 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
         filter_value: Value for the filter
     """
     output_file = os.path.join(output_dir, 'image_index.bin')
+    model_manager.set_config_path(output_dir)
 
     # Load existing index
     existing_embeddings = []
@@ -132,9 +133,6 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
                 print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
         except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError) as e:
             print(f"Warning: corrupt index file, starting fresh: {e}", file=sys.stderr)
-
-    # Ensure model is loaded (uses singleton)
-    model_manager.ensure_loaded()
 
     # Filter out hidden, system, and package files (handle None)
     if new_files is None:
@@ -156,6 +154,10 @@ def index_images_with_clip(output_dir, incremental=False, new_files=None,
     if not files_to_process:
         print("No new images to index", file=sys.stderr)
         return
+
+    # Ensure model is loaded only after discovering work. The config path must
+    # be set first so CLI indexing honors the selected model preference.
+    model_manager.ensure_loaded()
 
     print(f"Processing {len(files_to_process)} new images (batch_size={batch_size}, fast={fast_indexing}, max_dim={max_dimension})", file=sys.stderr)
 
@@ -248,6 +250,8 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
         image_dirs = [image_dirs]
 
     try:
+        model_manager.set_config_path(output_dir)
+
         output_file = os.path.join(output_dir, 'image_index.bin')
         existing_embeddings = []
         existing_paths = []
@@ -263,9 +267,6 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
                     print(f"Loaded {len(existing_paths)} existing images", file=sys.stderr)
             except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, OSError) as e:
                 print(f"Warning: corrupt index file, starting fresh: {e}", file=sys.stderr)
-
-        print("Loading CLIP model...", file=sys.stderr)
-        model_manager.ensure_loaded()
 
         print(f"Scanning for images in {len(image_dirs)} folder(s)...", file=sys.stderr)
         image_paths = []
@@ -303,6 +304,9 @@ def process_images(image_dirs, output_dir, fast_indexing=True, max_dimension=384
 
         # Output initial progress
         print(json.dumps({"type": "start", "total_images": total_images, "total_batches": total_batches}), flush=True)
+
+        print("Loading configured vision model...", file=sys.stderr)
+        model_manager.ensure_loaded()
 
         # Create empty index file immediately if none exists (so search works during indexing)
         if not os.path.exists(output_file):

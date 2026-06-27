@@ -1,23 +1,15 @@
 ## What's New
 
-### Bug Fixes
-- **Fix broken indexing** — `transformers` 5.x changed `get_image_features()` / `get_text_features()` to return `BaseModelOutputWithPooling` instead of a tensor. Every batch silently failed, resulting in 0 images indexed.
-- **Fix fresh install failures** — Setup verification only checked `torch` + `transformers`, missing `pyobjc`, `deepface`, and `Vision`. Users with stale venvs passed setup but crashed on text search.
-- **Fix Python 3.13+ incompatibility** — TensorFlow has no build for 3.13+. Venv creation now caps at Python 3.12.
-- **Fix generic error on pip failure** — Now shows last 5 lines of actual pip output instead of "check your internet connection".
+### Searchy 4.3
+- **New gallery UI** — Adds the redesigned library, gallery, duplicates, people, volumes, setup, and settings surfaces.
+- **Large-library readiness** — Verified indexing against a 1,200-image COCO subset plus the showcase pack.
+- **Better retrieval path** — Includes multi-signal search, OCR tokenization improvements, SigLIP/PE-Core model options, and weighted RRF ranking.
+- **Indexing reliability fix** — CLI/manual indexing now honors the saved model config instead of falling back to the default model.
+- **Clearer model status** — The indexing completion card refreshes the active model state when a run finishes.
 
-### Reliability
-- **Atomic index writes** — All pickle writes now use temp file + `fsync` + `os.replace`. Index files can no longer be corrupted by crashes or power loss.
-- **Persistent logging** — Rotating `server.log`, `setup.log`, and `server_stdout.log` in `~/Library/Application Support/searchy/logs/`.
-
-### UI
-- **Setup redesign** — Clean minimal aesthetic, per-package install progress, scrollable error output on failure.
-
-### DevOps
-- **Pre-push git hook** — `py_compile` + `ruff` + `pytest` + `xcodebuild` (~5s).
-- **20 unit tests** — Atomic writes, filename filters, text matching.
-- **CI pipeline** — Build + lint + test on every PR. Automated DMG release on tags.
-- **Makefile** — `make build`, `make lint`, `make test`, `make check`, `make hooks`, `make release`.
+### Verification
+- Indexed 1,200 COCO images in 47.9s on CLIP ViT-B/32 with MPS.
+- `make test`: 22 backend tests passing.
 
 ---
 

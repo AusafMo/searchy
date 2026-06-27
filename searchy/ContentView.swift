@@ -6554,6 +6554,7 @@ struct ContentView: View {
                     case "complete":
                         self.indexingPercent = 100
                         self.indexingETA = ""
+                        self.modelSettings.fetchCurrentModel()
                         if let totalImages = progress.total_images,
                            let newImages = progress.new_images,
                            let totalTime = progress.total_time,
@@ -6730,4 +6731,3 @@ struct ContentView: View {
         }
     }
 }
-
