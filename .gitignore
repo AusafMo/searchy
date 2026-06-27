@@ -18,10 +18,3 @@ xcuserdata/
 *.bin
 *_PLAN.md
 *_PLAN*.md
-.claude/
-demo_recordings/searchy_window_frames/
-demo_recordings/searchy_window_stop
-demo_recordings/verify/
-demo_recordings/verify_window_only/
-searchy_large_library/
-searchy_showcase_pack/
