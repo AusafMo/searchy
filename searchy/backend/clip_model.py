@@ -374,7 +374,6 @@ class ModelManager:
         """Pre-download model files with progress tracking."""
         try:
             from huggingface_hub import snapshot_download, try_to_load_from_cache
-            from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
             # Quick check: if model.safetensors is already cached, skip
             cached = try_to_load_from_cache(model_name, "model.safetensors")
