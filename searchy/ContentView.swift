@@ -232,6 +232,26 @@ struct ContentView: View {
         }
     }
 
+    private func selectTab(_ tab: AppTab) {
+        guard activeTab != tab else { return }
+        clearTransientSearchState()
+        activeTab = tab
+    }
+
+    private func clearTransientSearchState() {
+        searchDebounceTimer?.invalidate()
+        searchDebounceTimer = nil
+        previewTimer?.invalidate()
+        previewTimer = nil
+        searchText = ""
+        pastedImage = nil
+        previewResult = nil
+        showPreviewPanel = false
+        isSearchFocused = false
+        isGlobalSearchFocused = false
+        searchManager.clearResults()
+    }
+
     // MARK: - Atelier Sidebar
     private var atelierSidebar: some View {
         let sidebarItems: [(id: AppTab, label: String, icon: String, count: Int?, badge: Bool)] = [
@@ -273,7 +293,7 @@ struct ContentView: View {
             ForEach(sidebarItems, id: \.id) { item in
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        activeTab = item.id
+                        selectTab(item.id)
                     }
                 }) {
                     HStack(spacing: 10) {
@@ -320,7 +340,7 @@ struct ContentView: View {
 
                 ForEach(recentSearchQueries, id: \.self) { query in
                     Button(action: {
-                        activeTab = .search
+                        selectTab(.search)
                         searchText = query
                         performSearch()
                     }) {
@@ -5928,7 +5948,7 @@ struct ContentView: View {
                         .font(.system(size: 12))
                         .foregroundColor(p.ink3)
                         .multilineTextAlignment(.center)
-                    Button(action: { activeTab = .setup }) {
+                    Button(action: { selectTab(.setup) }) {
                         HStack(spacing: 6) {
                             Image(systemName: "folder.badge.plus")
                                 .font(.system(size: 12))
@@ -6224,7 +6244,7 @@ struct ContentView: View {
                let digit = chars.first?.wholeNumberValue, digit >= 1 && digit <= 6 {
                 let tabs: [AppTab] = [.faces, .search, .volumes, .duplicates, .gallery, .setup]
                 DispatchQueue.main.async {
-                    self.activeTab = tabs[digit - 1]
+                    self.selectTab(tabs[digit - 1])
                 }
                 return nil
             }

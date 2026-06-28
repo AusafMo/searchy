@@ -1519,9 +1519,11 @@ struct SettingsView: View {
     }
 }
 
+#if canImport(PreviewsMacros)
 #Preview {
     SettingsView()
 }
+#endif
 // Extension to support Python file types
 extension UTType {
     static var pythonScript: UTType {
