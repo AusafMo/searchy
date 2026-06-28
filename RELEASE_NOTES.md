@@ -1,5 +1,8 @@
 ## What's New
 
+### Searchy 4.3.1
+- **Search reset fix** — Switching sections from the left sidebar now clears active search text, results, previews, and stale in-flight search responses.
+
 ### Searchy 4.3
 - **New gallery UI** — Adds the redesigned library, gallery, duplicates, people, volumes, setup, and settings surfaces.
 - **Large-library readiness** — Verified indexing against a 1,200-image COCO subset plus the showcase pack.
