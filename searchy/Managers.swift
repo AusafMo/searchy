@@ -9,6 +9,9 @@ class SearchManager: ObservableObject {
     @Published private(set) var errorMessage: String? = nil
     @Published private(set) var searchStats: SearchStats? = nil
 
+    private var searchTask: Task<Void, Never>?
+    private var searchGeneration = 0
+
     private init() {}
 
     private var serverURL: URL? {
@@ -20,6 +23,9 @@ class SearchManager: ObservableObject {
 
     func search(query: String, numberOfResults: Int = 5, ocrWeight: Double = 0.5) {
         guard !isSearching else { return }
+        searchTask?.cancel()
+        searchGeneration += 1
+        let generation = searchGeneration
 
         DispatchQueue.main.async {
             self.isSearching = true
@@ -27,10 +33,13 @@ class SearchManager: ObservableObject {
             // Don't clear results — keep old results visible while searching
         }
 
-        Task {
+        searchTask = Task {
             do {
                 let response = try await self.performSearch(query: query, numberOfResults: numberOfResults, ocrWeight: ocrWeight)
+                guard !Task.isCancelled else { return }
+
                 DispatchQueue.main.async {
+                    guard self.searchGeneration == generation else { return }
                     let filteredResults = response.results.filter {
                         $0.similarity >= SearchPreferences.shared.similarityThreshold
                     }
@@ -39,7 +48,10 @@ class SearchManager: ObservableObject {
                     self.isSearching = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
+
                 DispatchQueue.main.async {
+                    guard self.searchGeneration == generation else { return }
                     self.results = []
                     self.errorMessage = error.localizedDescription
                     self.isSearching = false
@@ -77,17 +89,38 @@ class SearchManager: ObservableObject {
         return response
     }
     func cancelSearch() {
-        DispatchQueue.main.async {
+        searchTask?.cancel()
+        searchTask = nil
+        searchGeneration += 1
+
+        let reset = {
             self.isSearching = false
             self.errorMessage = nil
+        }
+
+        if Thread.isMainThread {
+            reset()
+        } else {
+            DispatchQueue.main.async(execute: reset)
         }
     }
 
     func clearResults() {
-        DispatchQueue.main.async {
+        searchTask?.cancel()
+        searchTask = nil
+        searchGeneration += 1
+
+        let reset = {
             self.results = []
+            self.isSearching = false
             self.searchStats = nil
             self.errorMessage = nil
+        }
+
+        if Thread.isMainThread {
+            reset()
+        } else {
+            DispatchQueue.main.async(execute: reset)
         }
     }
 
@@ -133,6 +166,9 @@ class SearchManager: ObservableObject {
 
     func findSimilar(imagePath: String, numberOfResults: Int = 20) {
         guard !isSearching else { return }
+        searchTask?.cancel()
+        searchGeneration += 1
+        let generation = searchGeneration
 
         DispatchQueue.main.async {
             self.isSearching = true
@@ -141,16 +177,22 @@ class SearchManager: ObservableObject {
             self.searchStats = nil
         }
 
-        Task {
+        searchTask = Task {
             do {
                 let response = try await self.performFindSimilar(imagePath: imagePath, numberOfResults: numberOfResults)
+                guard !Task.isCancelled else { return }
+
                 DispatchQueue.main.async {
+                    guard self.searchGeneration == generation else { return }
                     self.results = response.results
                     self.searchStats = response.stats
                     self.isSearching = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
+
                 DispatchQueue.main.async {
+                    guard self.searchGeneration == generation else { return }
                     self.errorMessage = error.localizedDescription
                     self.isSearching = false
                 }
