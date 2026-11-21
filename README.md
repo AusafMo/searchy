@@ -263,7 +263,7 @@ Fully local. No cloud, no telemetry, no external requests after initial model do
 
 ## Requirements
 
-- macOS 13+
+- macOS 15+
 - Apple Silicon
 - Internet connection (first-time setup only)
 - ~2GB disk space for models
